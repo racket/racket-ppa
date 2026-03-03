@@ -146,10 +146,35 @@ Changes made to debian/:
 - `dput ppa:plt/racket racket_9.1+ppa1-1~questing1_source.changes` — SUCCESS
 - Monitor builds at: https://launchpad.net/~plt/+archive/ubuntu/racket/+packages
 
-### Still TODO
-- Push git changes to racket-ppa repo
-- Push plt-admin commits
-- Verify Launchpad builds succeed
+### Step 11: Push git changes
+- Added remote `samth` pointing to git@github.com:racket/racket-ppa.git
+- Pushed main branch, upstream branch, and all tags to racket/racket-ppa
+- SUCCESS
+
+### Step 12: plt-admin updates
+- Generated GPG key stored in plt-admin as `ppa-signing-key` (age-encrypted)
+- Had to merge racket-accounts: local had globalsign credentials not yet upstream.
+  Decrypted both versions, diffed, took local version (superset), re-encrypted.
+- Updated README.md to document ppa-signing-key
+- All changes in a single commit, pushed to racket/plt-admin
+- SUCCESS
+
+### Step 13: Launchpad builds
+- All three builds completed successfully on Launchpad:
+  - noble (24.04): built on lcy02-amd64-009
+  - jammy (22.04): built on lcy02-amd64-030
+  - questing (25.10): built on lcy02-amd64-021
+- Build time: ~40 minutes each on Launchpad builders
+- SUCCESS
+
+### Step 14: CLI tools
+- Installed `ppa-dev-tools` (pip) for future PPA management
+  - `ppa wait` can poll until builds complete
+  - `ppa show` shows PPA status
+  - Requires Launchpad OAuth authentication on first use
+
+## DONE
+All packages built and published. PPA updated from 8.6 to 9.1.
 
 ## Dependencies needed
 - cdbs (for debian/rules)
