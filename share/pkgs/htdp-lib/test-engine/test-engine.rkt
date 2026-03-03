@@ -5,7 +5,8 @@
 
 (provide (contract-out
           (struct test-object
-            ((tests (listof (-> any)))
+            ((tests (listof (-> boolean?)))
+             (successful-tests (listof (-> boolean?)))
              (failed-checks (listof failed-check?))
              (signature-violations (listof signature-violation?)))
             #:omit-constructor)
@@ -14,7 +15,7 @@
           (test-object-copy (test-object? . -> . test-object?))
           (test-object=? (test-object? test-object? . -> . boolean?))
           (initialize-test-object! (-> any))
-          (add-test! ((-> any) . -> . any))
+          (add-test! ((-> boolean?) . -> . any))
           (add-failed-check! (failed-check? . -> . any))
           (add-signature-violation! (signature-violation? . -> . any))
           (run-tests! (-> test-object?))
@@ -31,11 +32,34 @@
              (expected any/c)
              (exn exn?)))
 
+          ; deprecated
           (struct (unexpected-error/markup unexpected-error)
             ((srcloc srcloc?)
              (expected any/c)
              (exn exn?)
              (error-markup markup?)))
+
+          (struct (unexpected-error/check-* unexpected-error/markup)
+            ((srcloc srcloc?)
+             (expected any/c)
+             (exn exn?)
+             (error-markup markup?)
+             (form-name (or/c symbol? string?))))
+
+          (struct (unexpected-error/range unexpected-error/markup)
+            ((srcloc srcloc?)
+             (expected any/c)
+             (exn exn?)
+             (error-markup markup?)
+             (min real?)
+             (max real?)))
+
+          (struct (unexpected-error/member unexpected-error/markup)
+            ((srcloc srcloc?)
+             (expected any/c)
+             (exn exn?)
+             (error-markup markup?)
+             (set any/c)))
 
           ; wanted to satisfy a predicate, but error happend
           (struct (unsatisfied-error fail-reason)
@@ -104,7 +128,7 @@
             ((srcloc srcloc?)
              (obj any/c)
              (signature signature?)
-             (blame (or/c #f syntax?))))
+             (blame-srcloc (or/c #f srcloc?))))
 
           ; the value we got that violated the signature.
           (struct signature-got
@@ -115,7 +139,7 @@
              (signature signature?)
              (message (or/c string? signature-got?))
              (srcloc (or/c #f srcloc?))
-             (blame (or/c #f syntax?))))
+             (blame-srcloc (or/c #f srcloc?))))
 
           (struct (property-fail fail-reason)
             ((srcloc srcloc?)
@@ -134,19 +158,21 @@
 ;; - a check is a single assertion within that code
 
 (struct test-object
-	(tests ; reverse list of thunks
-	 failed-checks ; reverse list of failed-check structs
-	 signature-violations ; reverse list of signature-violation structs
-	 )
-	#:mutable #:transparent)
+  (tests ; reverse list of thunks
+   successful-tests ; reverse list of thunks from tests
+   failed-checks ; reverse list of failed-check structs
+   signature-violations ; reverse list of signature-violation structs
+   )
+  #:mutable #:transparent)
 
 (define (empty-test-object)
-  (test-object '() '() '()))
+  (test-object '() '() '() '()))
 
 (define *test-object* (empty-test-object))
 
 (define (initialize-test-object)
   (set-test-object-tests! *test-object* '())
+  (set-test-object-successful-tests! *test-object* '())
   (set-test-object-failed-checks! *test-object* '())
   (set-test-object-signature-violations! *test-object* '())
   *test-object*)
@@ -173,10 +199,14 @@
   (let ((test-object (current-test-object)))
     ; in case we're re-running
     (set-test-object-failed-checks! test-object '())
+    (set-test-object-successful-tests! test-object '())
     ;; signature violations come before running tests, and there's no
     ;; way to easily re-run them, so so don't reset them here
     (for-each (lambda (thunk)
-                (thunk))
+                (when (thunk)
+                  (set-test-object-successful-tests!
+                   test-object
+                   (cons thunk (test-object-successful-tests test-object)))))
               (reverse (test-object-tests test-object)))
     test-object))
 
@@ -200,7 +230,19 @@
 (struct unexpected-error fail-reason (expected exn)
   #:transparent)
 
+; deprecated
 (struct unexpected-error/markup unexpected-error (error-markup)
+  #:transparent)
+
+(struct unexpected-error/check-* unexpected-error/markup (form-name)
+  #:transparent)
+
+; in this case, the expected field from unexpected-error is #f
+; for historical reasons
+(struct unexpected-error/range unexpected-error/markup (min max)
+  #:transparent)
+
+(struct unexpected-error/member unexpected-error/markup (set)
   #:transparent)
 
 (struct unsatisfied-error fail-reason (name exn)
@@ -237,13 +279,13 @@
 ; that directly calls add-signature-violation!
 ; The default handler raises an exception - when that happens
 ; during a test, this test failure is registered:
-(struct violated-signature fail-reason (obj signature blame)
+(struct violated-signature fail-reason (obj signature blame-srcloc)
   #:transparent)
 
 (struct signature-got (value)
   #:transparent)
 
-(struct signature-violation (obj signature message srcloc blame)
+(struct signature-violation (obj signature message srcloc blame-srcloc)
   #:transparent)
 
 (struct property-fail fail-reason (result)

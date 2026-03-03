@@ -179,21 +179,42 @@
 
 (import-class NSColor)
 (import-class NSColorSpace)
+(import-class NSAppearance)
 
 (define (get-color get)
-  (let ([hi (as-objc-allocation-with-retain
-             (tell (get) colorUsingColorSpace: (tell NSColorSpace deviceRGBColorSpace)))]
-        [as-color (lambda (v)
-                    (inexact->exact (floor (* 255.0 v))))])
-    (begin0
-     (make-object color%
-                  (as-color
-                   (tell #:type _CGFloat hi redComponent))
-                  (as-color
-                   (tell #:type _CGFloat hi greenComponent))
-                  (as-color
-                   (tell #:type _CGFloat hi blueComponent)))
-     (release hi))))
+  (define hi
+    (as-objc-allocation-with-retain
+     (cond
+       [(version-11.0-or-later?)
+        (define ans #f)
+        (define keep (box null))
+        (tell (tell app effectiveAppearance)
+              performAsCurrentDrawingAppearance:
+              #:type _pointer
+              (objc-block
+               (_fun #:atomic? #t #:keep keep _pointer -> _void)
+               (λ (blk)
+                 (set! ans (tell (get) colorUsingColorSpace: (tell NSColorSpace deviceRGBColorSpace))))
+               #:keep keep))
+        (void/reference-sink keep)
+        ans]
+       [(version-10.7-or-later?)
+        (tell (get) colorUsingColorSpace: (tell NSColorSpace deviceRGBColorSpace))]
+       [else
+        ;; In 10.6 and earlier, `colorUsingColorSpace:` with (tell NSColorSpace deviceRGBColorSpace)`
+        ;; doesn't produce a color with RGB components
+        (tell (get) colorUsingColorSpaceName: #:type _NSString "NSDeviceRGBColorSpace")])))
+  (define (as-color v)
+    (inexact->exact (floor (* 255.0 v))))
+  (begin0
+    (make-object color%
+      (as-color
+       (tell #:type _CGFloat hi redComponent))
+      (as-color
+       (tell #:type _CGFloat hi greenComponent))
+      (as-color
+       (tell #:type _CGFloat hi blueComponent)))
+    (release hi)))
 
 (define (get-highlight-background-color)
   (get-color (lambda () (tell NSColor selectedTextBackgroundColor))))

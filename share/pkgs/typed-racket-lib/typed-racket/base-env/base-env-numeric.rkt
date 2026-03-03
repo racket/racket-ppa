@@ -1,4 +1,5 @@
 #lang s-exp "env-lang.rkt"
+#:default-T+ #true
 
 (begin
   (require
@@ -7,12 +8,15 @@
    (only-in "../rep/values-rep.rkt" make-Values)
    racket/list racket/math racket/flonum racket/extflonum racket/unsafe/ops racket/sequence racket/match
    (for-template racket/flonum racket/extflonum racket/fixnum racket/math racket/unsafe/ops racket/base
+                 (only-in typed-racket/base-env/extra-env-lang with-default-T+)
                  (only-in "../types/numeric-predicates.rkt" index?))
    (only-in (combine-in "../types/abbrev.rkt"
                         "../types/numeric-tower.rkt")
             [-Number N] [-Boolean B] [-Symbol Sym] [-Real R] [-PosInt -Pos]))
 
   ;; TODO having definitions only at the top is really inconvenient.
+
+ (with-default-T+ #true
 
   (define all-int-types
     (list -Zero -One -PosByte -Byte -PosIndex -Index
@@ -233,6 +237,7 @@
        (-> -Int -NonPosInt B : (-PS (-is-type 0 -NegFixnum) -tt))
        (-> -NegInt -Int B : (-PS -tt (-is-type 1 -NegFixnum)))
        (-> -NonPosInt -Int B : (-PS -tt (-is-type 1 -NonPosFixnum)))
+       (-> -Int -True)
        (comp -Int))))
   (define fx>-type
     (lambda ()
@@ -260,6 +265,7 @@
        (-> -NonPosInt -Int B : (-PS (-is-type 1 -NegFixnum) -tt))
        (-> -Int -NegInt B : (-PS -tt (-is-type 0 -NegFixnum)))
        (-> -Int -NonPosInt B : (-PS -tt (-is-type 0 -NonPosFixnum)))
+       (-> -Int -True)
        (comp -Int))))
   (define fx<=-type
     (lambda ()
@@ -288,6 +294,7 @@
        (-> -Int -NegInt B : (-PS (-is-type 0 -NegFixnum) -tt))
        (-> -Int -NonPosInt B : (-PS (-is-type 0 -NonPosFixnum) -tt))
        (-> -NonPosInt -Int B : (-PS -tt (-is-type 1 -NegFixnum)))
+       (-> -Int -True)
        (comp -Int))))
   (define fx>=-type
     (lambda ()
@@ -317,6 +324,7 @@
        (-> -NegInt -Int B : (-PS (-is-type 1 -NegFixnum) -tt))
        (-> -NonPosInt -Int B : (-PS (-is-type 1 -NonPosFixnum) -tt))
        (-> -Int -NonPosInt B : (-PS -tt (-is-type 0 -NegFixnum)))
+       (-> -Int -True)
        (comp -Int))))
   (define fxmin-type
     (lambda ()
@@ -470,7 +478,7 @@
                        (list -FlZero -FlNan -PosFl -NonNegFl
                              -NegFl -NonPosFl -Fl))
                   (commutative-binop -NonNegFl -PosFl -PosFl)
-                  (map binop (list -NonNegFl -NegFl -NonPosFl -Fl)))))
+                  (map varop (list -NonNegFl -NegFl -NonPosFl -Fl)))))
   (define fl--type
     (fl-type-lambda
       (from-cases (binop -FlZero)
@@ -480,7 +488,7 @@
                   (-PosFl -NonPosFl . -> . -PosFl)
                   (-NonNegFl -NegFl . -> . -PosFl)
                   (-NonNegFl -NonPosFl . -> . -NonNegFl)
-                  (binop -Fl))))
+                  (varop-1+ -Fl))))
   (define fl*-type
     (fl-type-lambda
       (from-cases (binop -FlZero)
@@ -488,7 +496,7 @@
                   (binop -NonNegFl)
                   (commutative-binop -NegFl -PosFl -NonPosFl)
                   (binop -NegFl -NonNegFl)
-                  (binop -Fl))))
+                  (varop -Fl))))
   (define fl/-type
     (fl-type-lambda
       (from-cases (-FlZero -Fl . -> . -FlZero)
@@ -496,7 +504,7 @@
                   (-PosFl -PosFl . -> . -NonNegFl)
                   (commutative-binop -PosFl -NegFl -NonPosFl)
                   (-NegFl -NegFl . -> . -NonNegFl)
-                  (binop -Fl))))
+                  (varop-1+ -Fl))))
   (define fl=-type
     (fl-type-lambda
       (from-cases (commutative-equality/strict-prop -Fl (Un -FlPosZero -FlNegZero))
@@ -510,12 +518,14 @@
        ;; false case, we know nothing, lhs may be NaN. same for all comparison that can involve floats
        (-> -NonNegFl -Fl B : (-PS (-is-type 1 -PosFl) -tt))
        (-> -Fl -NonPosFl B : (-PS (-is-type 0 -NegFl) -tt))
+       (-> -Fl -True)
        (comp -Fl))))
   (define fl>-type
     (fl-type-lambda
       (from-cases
        (-> -NonPosFl -Fl B : (-PS (-is-type 1 -NegFl) -tt))
        (-> -Fl -NonNegFl B : (-PS (-is-type 0 -PosFl) -tt))
+       (-> -Fl -True)
        (comp -Fl))))
   (define fl<=-type
     (fl-type-lambda
@@ -524,6 +534,7 @@
        (-> -NonNegFl -Fl B : (-PS (-is-type 1 -NonNegFl) -tt))
        (-> -Fl -NegFl B : (-PS (-is-type 0 -NegFl) -tt))
        (-> -Fl -NonPosFl B : (-PS (-is-type 0 -NonPosFl) -tt))
+       (-> -Fl -True)
        (comp -Fl))))
   (define fl>=-type
     (fl-type-lambda
@@ -532,6 +543,7 @@
        (-> -Fl -NonNegFl B : (-PS (-is-type 0 -NonNegFl) -tt))
        (-> -NegFl -Fl B : (-PS (-is-type 1 -NegFl) -tt))
        (-> -NonPosFl -Fl B : (-PS (-is-type 1 -NonPosFl) -tt))
+       (-> -Fl -True)
        (comp -Fl))))
   (define flmin-type
     (fl-type-lambda
@@ -772,7 +784,7 @@
         (unless (free-identifier=? id1 id2 (sub1 phase))
           (error 'flonum-operations "The assumption that the safe and unsafe flonum-ops are the same binding has been violated. ~a and ~a are diffferent bindings." id1 id2))])))
 
-  )
+  ))
 
 ;; numeric predicates
 ;; There are 25 values that answer true to zero?. They are either reals, or inexact complexes.
@@ -781,27 +793,27 @@
   (-> N B : (-PS (-is-type 0 (Un -RealZeroNoNan -InexactComplex -InexactImaginary))
                  (-not-type 0 -RealZeroNoNan)))]
 
-[number? (make-pred-ty N)]
-[integer? (asym-pred Univ B (-PS (-is-type 0 (Un -Int -Flonum -SingleFlonum)) ; inexact-integers exist...
+[number? (unsafe-shallow:make-pred-ty N)]
+[integer? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 (Un -Int -Flonum -SingleFlonum)) ; inexact-integers exist...
                                  (-not-type 0 -Int)))]
-[exact-integer? (make-pred-ty -Int)]
-[real? (make-pred-ty -Real)]
-[flonum? (make-pred-ty -Flonum)]
-[single-flonum? (make-pred-ty -SingleFlonum)]
-[double-flonum? (make-pred-ty -Flonum)]
-[inexact-real? (make-pred-ty -InexactReal)]
-[complex? (make-pred-ty N)]
+[exact-integer? (unsafe-shallow:make-pred-ty -Int)]
+[real? (unsafe-shallow:make-pred-ty -Real)]
+[flonum? (unsafe-shallow:make-pred-ty -Flonum)]
+[single-flonum? (unsafe-shallow:make-pred-ty -SingleFlonum)]
+[double-flonum? (unsafe-shallow:make-pred-ty -Flonum)]
+[inexact-real? (unsafe-shallow:make-pred-ty -InexactReal)]
+[complex? (unsafe-shallow:make-pred-ty N)]
 ;; `rational?' includes all Reals, except infinities and NaN.
-[rational? (asym-pred Univ B (-PS (-is-type 0 -Real) (-not-type 0 -Rat)))]
-[exact? (make-pred-ty -ExactNumber)]
-[inexact? (make-pred-ty (Un -InexactReal -InexactImaginary -InexactComplex))]
-[fixnum? (make-pred-ty -Fixnum)]
-[fixnum-for-every-system? (asym-pred Univ B (-PS (-is-type 0 -Fixnum) -tt))]
-[index? (make-pred-ty -Index)]
+[rational? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 -Real) (-not-type 0 -Rat)))]
+[exact? (unsafe-shallow:make-pred-ty -ExactNumber)]
+[inexact? (unsafe-shallow:make-pred-ty (Un -InexactReal -InexactImaginary -InexactComplex))]
+[fixnum? (unsafe-shallow:make-pred-ty -Fixnum)]
+[fixnum-for-every-system? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 -Fixnum) -tt))]
+[index? (unsafe-shallow:make-pred-ty -Index)]
 [positive? (-> -Real B : (-PS (-is-type 0 -PosRealNoNan) (-is-type 0 -NonPosReal)))]
 [negative? (-> -Real B : (-PS (-is-type 0 -NegRealNoNan) (-is-type 0 -NonNegReal)))]
-[exact-positive-integer? (make-pred-ty -Pos)]
-[exact-nonnegative-integer? (make-pred-ty -Nat)]
+[exact-positive-integer? (unsafe-shallow:make-pred-ty -Pos)]
+[exact-nonnegative-integer? (unsafe-shallow:make-pred-ty -Nat)]
 
 [odd? (-> -Int B : (-PS (-not-type 0 -Zero) (-not-type 0 -One)))]
 [even? (-> -Int B : (-PS (-not-type 0 -One) (-not-type 0 -Zero)))]
@@ -819,6 +831,7 @@
   ;; from the original types.
   (map (lambda (t) (commutative-equality/prop -Real t))
        (list -RealZero -PosReal -NonNegReal -NegReal -NonPosReal -Real))
+  (-> N -True)
   (->* (list N N) N B))]
 
 [<  (from-cases
@@ -863,6 +876,7 @@
                                      (-is-type 1 (Un -InexactRealNan -NegInfinity))))
      (-> -PosInfinity -Real B : -false-propset)
      (-> -Real -NegInfinity B : -false-propset)
+     (-> -Real -True)
      ;; If applying props resulted in the interesection of the prop and the
      ;; original type, we'd only need the cases for Fixnums and those for Reals.
      ;; Cases for Integers and co would fall out naturally from the Real cases,
@@ -924,6 +938,7 @@
      (>-type-pattern -SingleFlonum -PosSingleFlonum -NonNegSingleFlonum -NegSingleFlonum -NonPosSingleFlonum #:no-false-props? #t)
      (>-type-pattern -InexactReal -PosInexactReal -NonNegInexactReal -NegInexactReal -NonPosInexactReal #:no-false-props? #t)
      (>-type-pattern -Real -PosReal -NonNegReal -NegReal -NonPosReal #:no-false-props? #t)
+     (-> -Real -True)
      (->* (list R R) R B))]
 [<= (from-cases
      (-> -Int -One B : (-PS (-is-type 0 (Un -NonPosInt -One)) (-is-type 0 -PosInt)))
@@ -972,6 +987,7 @@
      (<=-type-pattern -SingleFlonum -PosSingleFlonum -NonNegSingleFlonum -NegSingleFlonum -NonPosSingleFlonum #:no-false-props? #t)
      (<=-type-pattern -InexactReal -PosInexactReal -NonNegInexactReal -NegInexactReal -NonPosInexactReal #:no-false-props? #t)
      (<=-type-pattern -Real -PosReal -NonNegReal -NegReal -NonPosReal #:no-false-props? #t)
+     (-> -Real -True)
      (->* (list R R) R B))]
 [>= (from-cases
      (-> -One -Int B : (-PS (-is-type 1 (Un -One -NonPosInt)) (-is-type 1 -PosInt)))
@@ -1020,6 +1036,7 @@
      (>=-type-pattern -SingleFlonum -PosSingleFlonum -NonNegSingleFlonum -NegSingleFlonum -NonPosSingleFlonum #:no-false-props? #t)
      (>=-type-pattern -InexactReal -PosInexactReal -NonNegInexactReal -NegInexactReal -NonPosInexactReal #:no-false-props? #t)
      (>=-type-pattern -Real -PosReal -NonNegReal -NegReal -NonPosReal #:no-false-props? #t)
+     (-> -Real -True)
      (->* (list R R) R B))]
 
 [* (from-cases
@@ -1900,18 +1917,18 @@
   (-> (Un -NonPosRat -NonPosFlonum -NonPosSingleFlonum -NonPosInexactReal -NonPosReal) -NonPosInt)
   (-> (Un -Rat -Flonum -SingleFlonum -InexactReal -Real) -Int))]
 
-[nan? (make-pred-ty (list -Real) B -InexactRealNan)]
+[nan? (unsafe-shallow:make-pred-ty (list -Real) B -InexactRealNan)]
 
-[infinite? (make-pred-ty (list -Real) B (Un -PosInfinity -NegInfinity))]
-[positive-integer? (asym-pred Univ B (-PS (-is-type 0 (Un -PosInt -PosFlonum -PosSingleFlonum))
+[infinite? (unsafe-shallow:make-pred-ty (list -Real) B (Un -PosInfinity -NegInfinity))]
+[positive-integer? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 (Un -PosInt -PosFlonum -PosSingleFlonum))
                                           (-not-type 0 -PosInt)))]
-[negative-integer? (asym-pred Univ B (-PS (-is-type 0 (Un -NegInt -NegFlonum -NegSingleFlonum))
+[negative-integer? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 (Un -NegInt -NegFlonum -NegSingleFlonum))
                                           (-not-type 0 -NegInt)))]
-[nonpositive-integer? (asym-pred Univ B (-PS (-is-type 0 (Un -NonPosInt -NonPosFlonum -NonPosSingleFlonum))
+[nonpositive-integer? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 (Un -NonPosInt -NonPosFlonum -NonPosSingleFlonum))
                                              (-not-type 0 -NonPosInt)))]
-[nonnegative-integer? (asym-pred Univ B (-PS (-is-type 0 (Un -Nat -NonNegFlonum -NonNegSingleFlonum))
+[nonnegative-integer? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 (Un -Nat -NonNegFlonum -NonNegSingleFlonum))
                                              (-not-type 0 -Nat)))]
-[natural? (make-pred-ty -Nat)]
+[natural? (unsafe-shallow:make-pred-ty -Nat)]
 
 ;; racket/fixnum
 [fx+ (fx+-type)]
@@ -2037,7 +2054,7 @@
 [unsafe-flrandom (flrandom-type)]
 
 ; racket/extflonum
-[extflonum? (make-pred-ty -ExtFlonum)]
+[extflonum? (unsafe-shallow:make-pred-ty -ExtFlonum)]
 [extflonum-available? (-> B)]
 [pi.t -PosExtFlonum]
 

@@ -20,7 +20,9 @@
          make-data+root
          data+root?
          make-data+root+doc-id
-         data+root+doc-id?)
+         data+root+doc-id?
+         make-data+root+doc-id+pkg
+         data+root+doc-id+pkg?)
 
 (define-struct entry
   (words    ; list of strings: main term, sub-term, etc.
@@ -30,6 +32,7 @@
 
 (define-struct data+root (data root))
 (define-struct (data+root+doc-id data+root) (doc-id))
+(define-struct (data+root+doc-id+pkg data+root+doc-id) (pkg))
 
 ;; Private:
 (define-struct xrefs (renderer ri))
@@ -47,7 +50,8 @@
                                             (lambda (key use-id) (demand-source key))]
                    #:render% [render% (html:render-mixin render%)]
                    #:root [root-path #f]
-                   #:doc-id [doc-id-str #f])
+                   #:doc-id [doc-id-str #f]
+                   #:pkg [pkg-str #f])
   (let* ([renderer (new render% [dest-dir (find-system-path 'temp-dir)])]
          [fp (send renderer traverse null null)]
          [load-source (lambda (src ci)
@@ -60,9 +64,12 @@
                                 (define root (if (data+root? v) (data+root-root v) root-path))
                                 (define doc-id (or (and (data+root+doc-id? v) (data+root+doc-id-doc-id v))
                                                    doc-id-str))
+                                (define pkg (or (and (data+root+doc-id+pkg? v) (data+root+doc-id+pkg-pkg v))
+                                                pkg-str))
                                 (send renderer deserialize-info data ci
                                       #:root root
-                                      #:doc-id doc-id))))))]
+                                      #:doc-id doc-id
+                                      #:pkg pkg))))))]
          [use-ids (make-weak-hasheq)]
          [ci (send renderer collect null null fp
                    (lambda (key ci)
@@ -118,12 +125,14 @@
   (send renderer transfer-info ci (resolve-info-ci (xrefs-ri xrefs))))
 
 ;; Returns (values <tag-or-#f> <form?>)
-(define xref-binding-tag
-  (case-lambda
-   [(xrefs id/binding mode)
+(define (xref-binding-tag xrefs id/binding mode
+                          #:space [space #f]
+                          #:suffix [suffix space])
     (let ([search
            (lambda (id/binding)
-             (let ([tag (find-scheme-tag #f (xrefs-ri xrefs) id/binding mode)])
+             (let ([tag (find-scheme-tag #f (xrefs-ri xrefs) id/binding mode
+                                         #:space space
+                                         #:suffix suffix)])
                (if tag
                    (values tag (eq? (car tag) 'form))
                    (values #f #f))))])
@@ -151,10 +160,14 @@
                                      "                    (and (list? l)\n"
                                      "                         (or (= (length l) 2)\n"
                                      "                             (= (length l) 7)))))")
-                                    id/binding)]))]))
+                                    id/binding)])))
 
-(define (xref-binding->definition-tag xrefs id/binding mode)
-  (let-values ([(tag form?) (xref-binding-tag xrefs id/binding mode)])
+(define (xref-binding->definition-tag xrefs id/binding mode
+                                      #:space [space #f]
+                                      #:suffix [suffix space])
+  (let-values ([(tag form?) (xref-binding-tag xrefs id/binding mode
+                                              #:space space
+                                              #:suffix suffix)])
     tag))
 
 (define (xref-tag->path+anchor xrefs tag

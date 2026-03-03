@@ -6,6 +6,7 @@
          "utils.rkt"
          "const.rkt"
          "types.rkt"
+         "liquid-glass.rkt"
          "window.rkt"
          "queue.rkt"
          "menu-bar.rkt"
@@ -28,7 +29,7 @@
 
 (import-class NSWindow NSGraphicsContext NSMenu NSPanel
               NSApplication NSAutoreleasePool NSScreen
-              NSToolbar NSArray)
+              NSToolbar NSArray NSView)
 
 (define NSWindowCloseButton 0)
 (define NSWindowToolbarButton 3)
@@ -47,6 +48,18 @@
 ;;  the weak-box layer is needed to avoid GC-accounting
 ;;  problems.
 (define all-windows (make-hash))
+
+(set-queue-events-to-refresh-all-canvases!
+ (let ([queue-events-to-refresh-all-canvases
+        (λ ()
+          (atomically
+           (for ([b (in-hash-values all-windows)])
+             (define frame (weak-box-value b))
+             (when frame
+               (queue-event
+                (send frame get-eventspace)
+                (λ () (send frame request-refresh-all-canvas-children)))))))])
+   queue-events-to-refresh-all-canvases))
 
 ;; called in atomic mode
 (define (send-screen-change-notifications flags)
@@ -307,12 +320,37 @@
 
     (tellv cocoa setAcceptsMouseMovedEvents: #:type _BOOL #t)
 
+    (define inner-content-view
+      (cond
+        [(and is-dialog? liquid-glass?)
+         (import-class NSLayoutConstraint)
+         (define cv (tell (tell NSView alloc) init))
+         (define win (tell cocoa contentView))
+         (define margin 10)
+         (tellv win addSubview: cv)
+         (tellv cv setTranslatesAutoresizingMaskIntoConstraints: #:type _BOOL #false)
+         (tellv NSLayoutConstraint
+                activateConstraints:
+                (tell NSArray
+                      arrayWithObjects: #:type (_list i _id)
+                      (list
+                       (tell (tell cv topAnchor) constraintEqualToAnchor: (tell win topAnchor) constant: #:type _CGFloat margin)
+                       (tell (tell cv leadingAnchor) constraintEqualToAnchor: (tell win leadingAnchor) constant: #:type _CGFloat margin)
+                       (tell (tell cv trailingAnchor) constraintEqualToAnchor: (tell win trailingAnchor) constant: #:type _CGFloat (- margin))
+                       (tell (tell cv bottomAnchor) constraintEqualToAnchor: (tell win bottomAnchor) constant: #:type _CGFloat (- margin)))
+                      count: #:type _NSUInteger 4))
+         cv]
+        [else #f]))
+
     ;; Setting the window in one-shot mode helps prevent the
     ;;  frame from being resurrected by a click on the dock icon.
     (tellv cocoa setOneShot: #:type _BOOL #t)
 
+    (define/override (get-frame)
+      (tell #:type _NSRect cocoa frame))
+
     (define/override (get-cocoa-content) 
-      (tell cocoa contentView))
+      (or inner-content-view (tell cocoa contentView)))
     (define/override (get-cocoa-window) cocoa)
     (define/override (get-wx-window) this)
 
@@ -850,6 +888,14 @@
      (let ([f (weak-box-value b)])
        (when f
          (send f fixup-locations-children))))))
+
+(set-post-key-callback-hook!
+ (lambda (evt)
+   (key-event-received #f)
+   (and root-fake-frame
+        (lambda (evt)
+          (unless (key-event-received)
+            (tellv (send root-fake-frame get-cocoa) keyDown: evt))))))
 
 ;; ----------------------------------------
 ;; As of Mac OS 10.14, NSWindow-specific flushing control is no longer

@@ -12,6 +12,7 @@
          text-column-guide^
          text-ascii-art^
          text-misc^
+         text-max-width-paragraph^
          text-delegate^
          text-port^
          text-port-class^
@@ -19,7 +20,8 @@
          text-search^
          text-first-line^
          text-inline-overview^
-         text-mixed-in-classes^)
+         text-mixed-in-classes^
+         text-indent-guides^)
 
 (define-signature text-basic-class^
   (basic<%>
@@ -39,6 +41,10 @@
 (define-signature text-line-numbers^
   (line-numbers<%>
    line-numbers-mixin))
+
+(define-signature text-indent-guides^
+  (indent-guides<%>
+   indent-guides-mixin))
 
 (define-signature text-autocomplete-class^
   (autocomplete<%>
@@ -86,11 +92,14 @@
 
 (define-signature text-search^
   (searching<%>
-   searching-mixin))
+   searching-mixin
+   searching-embedded<%>
+   searching-embedded-mixin))
 
 (define-signature text-inline-overview^
   (inline-overview<%>
-   inline-overview-mixin))
+   inline-overview-mixin
+   inline-overview-mpw-mixin))
 
 (define-signature text-first-line^
   (first-line<%>
@@ -119,6 +128,10 @@
    all-string-snips-mixin
    overwrite-disable<%>
    overwrite-disable-mixin))
+
+(define-signature text-max-width-paragraph^
+  (max-width-paragraph-mixin
+   max-width-paragraph<%>))
 
 (define-signature text-mixed-in-classes^
   (basic%

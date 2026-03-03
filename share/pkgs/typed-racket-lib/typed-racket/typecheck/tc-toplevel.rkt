@@ -8,6 +8,7 @@
          (prefix-in c: (contract-req))
          "../rep/core-rep.rkt" "../rep/type-rep.rkt" "../rep/values-rep.rkt"
          "../rep/type-constr.rkt"
+         "../rep/free-variance.rkt"
          "../types/utils.rkt" "../types/abbrev.rkt" "../types/type-table.rkt"
          "../types/struct-table.rkt" "../types/resolve.rkt"
          "../private/parse-type.rkt"
@@ -72,7 +73,6 @@
                   #:mutable (attribute t.mutable)
                   #:maker (attribute t.maker)
                   #:extra-maker (attribute t.extra-maker)
-                  #:type-only (attribute t.type-only)
                   #:prefab? (attribute t.prefab)
                   #:proc-ty-stx (attribute t.proc-ty)
                   #:properties (attribute t.properties))])))
@@ -82,7 +82,7 @@
   (syntax-parse form
     [t:typed-struct (attribute t.tvars)]))
 
-;; syntax? -> (listof def-binding?)
+;; syntax? -> (listof binding?)
 (define (tc-toplevel/pass1 form)
   (parameterize ([current-orig-stx form])
     (syntax-parse form
@@ -389,7 +389,16 @@
        (let ([ts (attribute var.type)])
          (when (= 1 (length ts))
            (add-scoped-tvars #'expr (lookup-scoped-tvars (stx-car #'(var ...)))))
-         (tc-expr/check #'expr (ret ts)))
+         (define adjusted-ts (tc-expr/check #'expr (ret ts)))
+         #;(for ([var (in-list (syntax-e #'(var ...)))]
+               [tcr (in-list (match adjusted-ts [(tc-results: tcrs _) tcrs]))])
+           ;; 2022-01-17: consider updating types for shallow so it can infer
+           ;; when to skip result checks --- but beware, this code was a problem for
+           ;; examples in the ts-guide (occurrence.scrbl)
+           ;; 2022-01-24: consider runnning this code ONLY for shallow mode!
+           ;; 2022-01-24: consider an "upgrade" function anyway
+           (register-type var (tc-result-t tcr)))
+         (void))
        'no-type]
 
       ;; to handle the top-level, we have to recur into begins
@@ -428,23 +437,40 @@
               (~datum expand)))))
 
 ;; finish registering struct definitions in two steps with the second one being
-;; the return thunk, which can be invoked on demand.
-;; Listof[Expr] -> Promise[Listof[binding]]
+;; the return thunk, which can be invoked on demand. The function also returns a
+;; dependency mappping from struct type names to the type names used in their
+;; definitions.
+
+;; Listof[Expr] -> Values[Promise[Listof[binding]], FreeIDTable[Identifer, Identifer]]
 (define (register-struct-type-info! form-li)
   ;; register type name and alias first
-  (define rest
-    (for/list ([form (in-list form-li)])
+  (define-values (poly-names binding-reg dependency-map)
+    (for/fold ([poly-names '()]
+               [binding-reg '()]
+               [dependency-map (make-immutable-free-id-table)]
+               #:result (values (reverse poly-names)
+                                (reverse binding-reg)
+                                dependency-map))
+              ([form (in-list form-li)])
       (define name (name-of-struct form))
+      (define other-names (names-referred-in-struct form))
       (define tvars (type-vars-of-struct form))
       (register-resolved-type-alias name (make-Name name (length tvars) #t))
       (register-type-name name)
-      (add-constant-variance! name tvars)
-      (delay
-        (let ([parsed (parse-typed-struct form)])
-          (register-parsed-struct-sty! parsed)
-          (refine-struct-variance! (list parsed))
-          (register-parsed-struct-bindings! parsed)))))
-  (delay (map force rest)))
+      (define parsed (delay (parse-typed-struct form)))
+      (values (cons (delay (register-parsed-struct-sty! (force parsed))
+                           (if (null? tvars) #f
+                               name))
+                    poly-names)
+              (cons (delay (register-parsed-struct-bindings! (force parsed)))
+                    binding-reg)
+              (free-id-table-set dependency-map name other-names))))
+  (values
+   (delay (lambda (names)
+            (refine-user-defined-constructor-variances!
+             (append names (filter-map force poly-names)))
+            (map force binding-reg)))
+   dependency-map))
 
 
   ;; the resulting thunk finishes the rest work)
@@ -473,11 +499,11 @@
     (parse-and-register-signature! sig-form))
 
   ;; Add the struct names to the type table, but not with a type
-  (define promise-reg-sty-info (register-struct-type-info! struct-defs))
+  (define-values (promise-reg-sty-info dependency-map) (register-struct-type-info! struct-defs))
 
   (do-time "after adding type names")
 
-  (register-all-type-aliases type-aliases)
+  (define names (register-all-type-aliases type-aliases dependency-map))
 
   (finalize-signatures!)
 
@@ -485,7 +511,7 @@
 
   ;; continue parsing and registering the structure types,
   ;; the bindings of the structs
-  (define struct-bindings (force promise-reg-sty-info))
+  (define struct-bindings ((force promise-reg-sty-info) names))
 
   (do-time "before pass1")
   ;; do pass 1, and collect the defintions
@@ -529,7 +555,8 @@
   (log-message online-check-syntax-logger
                'info
                "TR's tooltip syntaxes; this message is ignored"
-               (list (syntax-property #'(void) 'mouse-over-tooltips (type-table->tooltips))))
+               (list (syntax-property (datum->syntax #'here '(void) (orig-module-stx))
+                                      'mouse-over-tooltips (type-table->tooltips))))
   ;; report delayed errors
   (report-all-errors)
   ;; provide-tbl : hash[id, listof[id]]
@@ -710,7 +737,8 @@
                                       'no-type)]
     [else
      (when (typed-struct? form)
-       (force (register-struct-type-info! (list form))))
+       (define-values (after-reg _) (register-struct-type-info! (list form)))
+       ((force after-reg) null))
      (define all-forms (cond
                          [(typed-struct? form)
                           ;; after a struct type is registered, check the pending forms is in receiving order

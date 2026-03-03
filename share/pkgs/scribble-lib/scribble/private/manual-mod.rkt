@@ -56,6 +56,7 @@
              (~optional (~and #:indirect indirect))
              (~optional (~seq #:use-sources (pname ...)))
              (~optional (~seq #:module-paths (modpath ...)))
+             (~optional (~seq #:language-family (fam:string ...)))
              (~optional (~seq #:packages (pkg ...)))
              (~optional (~and #:no-declare no-declare))
              (~optional (~or (~and #:lang language)
@@ -102,6 +103,9 @@
                      [req (if (attribute req)
                               #'req
                               #'(racket require))]
+                     [fam (if (attribute fam)
+                              #'(quote (fam ...))
+                              #'#f)]
                      [(show-name ...)
                       (if (attribute modpath)
                           #'(name2 ...)
@@ -115,7 +119,8 @@
                          link-target-expr
                          kind
                          (list . content)
-                         req))))]))
+                         req
+                         fam))))]))
 
 ;; ----------------------------------------
 ;; old forms for backward compatibility:
@@ -140,20 +145,16 @@
     [(_ (name ...) . options+content)
      (defmodule #:multi (name ...) . options+content)]))
 
-(define-syntax defmodulelang*/no-declare
-  (syntax-rules ()
-    [(_ (lang ...) . options+content)
-     (defmodule #:multi (lang ...)
-       #:lang
-       #:no-declare
-       . options+content)]))
+(define-syntax-rule (defmodulelang*/no-declare (lang ...) . options+content)
+  (defmodule #:multi (lang ...)
+    #:lang
+    #:no-declare
+    . options+content))
 
-(define-syntax defmodulelang*
-  (syntax-rules ()
-    [(_ (name ...) . options+content)
-     (defmodule #:multi (name ...)
-       #:lang
-       . options+content)]))
+(define-syntax-rule (defmodulelang* (name ...) . options+content)
+  (defmodule #:multi (name ...)
+    #:lang
+    . options+content))
 
 (define-syntax defmodulelang
   (syntax-rules ()
@@ -173,12 +174,10 @@
     #:no-declare
     . options+content))
 
-(define-syntax defmodulereader*
-  (syntax-rules ()
-    [(_ (name ...) . options+content)
-     (defmodule #:multi (name ...)
-       #:reader
-       . options+content)]))
+(define-syntax-rule (defmodulereader* (name ...) . options+content)
+  (defmodule #:multi (name ...)
+    #:reader
+    . options+content))
 
 (define-syntax-rule (defmodulereader lang . options+content)
   (defmodule lang
@@ -188,19 +187,21 @@
 ;; ----------------------------------------
 
 (define (compute-packages module-path)
-  (let* ([path (with-handlers ([exn:missing-module? (lambda (exn) #f)])
-                 (and module-path
-                      (resolved-module-path-name
-                       (module-path-index-resolve (module-path-index-join module-path #f)))))]
-         [pkg (and path
-                   (path? path)
-                   (or (path->pkg path)
-                       (let ([c (path->main-collects-relative path)])
-                         (and c
-                              "base"))))])
-    (if pkg
-        (list pkg)
-        null)))
+  (define path
+    (with-handlers ([exn:missing-module? (lambda (exn) #f)])
+      (and module-path
+           (resolved-module-path-name
+            (module-path-index-resolve (module-path-index-join module-path #f))))))
+  (define pkg
+    (and path
+         (path? path)
+         (or (path->pkg path)
+             (let ([c (path->main-collects-relative path)])
+               (and c
+                    "base")))))
+  (if pkg
+      (list pkg)
+      null))
 
 ;; mflatt thinks this should not be exposed
 (define (racketpkgname pkg)
@@ -217,7 +218,7 @@
                               (format "Install this package using `raco pkg install ~a`"
                                       pkg))))))
 
-(define (*defmodule names modpaths module-path packages link-target? lang content req)
+(define (*defmodule names modpaths module-path packages link-target? lang content req fam)
   (let ([modpaths (or modpaths names)])
     (define pkg-spec
       (let ([pkgs (or packages
@@ -240,7 +241,7 @@
     (define libs-specs
       ;; make-desc  : element -> flow
       ;; index-desc : module-path-index-desc
-      (let-values ([(make-desc index-desc)
+      (let-values ([(make-desc the-index-desc)
                     (case lang
                       [(#f)
                        (values (if (procedure? req)
@@ -259,9 +260,14 @@
                       [else (error 'defmodule "unknown mode: ~e" lang)])])
       (map
        (lambda (name modpath)
-         (define modname (if link-target?
-                             (make-defracketmodname name modpath index-desc)
-                             name))
+         (define modname (cond
+                           [link-target?
+                            (define the-index-desc/fam
+                              (if fam
+                                  (index-desc (hash-set (index-desc-extras the-index-desc) 'language-family fam))
+                                  the-index-desc))
+                            (make-defracketmodname name modpath the-index-desc/fam)]
+                           [else name]))
          (list
           (make-flow
            (list
@@ -281,8 +287,8 @@
        (if pkg-spec
            (if ((+ (flow-width (caar libs-specs))
                    (flow-width pkg-spec)
-                   8)
-                . < . (current-display-width))
+                   6)
+                . <= . (current-display-width))
                (cons
                 (cons (car (car libs-specs))
                       (list pkg-spec))
@@ -293,28 +299,25 @@
                             pkg-spec))))
            libs-specs))
       (append (if link-target?
-                  (map (lambda (modpath)
-                         (make-part-tag-decl 
-                          (intern-taglet
-                           `(mod-path ,(datum-intern-literal
-                                        (element->string modpath))))))
-                       modpaths)
+                  (for/list ([modpath (in-list modpaths)])
+                    (make-part-tag-decl (intern-taglet `(mod-path ,(datum-intern-literal
+                                                                    (element->string modpath))))))
                   null)
               (flow-paragraphs (decode-flow content)))))))
 
-(define the-module-path-index-desc (make-module-path-index-desc))
-(define the-language-index-desc (make-language-index-desc))
-(define the-reader-index-desc (make-reader-index-desc))
+(define the-module-path-index-desc (index-desc (hash 'module-kind 'lib)))
+(define the-language-index-desc (index-desc (hash 'module-kind 'lang)))
+(define the-reader-index-desc (index-desc (hash 'module-kind 'reader)))
 
 (define (make-defracketmodname mn mp index-desc)
-  (let ([name-str (datum-intern-literal (element->string mn))]
-        [path-str (datum-intern-literal (element->string mp))])
-    (make-index-element #f
-                        (list mn)
-                        (intern-taglet `(mod-path ,path-str))
-                        (list name-str)
-                        (list mn)
-                        index-desc)))
+  (define name-str (datum-intern-literal (element->string mn)))
+  (define path-str (datum-intern-literal (element->string mp)))
+  (make-index-element #f
+                      (list mn)
+                      (intern-taglet `(mod-path ,path-str))
+                      (list name-str)
+                      (list mn)
+                      index-desc))
 
 (define-syntax (declare-exporting stx)
   (syntax-parse stx
@@ -328,12 +331,12 @@
                                  #'(list pkg ...)
                                  #'#f)])
        (let ([libs (syntax->list #'(lib ... plib ...))])
-         (for ([l libs])
-           (unless (or (syntax-case l (unquote)
-                         [(unquote _) #t]
-                         [_ #f])
-                       (module-path? (syntax->datum l)))
-             (raise-syntax-error #f "not a module path" stx l)))
+         (for ([l libs]
+               #:unless (or (syntax-case l (unquote)
+                              [(unquote _) #t]
+                              [_ #f])
+                            (module-path? (syntax->datum l))))
+           (raise-syntax-error #f "not a module path" stx l))
          (when (null? libs)
            (raise-syntax-error #f "need at least one module path" stx))
          #'(*declare-exporting `(lib ...) `(plib ...) packages)))]))

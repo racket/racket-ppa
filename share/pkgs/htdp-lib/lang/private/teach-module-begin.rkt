@@ -10,12 +10,13 @@
 
 (require deinprogramm/signature/signature
          lang/private/signature-syntax
-         (only-in test-engine/syntax test))
+         (only-in test-engine/syntax test test-display-results!))
 
 (require (for-syntax scheme/base)
          (for-syntax racket/list)
          (for-syntax syntax/boundmap)
-         (for-syntax syntax/kerncase))
+         (for-syntax syntax/kerncase)
+         (for-syntax stepper/private/syntax-property))
 
 (require (for-syntax "firstorder.rkt"))
 
@@ -23,12 +24,9 @@
   (syntax-case stx ()
     ((_ expr)
      (not (syntax-property #'expr 'test-call))
-     (syntax-property
       (syntax-property
        #'(#%app call-with-values (lambda () expr)
 		do-print-results)
-       'stepper-skipto 
-       '(syntax-e cdr cdr car syntax-e cdr cdr car))
       'certify-mode
       'transparent))
     ((_ expr) #'expr)))
@@ -51,6 +49,7 @@
     (define extract-signatures
       (lambda (lostx) 
 	(let* ((table (make-bound-identifier-mapping))
+               (ids '())
 	       (non-signatures
 		(filter-map (lambda (maybe)
 			      (syntax-case maybe (:)
@@ -58,19 +57,19 @@
 				 (not (identifier? #'?exp))
 				 #'(apply-signature/blame (signature ?sig) ?exp))
 				((: ?id ?sig)
-				 (begin
-				   (let ((real-id (first-order->higher-order #'?id)))
-				     (cond
-				      ((bound-identifier-mapping-get table real-id (lambda () #f))
-				       => (lambda (old-sig-stx)
-					    (unless (equal? (syntax->datum old-sig-stx)
-							    (syntax->datum #'?sig))
-					      (raise-syntax-error #f
-								  "Second signature declaration for the same name."
-								  maybe))))
-				      (else
-				       (bound-identifier-mapping-put! table real-id #'?sig)))
-				     #f)))
+                                 (let ((real-id (first-order->higher-order #'?id)))
+                                   (cond
+                                     ((bound-identifier-mapping-get table real-id (lambda () #f))
+                                      => (lambda (old-sig-stx)
+                                           (unless (equal? (syntax->datum old-sig-stx)
+                                                           (syntax->datum #'?sig))
+                                             (raise-syntax-error #f
+                                                                 "Second signature declaration for the same name."
+                                                                 maybe))))
+                                     (else
+                                      (bound-identifier-mapping-put! table real-id #'?sig)))
+                                   (set! ids (cons real-id ids))
+                                   #f))
 				((: ?id)
 				 (raise-syntax-error #f "Signature declaration is missing a signature." maybe))
 				((: ?id ?sig ?stuff0 ?stuff1 ...)
@@ -79,7 +78,7 @@
 								 (?stuff0 ?stuff1 ...))))
 				(_ maybe)))
 			    lostx)))
-	  (values table non-signatures))))
+	  (values table ids non-signatures))))
 
     (define local-expand-stop-list 
       (append (list #': #'define-signature)
@@ -136,6 +135,15 @@
 			     (begin
 			       ?first ?rest))))))))))
 
+    ; these dummy uses are so that DrRacket can display binding arrows correctly
+    (define (signature-id-dummy-uses ids)
+      #`(begin
+          #,@(map (lambda (id)
+                    (stepper-syntax-property #`(begin #,id (void))
+                                             'stepper-skip-completely 
+                                             #t))
+                  ids)))
+    
     (define (mk-module-begin options)
       (lambda (stx)
         (syntax-case stx ()
@@ -145,23 +153,45 @@
            ;; the module-expansion machinery can be used to handle
            ;; requires, etc.:
            #`(#%plain-module-begin
+              #,(stepper-syntax-property
+                 #`(begin
+                     (define repl? #f) ; whether we're in the REPL now
+                     (let ((handle (uncaught-exception-handler)))
+                       (uncaught-exception-handler
+                        (lambda (exn)
+                          (begin
+                            (unless repl? ; the REPL takes care of printing the results itself
+                              (test-display-results!))
+                            (set! repl? #t)
+                            (handle exn))))))
+                 'stepper-skip-completely 
+                 #t)
               (module-continue (e1 ...) () ())
               (module configure-runtime racket/base
                 (require htdp/bsl/runtime)
                 (configure '#,options))
-              (module+ test (test)))))))
+              (module+ test (test))
+              #,(stepper-syntax-property
+                 #`(set! repl? #t)
+                 'stepper-skip-completely 
+                 #t))))))
     
     (values
      ;; module-begin
-     (mk-module-begin '())
-     (mk-module-begin '(abbreviate-cons-as-list
-                        read-accept-quasiquote))
-     (mk-module-begin '(abbreviate-cons-as-list
-                        read-accept-quasiquote))
-     (mk-module-begin '(abbreviate-cons-as-list
-                        read-accept-quasiquote))
+     (mk-module-begin '(output-function-instead-of-lambda))
      (mk-module-begin '(abbreviate-cons-as-list
                         read-accept-quasiquote
+                        output-function-instead-of-lambda))
+     (mk-module-begin '(abbreviate-cons-as-list
+                        read-accept-quasiquote
+                        use-function-output-syntax
+                        output-function-instead-of-lambda))
+     (mk-module-begin '(abbreviate-cons-as-list
+                        read-accept-quasiquote
+                        use-function-output-syntax))
+     (mk-module-begin '(abbreviate-cons-as-list
+                        read-accept-quasiquote
+                        use-function-output-syntax
                         show-sharing))
 
      ;; module-continue
@@ -187,9 +217,11 @@
 			(reverse (syntax->list #'(defined-id ...)))))
 	    ;; Now handle signatures:
 	    (let ((top-level (reverse (syntax->list (syntax (e1 ...))))))
-	      (let-values (((sig-table expr-list)
+	      (let-values (((sig-table ids expr-list)
 			    (extract-signatures top-level)))
-		(expand-signature-expressions sig-table expr-list)))))
+		#`(begin
+                    #,(expand-signature-expressions sig-table expr-list)
+                    #,(signature-id-dummy-uses ids))))))
 	 ((frm e3s e1s def-ids)
 	  (let loop ((e3s #'e3s)
 		     (e1s #'e1s)

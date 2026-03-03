@@ -1,11 +1,14 @@
 #lang scribble/doc
 @(require scribble/manual scribble/struct scribble/xref scribble/bnf
-          (for-label scheme/base
-                     scheme/contract
+          scribble/example
+          (for-label (except-in racket/base error eof)
+                     racket/contract
                      parser-tools/lex
                      (prefix-in : parser-tools/lex-sre)
                      parser-tools/yacc
                      parser-tools/cfg-parser))
+
+@(define parser-eval (make-base-eval '(require parser-tools/lex parser-tools/yacc)))
 
 @title{Parser Tools: @exec{lex} and @exec{yacc}-style Parsing}
 
@@ -33,9 +36,10 @@ style lexer and parser generators.
 @defform/subs[#:literals (repetition union intersection complement concatenation
                           char-range char-complement
                           eof special special-comment)
-              (lexer maybe-suppress-warnings [trigger action-expr] ...)
-              ([maybe-suppress-warnings (code:line)
-                                        #:suppress-warnings]
+              (lexer empty-match-mode [trigger action-expr] ...)
+              ([empty-match-mode (code:line)
+                                 #:disallow-empty
+                                 #:suppress-warnings]
                [trigger re
                         (eof)
                         (special)
@@ -158,36 +162,9 @@ are a few examples, using @racket[:] prefixed SRE syntax:
  @racket[complement].}
 ]
 
+  The @racket[start-pos], @racket[end-pos], @racket[lexeme], @racket[input-port], and @racket[return-without-pos]
+  forms have special meaning inside of a lexer.
 
-     The following binding have special meaning inside of a lexer
-     action:
-
-     @itemize[
-       @item{@racket[start-pos] --- a @racket[position] struct for the first character matched.}
-       @item{@racket[end-pos] --- a @racket[position] struct for the character after the last character in the match.}
-       @item{@racket[lexeme] --- the matched string.}
-       @item{@racket[input-port] --- the input-port being
-            processed (this is useful for matching input with multiple
-            lexers).}
-       @item{@racket[(return-without-pos x)] is a function (continuation) that
-	immediately returns the value of @racket[x] from the lexer.  This useful
-	in a src-pos lexer to prevent the lexer from adding source
-	information.  For example:
-
-	@racketblock[
-	(define get-token
-	  (lexer-src-pos
-	  ...
-	  ((comment) (get-token input-port))
-	  ...))
-	]
-
-	would wrap the source location information for the comment around
-	the value of the recursive call.  Using
-	@racket[((comment) (return-without-pos (get-token input-port)))] 
-	will cause the value of the recursive call to be returned without
-	wrapping position around it.}
-     ]
 
      The lexer raises an exception @racket[(exn:read)] if none of the
      regular expressions match the input.  Hint: If @racket[(any-char
@@ -244,10 +221,49 @@ are a few examples, using @racket[:] prefixed SRE syntax:
     bytecode file.
 
  If the lexer can accept the empty string, a message is sent
- to @racket[current-logger]. These warnings can be disabled
- by giving the @racket[#:suppress-warnings] flag.
+ to @racket[current-logger] by default. This warning can be disabled
+ by giving the @racket[#:suppress-warnings] flag, or it can be
+ turned into a syntax error by using @racket[#:disallow-empty].
 
- @history[#:changed "7.7.0.7" @elem{Add @racket[#:suppress-warnings] flag.}]}
+ @examples[#:eval parser-eval
+   (define sample-input "( lambda (a ) (add_number a 42  ))")
+   (code:comment @#,elem{A function that partially tokenizes the sample input data})
+   (define (get-tokens a-lexer)
+     (define p (open-input-string sample-input))
+     (list (a-lexer p)
+           (a-lexer p)
+           (a-lexer p)
+           (a-lexer p)
+           (a-lexer p)))
+   (code:comment @#,elem{A lexer that uses primitive operations directly})
+   (define the-lexer/primitive
+     (lexer
+       [(eof) eof]
+       ["(" 'left-paren]
+       [")" 'right-paren]
+       [(repetition 1 +inf.0 numeric) (string->number lexeme)]
+       [(concatenation (union alphabetic #\_)
+                       (repetition 0 +inf.0 (union alphabetic numeric #\_)))
+        lexeme]
+       (code:comment @#,elem{invoke the lexer again to skip the current token})
+       [whitespace (the-lexer/primitive input-port)]))
+   (get-tokens the-lexer/primitive)
+   (code:comment @#,elem{Another lexer that uses SRE operators but has the same functionality})
+   (require (prefix-in : parser-tools/lex-sre))
+   (define the-lexer/SRE
+     (lexer
+       [(eof) eof]
+       ["(" 'left-paren]
+       [")" 'right-paren]
+       [(:+ numeric) (string->number lexeme)]
+       [(:: (:or alphabetic #\_) (:* (:or alphabetic numeric #\_)))
+        lexeme]
+       [whitespace (the-lexer/SRE input-port)]))
+   (get-tokens the-lexer/SRE)
+ ]
+
+ @history[#:changed "7.7.0.7" @elem{Add @racket[#:suppress-warnings] flag.}
+          #:changed "9.0" @elem{Add @racket[#:disallow-empty] flag.}]}
 
 @defform[(lexer-src-pos maybe-suppress-warnings [trigger action-expr] ...)]{
 
@@ -256,16 +272,50 @@ an @racket[action-expr], returns @racket[(make-position-token
 _action-result start-pos end-pos)] instead of simply
 @racket[_action-result].}
 
-@deftogether[(
-@defidform[start-pos]
-@defidform[end-pos]
-@defidform[lexeme]
-@defidform[input-port]
-@defidform[return-without-pos]
-)]{
+@(define in-lexer-usage @elem{
+  Its use outside of a @racket[lexer] action is a syntax error.
+})
 
-Use of these names outside of a @racket[lexer] action is a syntax
-error.}
+@defidform[start-pos]{
+  Produces a @racket[position] struct for the first character matched.
+  @|in-lexer-usage|
+}
+
+@defidform[end-pos]{
+  Produces a @racket[position] struct for the character after the last character in the match.
+  @|in-lexer-usage|
+}
+
+@defidform[lexeme]{
+  Produces the matched string.
+  @|in-lexer-usage|
+}
+
+@defidform[input-port]{
+  Produces the input port being processed, which is particularly useful
+  for matching input with multiple lexers.
+  @|in-lexer-usage|
+}
+
+@defidform[return-without-pos]{
+  Produces a function (continuation) that
+  immediately returns its argument from the lexer.
+  This is useful in @racket[lexer-src-pos] to prevent the lexer from adding source
+  information. For example:
+  @racketblock[
+    (define get-token
+      (lexer-src-pos
+        ...
+        [(comment) (get-token input-port)]
+        ...))
+  ]
+  would wrap the source location information for the comment around
+  the value of the recursive call.  Using
+  @racket[[(comment) (return-without-pos (get-token input-port))]]
+  will cause the value of the recursive call to be returned without
+  wrapping position around it.
+  @|in-lexer-usage|
+}
 
 @defstruct[position ([offset exact-positive-integer?]
                      [line exact-positive-integer?]
@@ -455,8 +505,26 @@ The same as @racket[(complement re ...)].})))
 Each @racket[_action-expr] in a @racket[lexer] form can produce any
 kind of value, but for many purposes, producing a @deftech{token}
 value is useful. Tokens are usually necessary for inter-operating with
-a parser generated by @racket[parser-tools/parser], but tokens may not
-be the right choice when using @racket[lexer] in other situations.
+a parser generated by @racketmodname[parser-tools/yacc] or @racketmodname[parser-tools/cfg-parser],
+but tokens may not be the right choice when using @racket[lexer] in other situations.
+
+@examples[#:eval parser-eval
+  (define-tokens basic-tokens (NUM ID))
+  (define-empty-tokens punct-tokens (LPAREN RPAREN EOF))
+  (define the-lexer/tokens
+    (lexer
+      [(eof) (token-EOF)]
+      ["(" (token-LPAREN)]
+      [")" (token-RPAREN)]
+      [(:+ numeric) (token-NUM (string->number lexeme))]
+      [(:: (:or alphabetic #\_)
+           (:* (:or alphabetic numeric #\_)))
+       (token-ID (string->symbol lexeme))]
+      [whitespace (the-lexer/tokens input-port)]))
+
+  (code:comment @#,elem{Use @racket[get-tokens] defined in @secref["Creating_a_Lexer"]})
+  (get-tokens the-lexer/tokens)
+]
 
 @defform[(define-tokens group-id (token-id ...))]{
 
@@ -464,16 +532,15 @@ be the right choice when using @racket[lexer] in other situations.
    each @racket[token-id], a function
    @racketidfont{token-}@racket[token-id] is created that takes any
    value and puts it in a token record specific to @racket[token-id].
-   The token value is inspected using @racket[token-id] and
+   A token can be inspected using @racket[token-name] and
    @racket[token-value].
 
    A token cannot be named @racketidfont{error}, since
-   @racketidfont{error} it has special use in the parser.}
+   @racketidfont{error} has a special use in the parser.}
 
-@defform[(define-empty-tokens group-id (token-id ...) )]{
+@defform[(define-empty-tokens group-id (token-id ...))]{
 
-
-   Like @racket[define-tokens], except a each token constructor
+   Like @racket[define-tokens], but each token constructor
    @racketidfont{token-}@racket[token-id] takes no arguments and returns
    @racket[(@#,racket[quote] token-id)].}
 
@@ -494,6 +561,7 @@ be the right choice when using @racket[lexer] in other situations.
 
   Returns @racket[#t] if @racket[val] is a
   token structure, @racket[#f] otherwise.}
+
 
 @; ----------------------------------------------------------------------
 
@@ -549,11 +617,12 @@ be the right choice when using @racket[lexer] in other situations.
       Each action is Racket code that has the same scope as its
       parser's definition, except that the variables @racket[$1], ...,
       @racketidfont{$}@math{i} are bound, where @math{i} is the number
-      of @racket[grammar-id]s in the corresponding production. Each
-      @racketidfont{$}@math{k} is bound to the result of the action
-      for the @math{k}@superscript{th} grammar symbol on the right of
-      the production, if that grammar symbol is a non-terminal, or the
-      value stored in the token if the grammar symbol is a terminal.
+      of @racket[grammar-id]s in the corresponding production. If the
+      @math{k}@superscript{th} grammar symbol on the right of
+      the production is a non-terminal, @racketidfont{$}@math{k}
+      is bound to the result of its action; if it is a terminal,
+      @racketidfont{$}@math{k} is bound to the value stored in the
+      token.
       If the @racket[src-pos] option is present in the parser, then
       variables @racket[$1-start-pos], ...,
       @racketidfont{$}@math{i}@racketidfont{-start-pos} and
@@ -607,7 +676,7 @@ be the right choice when using @racket[lexer] in other situations.
       error.
 
       If the @racket[src-pos] declaration is present, the function
-      should accept 5 arguments,:
+      should accept 5 arguments:
 
       @racketblock[(lambda (tok-ok? tok-name tok-value _start-pos _end-pos) 
                      ....)]
@@ -623,7 +692,7 @@ be the right choice when using @racket[lexer] in other situations.
       the error was detected.  The fourth and fifth arguments, if
       present, provide the source positions of that token.
 
-      In both cases, the function is allowed to accept an additional keyword argument named @racket[#:stack]. This argument is a representation of the parsing automata's stack. This can, for example, be used to generate context-sensitive error messages as described in @link["https://dl.acm.org/citation.cfm?id=937563.937566"]{Generating LR syntax error messages from examples}, by Clinton L. Jeffrey.}
+      In both cases, the function is allowed to accept an additional keyword argument named @racket[#:stack]. This argument is a representation of the parsing automaton's stack. This can, for example, be used to generate context-sensitive error messages as described in @link["https://dl.acm.org/citation.cfm?id=937563.937566"]{Generating LR syntax error messages from examples}, by Clinton L. Jeffrey.}
 
       @item{@racket[(precs (assoc token-id ...) ...)]
       @italic{OPTIONAL}
@@ -701,17 +770,49 @@ be the right choice when using @racket[lexer] in other situations.
     @racket[parser] expression produces a list of parsing functions,
     one for each non-terminal in the same order. Each parsing function
     is like the result of a parser expression with only one
-    @racket[start] non-terminal,
+    @racket[start] non-terminal.
 
     Each time the Racket code for a @racket[parser] is compiled
     (e.g. when a @filepath{.rkt} file containing a @racket[parser] form
     is loaded), the parser generator is run.  To avoid this overhead
     place the parser into a module and compile the module to a
-    @filepath{.zo} bytecode file.}
+    @filepath{.zo} bytecode file.
 
-                                            
-                                            
-                                            
+
+    @examples[#:eval parser-eval
+      (code:comment #, @t{Use the lexer and tokens from @secref["Tokens"]})
+      (code:comment #, @t{and the sample input from @secref["Creating_a_Lexer"]})
+      (eval:alts
+       (define the-parser
+         (parser
+           [start #,(racketid expr)]
+           [end EOF]
+           [error void]
+           [tokens basic-tokens punct-tokens]
+           [grammar
+            [#,(racketid expr) [(LPAREN exprs RPAREN) $2]
+                  [(NUM) $1]
+                  [(ID) $1]]
+            [exprs [() '()]
+                   [(#,(racketid expr) exprs) (cons $1 $2)]]]))
+       (define the-parser
+         (parser
+           [start expr]
+           [end EOF]
+           [error void]
+           [tokens basic-tokens punct-tokens]
+           [grammar
+            [expr [(LPAREN exprs RPAREN) $2]
+                  [(NUM) $1]
+                  [(ID) $1]]
+            [exprs [() '()]
+                   [(expr exprs) (cons $1 $2)]]])))
+
+      (define p (open-input-string sample-input))
+      (the-parser (λ () (the-lexer/tokens p)))
+    ]
+}
+
 @section{Context-Free Parsers}
 
 @section-index["cfg-parser"]

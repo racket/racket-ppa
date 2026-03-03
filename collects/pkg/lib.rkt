@@ -27,7 +27,8 @@
          "private/catalog-archive.rkt"
          "private/suggestions.rkt"
          "private/archive.rkt"
-         "private/trash.rkt")
+         "private/trash.rkt"
+         "private/timeout.rkt")
   
 (define dep-behavior/c
   (or/c #f 'fail 'force 'search-ask 'search-auto))
@@ -70,6 +71,8 @@
    (parameter/c (or/c #f real?))]
   [current-pkg-network-retries
    (parameter/c (or/c #f real?))]
+  [current-pkg-network-timeout
+   (parameter/c (or/c #f real?))]
   [pkg-directory
    (->* (string?)
         (#:cache (or/c #f (and/c hash? (not/c immutable?))))
@@ -101,7 +104,8 @@
                   #:mode (or/c 'as-is 'source 'binary 'binary-lib 'built)
                   #:quiet? boolean?
                   #:from-command-line? boolean?
-                  #:dest (or/c (and/c path-string? complete-path?) #f))
+                  #:dest (or/c (and/c path-string? complete-path?) #f)
+                  #:original (or/c string? #f))
         void?)]
   [pkg-update
    (->* ((listof (or/c string? pkg-desc?)))
@@ -181,6 +185,8 @@
                         #:force-strip? boolean?
                         #:dry-run? boolean?)
         (or/c #f 'skip (listof (or/c path-string? (non-empty-listof path-string?)))))]
+  [pkg-migrate-available-versions
+   (-> (listof string?))]
   [pkg-catalog-show
    (->* ((listof string?))
         (#:all? boolean?
@@ -278,7 +284,7 @@
                 (listof module-path?)
                 any/c))]
   [extract-pkg-dependencies
-   (->* ((symbol? (-> any/c) . -> . any/c))
+   (->* ((or/c #f (symbol? (-> any/c) . -> . any/c)))
         (#:build-deps? boolean?
                        #:filter? boolean?
                        #:versions? boolean?)
@@ -298,4 +304,8 @@
                                            (#:namespace namespace?
                                                         #:system-type (or/c #f symbol?)
                                                         #:system-library-subpath (or/c #f path-for-some-system?))
-                                           (listof (cons/c symbol? string?)))]))
+                                           (listof (cons/c symbol? string?)))]
+
+  [call-in-pkg-timeout-sandbox (->* ((-> any))
+                                    (#:make-exn (-> string? continuation-mark-set? any/c))
+                                    any)]))

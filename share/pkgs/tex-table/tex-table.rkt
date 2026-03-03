@@ -1,5 +1,5 @@
 #lang racket/base
-(require racket/contract)
+(require racket/contract racket/match)
 
 (define (string-len-one? x)
   (and (string? x)
@@ -9,7 +9,36 @@
  [tex-shortcut-table
   (listof (list/c string? string-len-one?))])
 
+(define blackboard-bold
+  (append
+   (for*/list ([i (in-string "ABCDEFGHIJKLMNOPQRSTUVWXYZ")]
+               [case (in-list '(lower upper))])
+     (cond
+       [(and (equal? case 'upper) (member i (string->list "CHNPQRZ")))
+        (list (format "b~a" i)
+              (match i
+                [#\C "ℂ"]
+                [#\H "ℍ"]
+                [#\N "ℕ"]
+                [#\P "ℙ"]
+                [#\Q "ℚ"]
+                [#\R "ℝ"]
+                [#\Z "ℤ"]))]
+       [else
+        (define bo (match case
+                     ['upper (- (char->integer #\𝔸) (char->integer #\A))]
+                     ['lower (- (char->integer #\𝕒) (char->integer #\A))]))
+        (define co (match case
+                     ['upper 0]
+                     ['lower (- (char->integer #\a) (char->integer #\A))]))
+        (list (format "b~a" (integer->char (+ (char->integer i) co)))
+              (string (integer->char (+ (char->integer i) bo))))]))
+   (for/list ([i (in-inclusive-range 0 9)])
+     (list (format "b~a" i)
+           (string (integer->char (+ (char->integer #\𝟘) i)))))))
+
 (define tex-shortcut-table
+  (append
   '(("Downarrow" "⇓")
     ("nwarrow" "↖")
     ("downarrow" "↓")
@@ -133,6 +162,7 @@
     ("land" "∧")
     ("lnot" "¬")
     ("triangleleft" "◃")
+    ("angle" "∠")
     ("odot" "⊙")
     ("star" "★")
     ("dagger" "†")
@@ -157,6 +187,8 @@
     ("simeq" "≃")
     ("ll" "≪")
     ("gg" "≫")
+    ("guillemetleft" "«")
+    ("guillemetright" "»")
     ("asymp" "≍")
     ("parallel" "∥")
     ("subset" "⊂")
@@ -165,6 +197,8 @@
     ("bowtie" "⋈")
     ("subseteq" "⊆")
     ("supseteq" "⊇")
+    ("nsubseteq" "⊈")
+    ("subsetneq" "⊊")
     ("cong" "≅")
     ("sqsubsetb" "⊏")
     ("sqsupsetb" "⊐")
@@ -186,7 +220,11 @@
     ("coprod" "∐")
     
     ("int" "∫")
+    ("iint" "∬")
+    ("iiint" "∭")
     ("oint" "∮")
+    ("oiint" "∯")
+    ("oiiint" "∰")
 
     ("sqrt" "√")
     
@@ -194,10 +232,12 @@
     ("smiley" "☺")
     ("blacksmiley" "☻")
     ("frownie" "☹")
-    
+
+    ("Re" "ℜ")
+    ("Im" "ℑ")
     ("S" "§")
     ("l" "ł")
-    
+
     ("newpage" "\f")
     
     ("vdots" "⋮")
@@ -217,10 +257,10 @@
     ("leftmultimap" "⟜")
     ("multimapinv" "⟜")
     ("leftlollipop" "⟜")
-    ))
+    )
+  blackboard-bold))
 
 (module+ test
-  (require racket/match)
   (define name-ht (make-hash))
   (define val-ht (make-hash))
   (for ([line (in-list tex-shortcut-table)])

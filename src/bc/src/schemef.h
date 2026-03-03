@@ -273,6 +273,7 @@ MZ_EXTERN Scheme_Object *scheme_multiple_values;
 
 MZ_EXTERN unsigned short *scheme_uchar_table[];
 MZ_EXTERN unsigned char *scheme_uchar_cases_table[];
+MZ_EXTERN unsigned char *scheme_uchar_graphbreaks_table[];
 MZ_EXTERN unsigned char *scheme_uchar_cats_table[];
 MZ_EXTERN int scheme_uchar_ups[];
 MZ_EXTERN int scheme_uchar_downs[];
@@ -1111,10 +1112,12 @@ MZ_EXTERN int scheme_impersonator_of(Scheme_Object *obj1, Scheme_Object *obj2);
 XFORM_NONGCING MZ_EXTERN intptr_t scheme_hash_key(Scheme_Object *o);
 #endif
 MZ_EXTERN intptr_t scheme_equal_hash_key(Scheme_Object *o);
+MZ_EXTERN intptr_t scheme_equal_hash_key_recur(Scheme_Object *o, Scheme_Object *r);
 MZ_EXTERN intptr_t scheme_equal_hash_key2(Scheme_Object *o);
 MZ_EXTERN intptr_t scheme_recur_equal_hash_key(Scheme_Object *o, void *cycle_data);
 MZ_EXTERN intptr_t scheme_recur_equal_hash_key2(Scheme_Object *o, void *cycle_data);
 MZ_EXTERN intptr_t scheme_equal_always_hash_key(Scheme_Object *o);
+MZ_EXTERN intptr_t scheme_equal_always_hash_key_recur(Scheme_Object *o, Scheme_Object *r);
 MZ_EXTERN intptr_t scheme_equal_always_hash_key2(Scheme_Object *o);
 XFORM_NONGCING MZ_EXTERN intptr_t scheme_eqv_hash_key(Scheme_Object *o);
 XFORM_NONGCING MZ_EXTERN intptr_t scheme_eqv_hash_key2(Scheme_Object *o);

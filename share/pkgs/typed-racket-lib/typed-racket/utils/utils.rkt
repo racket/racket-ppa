@@ -5,10 +5,13 @@ This file is for utilities that are of general interest,
 at least theoretically.
 |#
 
-(require (for-syntax racket/base racket/string)
+(require (for-syntax racket/base
+                     racket/match
+                     racket/string)
          racket/require-syntax racket/provide-syntax
          racket/match
          racket/list
+         racket/format
          syntax/parse/define
          "timing.rkt")
 
@@ -26,6 +29,7 @@ at least theoretically.
  repeat-list
  ends-with?
  filter-multiple
+ rev-append
  syntax-length
  in-pair
  in-list/rest
@@ -36,11 +40,19 @@ at least theoretically.
  assoc-ref
  assoc-set
  assoc-remove
+ debug-print
  in-assoc)
 
 (define optimize? (make-parameter #t))
 (define with-refinements? (make-parameter #f))
-(define-for-syntax enable-contracts? (and (getenv "PLT_TR_CONTRACTS") #t))
+(define-for-syntax enable-contracts?
+  (match (getenv "PLT_TR_CONTRACTS")
+    ["true" #true]
+    [(or "false" "" #false) #false]))
+
+(define-logger tr-debug)
+(define (debug-print format-string . vs)
+  (log-message tr-debug-logger 'debug 'tr (apply format format-string vs)))
 
 (define-syntax do-contract-req
   (if enable-contracts?
@@ -168,7 +180,7 @@ at least theoretically.
        (begin (define (name . args) . body)
               (provide name)))]))
 
-(define-simple-macro (define/cond-contract/provide (name:id . args) c . body)
+(define-syntax-parse-rule (define/cond-contract/provide (name:id . args) c . body)
   (begin (define (name . args) . body)
          (provide/cond-contract [name c])))
 
@@ -240,6 +252,10 @@ at least theoretically.
 (define (filter-multiple l . fs)
   (apply values
          (map (lambda (f) (filter f l)) fs)))
+
+(define (rev-append a* b*)
+  (let loop ((a* a*) (b* b*))
+    (if (null? a*) b* (loop (cdr a*) (cons (car a*) b*)))))
 
 (define (syntax-length stx)
   (let ((list (syntax->list stx)))
@@ -361,10 +377,9 @@ at least theoretically.
 
 ;; quick in-list/rest and in-list-cycle sanity checks
 (module+ test
-  (unless (equal? (for/list ([_ (in-range 0)]
-                             [val (in-list/rest (list 1 2) #f)])
-                    val)
-                  (list))
+  (unless (null? (for/list ([_ (in-range 0)]
+                            [val (in-list/rest (list 1 2) #f)])
+                   val))
     (error 'in-list/rest "broken!"))
   (unless (equal? (for/list ([_ (in-range 2)]
                              [val (in-list/rest (list 1 2) #f)])
@@ -430,20 +445,20 @@ at least theoretically.
     (cond
       [(null? entries) (list (cons key val))]
       [else
-       (let ([entry (car entries)])
-         (if (equal? (car entry) key)
-             (cons (cons key val) (cdr entries))
-             (cons entry (loop (cdr entries)))))])))
+       (define entry (car entries))
+       (if (equal? (car entry) key)
+           (cons (cons key val) (cdr entries))
+           (cons entry (loop (cdr entries))))])))
 
 (define (assoc-remove d key)
   (let loop ([xd d])
     (cond
       [(null? xd) null]
       [else
-       (let ([a (car xd)])
-         (if (equal? (car a) key)
-             (cdr xd)
-             (cons a (loop (cdr xd)))))])))
+       (define a (car xd))
+       (if (equal? (car a) key)
+           (cdr xd)
+           (cons a (loop (cdr xd))))])))
 
 (define (in-assoc-proc l)
   (in-parallel (map car l) (map cdr l)))

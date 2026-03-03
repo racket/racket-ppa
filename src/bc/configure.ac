@@ -48,6 +48,7 @@ AC_ARG_ENABLE(lt,      [  --enable-lt=<prog>      use <prog> instead of libtool;
 m4_include(../ac/instlib_arg.m4)
 
 AC_ARG_ENABLE(libffi,  [  --enable-libffi         use installed libffi (enabled by default for Unix)], , enable_libffi=default)
+m4_include(../ac/iconv_arg.m4)
 m4_include(../ac/curses_arg.m4)
 
 m4_include(../ac/sdk_arg.m4)
@@ -240,6 +241,7 @@ if test "${enable_racket}" != "" ; then
 fi
 
 m4_include(../ac/path_pkgscope.m4)
+m4_include(../ac/pkgs_show.m4)
 
 m4_include(../ac/crossany.m4)
 
@@ -270,12 +272,17 @@ WINDRES=windres
 DLLTOOL=dlltool
 
 PREFLAGS="$CPPFLAGS"
+if test "$CPPFLAGS_ADD" != "" ; then
+   PREFLAGS="$PREFLAGS $CPPFLAGS_ADD"
+fi
 COPY_NEW_CFLAGS_TO_CPPFLAGS=yes
 
 OWN_LIBFFI="ON"
 
 ar_libtool_no_undefined=""
 LIBRACKET_DEP=""
+
+dist_install_missing_pkgs=no
 
 EXE_SUFFIX=
 SO_SUFFIX=.so
@@ -433,6 +440,8 @@ if test "$ARFLAGS" = '' ; then
 fi
 SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} AR_FLAGS="'"'"${ARFLAGS}"'"'
 
+m4_include(../ac/add_c_flags.m4)
+
 is_gmake=`make -v no-such-target-we-hope 2>&1 | grep "GNU Make"`
 
 m4_include(../ac/is_gcc.m4)
@@ -521,6 +530,7 @@ case "$host_os" in
     check_gcc_dash_e="yes"
     use_flag_pthread="no"
     use_flag_posix_pthread="yes"
+    strip_needs_dash_s="no"
     ;;
   aix*)
     enable_cgcdefault="yes"
@@ -545,8 +555,8 @@ case "$host_os" in
     ;;
   netbsd*)
     LIBS="$LIBS -rdynamic"
-    skip_curses_check=yes
-    add_curses_lib="/usr/pkg/lib/libncurses.a"
+    skip_iconv_check=yes
+    add_curses_lib="-lterminfo"
     default_post_linker="paxctl +m"
     ;;
   irix*)
@@ -557,7 +567,7 @@ case "$host_os" in
       X_PRE_LIBS=""
     fi
     ;;
-  linux*)
+  linux*|gnu*)
     LIBS="$LIBS -ldl -lm -lrt -rdynamic"
     DYN_CFLAGS="-fPIC"
     curses_portable_link="/usr/lib/${host_cpu}-${host_os}/libncurses.a /usr/lib/${host_cpu}-${host_os}/libtermcap.a"
@@ -609,8 +619,11 @@ case "$host_os" in
     mzrt_needs_pthread=no
     use_flag_pthread=no
     skip_curses_check=yes
+    dist_install_missing_pkgs=yes
+    update_guibin_default_as_root
     MZOPTIONS="$MZOPTIONS -fno-omit-frame-pointer" # to make JIT backtraces work
     MINGW="t"
+    WXVARIANT="wx_win"
     MZINSTALLTARGET=mingw-install
     MZINSTALLBINDIR="${MZINSTALLBINDIR}/.."
     EXE_SUFFIX=".exe"
@@ -707,17 +720,15 @@ case "$host_os" in
         FRAMEWORK_INSTALL_DIR='${libpltdir}'
         FRAMEWORK_REL_INSTALL=yes
       fi
-      if test "${enable_embedfw}" = "yes" ; then
-        strip_needs_dash_s=yes
-      fi
       # ".a" is typically not useful, since we always build a ".dylib":
       if test "${enable_libs}" = "" ; then
         INSTALL_LIBS_ENABLE=no-install
       fi
+      dist_install_missing_pkgs=yes
+      update_guibin_default_as_root
     else
       PREFLAGS="$PREFLAGS -DXONX "
       LIBS="$LIBS -framework CoreFoundation"
-      strip_needs_dash_s=yes
     fi
     # ncurses.h is always available, except on iOS
     if test "${enable_ios}" != "" ; then
@@ -1221,8 +1232,18 @@ fi
 
 ############## natipkg ################
 
+m4_include(../ac/natipkg.m4)
+
 if test "${enable_natipkg}" = "yes" ; then
   AC_DEFINE(SPLS_SUFFIX,"-natipkg",[Library subpath suffix])
+  dist_install_missing_pkgs=yes
+fi
+if test "${enable_nonatipkg}" = "yes" ; then
+  AC_DEFINE(SPLS_SUFFIX,"-nonatipkg",[Library subpath suffix])
+  dist_install_missing_pkgs=no
+fi
+if test "${enable_sofind}" != "" ; then
+  AC_DEFINE_UNQUOTED(SPLS_SUFFIX,"-${enable_sofind}",[Library subpath suffix])
 fi
 
 ############## Racket for Racket ################
@@ -1323,6 +1344,10 @@ fi
 if test "${enable_werror}" = "yes"; then
   CFLAGS="-Werror ${CFLAGS}"
 fi
+
+############## packages ################
+
+m4_include(../ac/pkgs.m4)
 
 ############## subconfigures ################
 
@@ -1477,7 +1502,12 @@ AC_SUBST(INSTALL_NAME_TOOL)
 AC_SUBST(LIBFFI_CONFIGURE_ARGS)
 AC_SUBST(RKTIO_CONFIGURE_ARGS)
 
+AC_SUBST(INSTALL_PKGS)
+AC_SUBST(INSTALL_MISSING_PKGS)
+AC_SUBST(INSTALL_PKG_CATALOG)
+
 AC_SUBST(CC_FOR_BUILD)
+AC_SUBST(CFLAGS_FOR_BUILD)
 AC_SUBST(upsrcdir)
 
 makefiles="Makefile"
@@ -1490,3 +1520,5 @@ AC_OUTPUT($makefiles)
 # cd rktio; eval "${abssrcdir}/../rktio/configure ${keep_configure_args} ${SUB_CONFIGURE_EXTRAS}"
 
 cp ${srcdir}/buildmain.zuo main.zuo
+
+show_path_results

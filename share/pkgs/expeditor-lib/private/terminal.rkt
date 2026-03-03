@@ -7,6 +7,7 @@
 (provide
  (protect-out init-term
               $ee-read-char/blocking
+              $ee-pending-winch?
               $ee-write-char
               char-width
               set-color
@@ -44,10 +45,16 @@
 
 (define init-term terminal-init)
 (define $ee-read-char/blocking terminal-read-char)
+(define $ee-pending-winch? terminal-pending-winch?)
 (define $ee-write-char (lambda (c)
                          (define w (terminal-write-char c))
-                         (hash-set! char-widths c w)
-                         w))
+			 (cond
+			  [(= w -128)
+			   ;; -128 mean "unknown"
+			   1]
+			  [else
+			   (hash-set! char-widths c w)
+			   w])))
 (define char-width (lambda (c)
                      ;; we're only set up to handle characters
                      ;; that are non-negative sized, so we don't

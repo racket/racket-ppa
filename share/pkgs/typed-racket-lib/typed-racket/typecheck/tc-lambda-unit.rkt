@@ -1,6 +1,7 @@
 #lang racket/unit
 
 (require "../utils/utils.rkt"
+         "../utils/plambda-utils.rkt"
          racket/list syntax/parse syntax/stx
          racket/match syntax/private/id-table
          racket/sequence
@@ -125,6 +126,7 @@
          #:types types]
       (tc-body/check body expected))
     arg-names #:rest-id rst-id)
+   #:T+ #true ;; shallow can trust the results of a literal lambda
    #:rest rst-type))
 
 ;; check-clause: Checks that a lambda clause has arguments and body matching the expected type
@@ -334,7 +336,7 @@
       [_ #f]))
 
   (cond
-    [(and (> (free-id-table-count aux-table) 0) (not rest-id))
+    [(and (positive? (free-id-table-count aux-table)) (not rest-id))
      (tc/opt-lambda-clause arg-list body aux-table)]
     [else
      (define arg-types (get-types arg-list #:default (lambda () #f)))
@@ -682,40 +684,6 @@
            (cons (make-formals f not-in-poly) b))
          expected))]))
 
-(define (plambda-prop stx)
-  (define d (plambda-property stx))
-  (and d (car (flatten d))))
-
-(define (has-poly-annotation? form)
-  (or (plambda-prop form) (pair? (lookup-scoped-tvar-layer form))))
-
-(define (remove-poly-layer tvarss)
-  (filter pair? (map rest tvarss)))
-
-(define (get-poly-layer tvarss)
-  (map car tvarss))
-
-(define (get-poly-tvarss form)
-  (let ([plambda-tvars
-          (let ([p (plambda-prop form)])
-            (match (and p (map syntax-e (syntax->list p)))
-              [#f #f]
-              [(list var ... dvar '...)
-               (list (list var dvar))]
-              [(list id ...)
-               (list id)]))]
-        [scoped-tvarss
-          (for/list ((tvarss (in-list (lookup-scoped-tvar-layer form))))
-            (for/list ((tvar (in-list tvarss)))
-              (match tvar
-                [(list (list v ...) dotted-v)
-                 (list (map syntax-e v) (syntax-e dotted-v))]
-                [(list v ...) (map syntax-e v)])))])
-    (if plambda-tvars
-        (cons plambda-tvars scoped-tvarss)
-        scoped-tvarss)))
-
-
 ;; tc/plambda syntax tvarss-list syntax-list syntax-list type -> Poly
 ;; formals and bodies must by syntax-lists
 (define/cond-contract (tc/plambda form tvarss-list formals bodies expected)
@@ -829,7 +797,9 @@
 ;; Returns both the tc-results of the function and of the body
 (define (tc/rec-lambda/check formals* body name args return)
   (define formals (syntax->list formals*))
-  (define ft (t:->* args (tc-results->values return)))
+  (define ft (if return
+		 (t:->* args (tc-results->values return))
+		 (t:->* args ManyUniv)))
   (define names (cons name formals))
   (with-extended-lexical-env
     [#:identifiers (cons name formals)

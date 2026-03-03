@@ -42,10 +42,52 @@ rule can call @racket[build] to start a nested build, or it can call
 @racket[build/dep] to build or register a dependency that is
 discovered in the process of building.
 
+Here's an example of a Zuo script to build @filepath{demo} by
+compiling and linking @filepath{main.c} and @filepath{helper.c}:
+
+@racketblock[
+@#,hash-lang[] zuo
+
+(provide-targets targets-at)
+
+(define (targets-at at-dir vars)
+  (define demo (at-dir (.exe "demo")))
+
+  (define main.c (at-source "main.c"))
+  (define main.o (at-dir (.c->.o "main.c")))
+
+  (define helper.c (at-source "helper.c"))
+  (define helper.o (at-dir (.c->.o "helper.c")))
+
+  (make-targets
+   `([:target ,demo (,main.o ,helper.o)
+              ,(lambda (dest token)
+                 (c-link dest (list main.o helper.o) vars))]
+     [:target ,main.o (,main.c)
+              ,(lambda (dest token)
+                 (c-compile dest main.c vars))]
+     [:target ,helper.o (,helper.c)
+              ,(lambda (dest token)
+                 (c-compile dest helper.c vars))]
+     [:target clean ()
+              ,(lambda (token)
+                 (for-each rm* (list main.o helper.o demo)))])))
+]
+
+Although the @racket[make-targets] function takes a makefile-like
+description of targets and dependencies, this script is still much
+more verbose than a Unix-specific makefile that performs the same
+task. Zuo is designed to support the kind of syntactic abstraction
+that could make this script compact, but the current implementation is
+aimed at build tasks that are larger and more complex. In those cases,
+it's not just a matter of dispatching to external tools like a C
+compiler, and most Zuo code ends up in helper functions and libraries
+outside the @racket[make-targets] form.
+
 @section[#:tag "make-target"]{Creating Targets}
 
 Construct a @deftech{target} with either @racket[input-file-target]
-(given a file name), @racket[input-data-target] (given a value whose
+(given a filename), @racket[input-data-target] (given a value whose
 @racket[~s] form is hashed), or @racket[target] (given a filename for a
 real target or a symbol for a @tech{phony} target).
 
@@ -64,9 +106,9 @@ build together determine that a rebuild is needed.
 
 When a target's @racket[_rebuild] function is called, it optionally
 returns a hash for the result of the build if the target's
-@racket[rule] had one, otherwise @racket[file-sha256] is used to get a
+@racket[rule] has one, otherwise @racket[file-sha256] is used to get a
 result hash. Either way, it's possible that the result hash is the
-same the one returned by @racket[_get-rule]; that is, maybe a
+same as the one returned by @racket[_get-rule]; that is, maybe a
 dependency of the target changed, but the change turned out not to
 affect the built result. In that case, rebuilding for other targets
 that depend on this one can be short-circuited.
@@ -75,7 +117,7 @@ Finally, in the process of building a target, a @racket[_rebuild]
 procedure may discover additional dependencies. A discovered
 dependency sent to @racket[build/dep] is recorded as a dependency of
 the target in addition to the ones that were reported by
-@racket[_get-deps]. Any changes in these additional targets trigger a
+@racket[_get-rule]. Any changes in these additional targets trigger a
 rebuild of the target in the future. Meanwhile, the build system
 assumes that if none of the dependencies change, then the set of
 additional dependencies discovered by @racket[_rebuild] would be the
@@ -101,13 +143,13 @@ shorthand for applying @racket[input-file-target] to the path string.
 
 There is no global list of targets that @racket[build] draws from.
 Instead, @racket[build] starts with a given target, and it learns
-about other targets a @racket[_get-dep] procedures return them and as
+about other targets as @racket[_get-dep] procedures return them and as
 @racket[_rebuild] procedures expose them via @racket[build/dep]. If
 @racket[build] discovers multiple non-input targets with the same
 filename, then it reports an error.
 
 The @racket[build/command-line] function is a convenience to implement
-get @exec{make}-like command-line handling for building targets. The
+@exec{make}-like command-line handling for building targets. The
 @racket[build/command-line] procedure takes a list of targets, and it
 calls @racket[build] on one or more of them based on command-line
 arguments (with help from @racket[find-target]).
@@ -161,7 +203,7 @@ have the generated @filepath{main.zuo} read from that file. The
 if @filepath{Mf-config} is written in the same directory with a
 @litchar{srcdir=} line to specify the source directory (where no
 escapes are needed for the path after @litchar{=}), then a
-@filepath{mzin.zuo} of them form
+@filepath{main.zuo} of the form
 
 @racketblock[
 @#,hash-lang[] @#,racketmodname[zuo]
@@ -201,17 +243,18 @@ targets that it creates.
 @section{Parallelism}
 
 A build runs in a @tech{threading context}, so a target's
-@racket[_get-deps] or @racket[_rebuild] procedure can use
-@racket[thread-process-wait] can be used to wait on a process. Doing
+@racket[_get-rule] or @racket[_rebuild] procedure can use
+@racket[thread-process-wait] to wait on a process. Doing
 so can enable parallelism among targets, depending on the
 @racket['jobs] option provided to @racket[build] or
 @racket[build/command-line], a @DFlag{jobs} command-line argument
-parsed by @racket[build/command-line], or the @envvar{ZUO_JOBS}
-environment variable.
+parsed by @racket[build/command-line], a jobserver configuration as
+provided by GNU make and communicated through the @envvar{MAKEFLAGS}
+environment variable, or the @envvar{ZUO_JOBS} environment variable.
 
 When calling @racket[build] for a nested build from a target's
-@racket[_get-deps] or @racket[_rebuild] procedures, supply the
-@tech{build token} that is passed to @racket[_get-deps] to the
+@racket[_get-rule] or @racket[_rebuild] procedures, supply the
+@tech{build token} that is passed to @racket[_get-rule] to the
 @racket[build] call. That way, parallelism configured for the
 enclosing build will be extended to the nested build.
 
@@ -260,11 +303,11 @@ not need to be globally unique.}
 
 
 @defproc*[([(target [name path-string?]
-                    [get-deps (path-string? token? . -> . rule?)]
+                    [get-rule (path-string? token? . -> . rule?)]
                     [options hash? (hash)])
             target?]
            [(target [name symbol?]
-                    [get-deps (token? . -> . phony-rule?)]
+                    [get-rule (token? . -> . phony-rule?)]
                     [options hash? (hash)])
             target?])]{
 
@@ -273,11 +316,11 @@ is a path string, then it represents a file build target whose results
 are recorded to avoid rebuilding. If @racket[name] is a symbol, then
 it represents a @tech{phony} target that is always rebuilt.
 
-In the case of a file target, @racket[get-deps] receives @racket[name]
+In the case of a file target, @racket[get-rule] receives @racket[name]
 back, because that's often more convenient for constructing a target
 when applying an @racket[_at-dir] function to create @racket[name].
 
-The @deftech{build token} argument to @racket[get-deps] represents the
+The @deftech{build token} argument to @racket[get-rule] represents the
 target build in progress. It's useful with @racket[file-sha256] to take
 advantage of caching, with @racket[build/dep] to report
 discovered targets, and with @racket[build/no-dep] or @racket[build].
@@ -294,13 +337,13 @@ The following keys are recognized in @racket[options]:
 
 @item{@racket['precious?] mapped to any value: if non-@racket[#f] for
       a non-phony target, @racket[name] is not deleted if the
-      @racket[get-deps] function or its result's @racket[_rebuild]
+      @racket[get-rule] function or its result's @racket[_rebuild]
       function fails.}
 
 @item{@racket['command?] mapped to any value: if non-@racket[#f], when
       @racket[build/command-line] runs the target as the first one
       named on the command line, all arguments from the command line
-      after the target name are provided @racket[_get-deps] as
+      after the target name are provided @racket[_get-rule] as
       additional arguments. When building a target directly instead
       of through @racket[build/command-line], use
       @racket[command-target->target] to supply arguments.}
@@ -317,16 +360,23 @@ The following keys are recognized in @racket[options]:
       its dependencies as quiet.}
 
 @item{@racket['eager?] mapped to any value: if non-@racket[#f], then
-      the target's build step is not run in a separate thread, which
-      has the effect of ordering the build step before others that do
+      the target's rule is not run in a separate thread, which
+      has the effect of ordering the rule before others that do
       run in a separate thread.}
+
+@item{@racket['recur?] mapped to any value: if non-@racket[#f], then
+      the target's rule is run in dry-run modes of @racket[build] the
+      same as non-dry-run modes. This option is analogous to prefixing
+      a command with @litchar{+} in a makefile.}
 
 @item{@racket['db-dir] mapped to a path or @racket[#f]: if
       non-@racket[#f], build information for the target is stored in
       @filepath{_zuo.db} and @filepath{_zuo_tc.db} files in the
-      specified directory, instead of the directory of @racket[path].}
+      specified directory, instead of the directory of @racket[name].}
 
-]}
+]
+
+@history[#:changed "1.8" @elem{Added @racket['recur?] for @racket[options].}]}
 
 @deftogether[(
 @defproc[(rule [dependencies (listof (or/c target? path-string?))]
@@ -388,19 +438,32 @@ following keys are recognized:
 @item{@racket['jobs] mapped to a positive integer: controls the
       maximum build steps that are allowed to proceed concurrently,
       and this concurrency turns into parallelism when a task uses a
-      process and @racket[thread-process-wait]; the @envvar{ZUO_JOBS}
-      environment variable determines the default if it is set,
-      otherwise the default is 1}
+      process and @racket[thread-process-wait]; if @racket['jobs] is
+      not mapped, a jobserver is used if found via
+      @racket[maybe-jobserver-client]; otherwise, the default is the
+      value of the @envvar{ZUO_JOBS} environment variable if it is
+      set, @racket[1] if not}
 
 @item{@racket['log?] mapped to any value: enables logging of rebuild
       reasons via @racket[alert] when the value is not @racket[#f];
       logging also can be enabled by setting the
       @envvar{ZUO_BUILD_LOG} environment variable}
 
+@item{@racket['dry-run-mode] mapped to @racket[#f], @racket['question], or
+      @racket['dry-run]: enables ``dry run'' mode when
+      non-@racket[#f]; when the value is @racket['dry-run],
+      @racket[build] prints targets whose rules would be run (without
+      running them); when the value is @racket['question],
+      @racket[build] does not rules, but  exits with
+      @racket[1] when some target's rule would be run; a @tech{target}
+      can be made immune to dry-run mode through a @racket['recur?]
+      option; when @racket['dry-run] is not set in @racket[options],
+      the mode is determined by calling @racket[maybe-dry-run-mode]}
+
 ]
 
 If @racket[token] is not @racket[#f], it must be a @tech{build token}
-that was passed to a target's @racket[_get-deps] to represent a build
+that was passed to a target's @racket[_get-rule] to represent a build
 in progress (but paused to run this one). The new build process uses
 parallelism available within the in-progress build for the new build
 process.
@@ -412,15 +475,21 @@ this one might check the states of some of the same files, but any
 triggered actions are separate, and @tech{phony} targets are similarly
 triggered independently. Use @racket[build/dep] or
 @racket[build/no-dep], instead, to recursively trigger targets within
-the same build.}
+the same build.
+
+@history[#:changed "1.1" @elem{Use @racket[maybe-jobserver-client] if
+                               @racket['jobs] is not set in
+                               @racket[options].}
+         #:changed "1.8" @elem{Added support for @racket['dry-run-mode]
+                               in @racket[options].}]}
 
 
 @defproc[(build/dep [target (or target? path-string?)] [token token?]) void?]{
 
 Like @racket[build], but continues a build in progress as represented
-by a @racket[token] that was passed to a target's @racket[_get-deps]
+by a @racket[token] that was passed to a target's @racket[_get-rule]
 or @racket[_rebuild] procedure. Targets reachable through
-@racket[target] may have been built or have be in progress already,
+@racket[target] may have been built or have been in progress already,
 for example. After @racket[target] is built, it is registered as a
 dependency of the target that received @racket[token] (if the target
 is not @tech{phony}).}
@@ -438,17 +507,19 @@ similar to @hyperlink[shake-url]{Shake}'s ``order only'' dependencies.}
 Parses command-line arguments to build one or more targets in
 @racket[targets], where the first one is built by default. The
 @racket[options] argument is passed along to @racket[build], but may
-be adjusted via command-line flags such as @DFlag{jobs}.
+be adjusted via command-line flags such as @DFlag{jobs}, @Flag{n},
+or @Flag{q}.
 
 If @racket[options] has a mapping for @racket['args], the value is
 used as the command-line arguments to parse instead of
-@racket[(hash-ref (system-env) 'args)]. If @racket[options] has a
+@racket[(hash-ref (runtime-env) 'args)]. If @racket[options] has a
 mapping for @racket['usage], the value is used as the usage options
 string.}
 
 
-@defproc[(build/command-line* [targets-at (procedure? hash? . -> . (listof target?))]
-                              [at-dir (path-string? ... . -> . path-string?) build-path]
+@defproc[(build/command-line* [targets-at ((path-string? ... . -> . path-string?) hash?
+                                           . -> . (listof target?))]
+                              [at-dir (path-string? ... . -> . path-string?) (make-at-dir ".")]
                               [options hash? (hash)])
          void?]{
 
@@ -460,27 +531,27 @@ assignments, where @nonterm{name} is formed by @litchar{a}-@litchar{z},
 not starting @litchar{0}-@litchar{9}. These variables can appear
 anywhere in the command line and are removed from the argument list
 sent on to @racket[build/command-line], but no argument after a
-@racket{--} argument is parsed as a variable assignment.
+@litchar{--} argument is parsed as a variable assignment.
 
 The @racket[targets-at] procedure is applied to @racket[at-dir] and a
 hash table of variables, where each variable name is converted to a
-symbol and the value is left exact as after @litchar{=}.}
+symbol and the value is left exactly as after @litchar{=}.}
 
 @defproc[(find-target [name string?]
                       [targets (listof target?)]
-                      [fail-k procedure? (lambda () (error ....))])
+                      [fail-k (-> any/c) (lambda () (error ....))])
          (or/c target? #f)]{
 
 Finds the first target in @racket[targets] that is a match for
 @racket[name], returning @racket[#f] is not match is found. A
-@racket[name] matches when it is the same as n entire symbol or path
+@racket[name] matches when it is the same as an entire symbol or path
 target name or when it matches a suffix that is preceded by
 @litchar{/} or @litchar{\\}. If no match is found, @racket[fail-k]
 is called in tail position.}
 
-@defproc[(make-at-dir [path path-string?]) (path-string?  ... . -> . path-string?)]{
+@defproc[(make-at-dir [path path-string?]) (path-string? ... . -> . path-string?)]{
 
-Creates a function that is similar to on created by @racket[at-source],
+Creates a function that is similar to one created by @racket[at-source],
 but relative to @racket[path].}
 
 @deftogether[(
@@ -497,7 +568,7 @@ target is built.}
 
 @deftogether[(
 @defproc[(file-sha256 [file path-string?] [token (or/c token? #f)]) sha256?]
-@defproc[(sha256? [v any/c]) booelan?]
+@defproc[(sha256? [v any/c]) boolean?]
 @defthing[sha256-length integer? #:value 64]
 )]{
 
@@ -523,9 +594,14 @@ be rebuilt.}
 
 Provides @racket[targets-at-id] as @racketidfont{targets-at}, and
 creates a @racketidfont{main} submodule that runs
-@racket[(build/command-line* targets-at-id build-path)]. A script
+@racket[(build/command-line* targets-at-id)]. A script
 using @racket[provide-targets] thus works as a makefile-like script or
-as an input to a larger build.}
+as an input to a larger build.
+
+@history[#:changed "1.7" @elem{Removed @racket[build-path] as a second
+                               argument to @racket[build/command-line*] so that
+                               the default @racket[(make-at-dir ".")]
+                               is used, instead.}]}
 
 @defform[(bounce-to-targets config-file-expr key-symbol-expr script-file-expr)]{
 
@@ -553,7 +629,7 @@ See @secref["build-targets"] for an explanation of how
                        at-source)
 ]}
 
-@defproc[(make-targets [specs list?]) list?]{
+@defproc[(make-targets [specs list?]) (listof target?)]{
 
 Converts a @exec{make}-like specification into a list of targets for use
 with @racket[build]. In this @exec{make}-like specification, extra
@@ -595,7 +671,7 @@ target. When a @racket[':target] has multiple @racket[_path]s, they
 must all be path strings.
 
 A @racket[_build-proc] accepts a path (if not phony) and a @tech{build
-token}, just like a @racket[_get-deps] procedure for @racket[target],
+token}, just like a @racket[_get-rule] procedure for @racket[target],
 but @racket[_build-proc] should build the target like the
 @racket[_rebuild] procedure for @racket[rule] (or @racket[phony-rule]).
 When a @racket[':target] line has multiple @racket[_path]s, only the
@@ -609,9 +685,12 @@ to an input-file target. A @racket[_dep-path-or-target] can also be a
 target that is created outside the @racket[make-targets] call.
 
 An @racket[_option] can be @racket[':precious], @racket[':command],
-@racket[':noisy], @racket[':quiet], or @racket[':eager] to set the
-corresponding option (see @racket[target]) in a target.}
+@racket[':noisy], @racket[':quiet], @racket[':eager], or @racket[':recur] to set the
+corresponding option (see @racket[target]) in a target.
 
 A @racket[':db-dir] line (appearing at most once) specifies where
 build information should be recorded for all targets. Otherwise, the
 build result for each target is stored in the target's directory.
+
+@history[#:changed "1.8" @elem{Added @racket[':recur] for
+                               @racket[_option].}]}

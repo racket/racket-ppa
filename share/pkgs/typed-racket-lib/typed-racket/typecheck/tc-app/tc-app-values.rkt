@@ -3,7 +3,7 @@
 (require "../../utils/utils.rkt"
          "signatures.rkt"
          "utils.rkt"
-         syntax/parse racket/match racket/sequence
+         syntax/parse racket/match racket/sequence racket/list
          "../signatures.rkt"
          "../tc-funapp.rkt"
          "../tc-metafunctions.rkt"
@@ -12,6 +12,7 @@
          "../../types/type-table.rkt"
          "../../types/utils.rkt"
          "../../rep/values-rep.rkt"
+         typed-racket/utils/shallow-utils
 
          (for-label racket/base))
 
@@ -29,13 +30,14 @@
     (match (tc/funapp #'prod #'() prod-ty null #f)
       [(tc-results: tcrs #f)
        (define con-ty (tc-expr/t #'con))
+       (define con-trusted? (and con-ty (shallow-trusted-positive? con-ty)))
        (define r
-         (tc/funapp #'con #'(prod) con-ty
+         (tc/funapp #'con (make-list (length tcrs) #'prod) con-ty
                     (for/list ([tcr (in-list tcrs)])
                       (-tc-results (list tcr) #f))
                     expected))
        (define return-ty (tc-results->values r))
-       (add-typeof-expr #'op-name (ret (-> prod-ty con-ty return-ty)))
+       (add-typeof-expr #'op-name (ret (-> prod-ty con-ty return-ty :T+ con-trusted?)))
        r]
       [(tc-results: _ (? RestDots?))
        (tc-error/expr "`call-with-values` with ... is not supported")]
@@ -55,7 +57,7 @@
       (define arg-ty
         ;; match never fails; `single-value` always returns a tc-result1
         (match tc-result [(tc-result1: t) t]))
-      (add-typeof-expr #'op-name (ret (-> arg-ty arg-ty)))
+      (add-typeof-expr #'op-name (ret (-> arg-ty arg-ty :T+ #t)))
       tc-result))
   ;; handle `values' specially
   (pattern ((~and op-name values) . args)
@@ -66,9 +68,10 @@
          (-tc-results
            (for/list ([arg (in-syntax #'args)]
                       [tcr (in-list/rest tcrs #f)])
-             (match (single-value arg (and tcr (-tc-results (list tcr) #f)))
-               [(tc-results: (list res) #f) res])) #f))
+             (match-define (tc-results: (list res) #f)
+               (single-value arg (and tcr (-tc-results (list tcr) #f))))
+             res) #f))
        (define return-ty (tc-results->values res))
        (define arg-tys (match return-ty [(Values: (list (Result: t* _ _) ...)) t*]))
-       (add-typeof-expr #'op-name (ret (->* arg-tys return-ty)))
+       (add-typeof-expr #'op-name (ret (->* arg-tys return-ty :T+ #t)))
        res])))

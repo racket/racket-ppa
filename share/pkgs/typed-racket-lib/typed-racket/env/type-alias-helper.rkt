@@ -2,30 +2,31 @@
 
 ;; This module provides helper functions for type aliases
 
-(require "../utils/utils.rkt"
-         "../utils/tarjan.rkt"
-         "../utils/tc-utils.rkt"
-         "type-alias-env.rkt"
-         "type-name-env.rkt"
-         "../rep/type-rep.rkt"
-         "../rep/type-constr.rkt"
-         "tvar-env.rkt"
-         "type-constr-env.rkt"
-         "../private/parse-type.rkt"
-         "../typecheck/internal-forms.rkt"
-         "../types/resolve.rkt"
-         "../types/base-abbrev.rkt"
-         "../types/substitute.rkt"
+(require (for-template racket/base
+                       "../typecheck/internal-forms.rkt")
+         racket/dict
+         racket/function
          racket/list
          racket/match
          racket/set
-         racket/dict
-         racket/function
          syntax/id-table
          syntax/parse
-         (for-template
-          "../typecheck/internal-forms.rkt"
-          racket/base))
+         "../private/parse-type.rkt"
+         "../private/user-defined-type-constr.rkt"
+         "../rep/free-variance.rkt"
+         "../rep/type-constr.rkt"
+         "../rep/type-rep.rkt"
+         "../typecheck/internal-forms.rkt"
+         "../types/base-abbrev.rkt"
+         "../types/resolve.rkt"
+         "../types/substitute.rkt"
+         "../utils/tarjan.rkt"
+         "../utils/tc-utils.rkt"
+         "../utils/utils.rkt"
+         "tvar-env.rkt"
+         "type-alias-env.rkt"
+         "type-constr-env.rkt"
+         "type-name-env.rkt")
 
 (provide find-strongly-connected-type-aliases
          register-all-type-aliases
@@ -55,10 +56,11 @@
     (map vertex-data component)))
 
 
-;; register-all-type-aliases : Listof<Syntax> -> Void
+;; register-all-type-aliases : Listof<Syntax> IDTable<ID, Listof<ID>> -> Void
 ;;
 ;; register all type alias definitions carried by the input syntaxes
-(define (register-all-type-aliases type-aliases)
+;; dependency-map accounts for the dependencies of struct declarations
+(define (register-all-type-aliases type-aliases [dependency-map (make-immutable-free-id-table)])
   (parameterize ([incomplete-name-alias-map (make-free-id-table)])
     (define-values (type-alias-names type-alias-map)
       (for/lists (_1 _2 #:result (values _1 (make-free-id-table
@@ -70,11 +72,13 @@
         ;; start registering type alias names
         (start-type-alias-registration! id (make-Name id (length args) #f))
         (values id (list id type-stx args))))
-    (register-all-type-alias-info type-alias-names type-alias-map)
-    (unless (zero? (free-id-table-count (incomplete-name-alias-map)))
-      (define names (free-id-table-keys (incomplete-name-alias-map)))
-      (int-err "not all type alias names are fully registered: ~n ~a"
-               names))))
+
+    (begin0
+      (register-all-type-alias-info type-alias-names type-alias-map dependency-map)
+      (unless (zero? (free-id-table-count (incomplete-name-alias-map)))
+        (define names (free-id-table-keys (incomplete-name-alias-map)))
+        (int-err "not all type alias names are fully registered: ~n ~a"
+                 names)))))
 
 ;; Identifier -> Type
 ;; Construct a fresh placeholder type
@@ -87,7 +91,7 @@
 ;; of actually registering the type aliases. If struct names or
 ;; other definitions need to be registered, do that before calling
 ;; this function.
-(define (register-all-type-alias-info type-alias-names type-alias-map)
+(define (register-all-type-alias-info type-alias-names type-alias-map dependency-map)
   ;; Find type alias dependencies
   ;; The two maps defined here contains the dependency structure
   ;; of type aliases in two senses:
@@ -98,8 +102,19 @@
   ;; The second is necessary in order to prevent recursive
   ;; #:implements clauses and to determine the order in which
   ;; recursive type aliases should be initialized.
+
+  (define (free-id-table-union! a b)
+    (define struct-names (list->set (free-id-table-keys b)))
+    (for ([(id deps) (in-free-id-table b)])
+      (free-id-table-set! a id (filter (lambda (v)
+                                         (or (free-id-table-ref type-alias-map v #f)
+                                             (set-member? struct-names v)))
+                                       deps))))
+
   (define-values (type-alias-dependency-map type-alias-class-map type-alias-productivity-map)
-    (for/lists (_1 _2 _3 #:result (values (make-free-id-table _1)
+    (for/lists (_1 _2 _3 #:result (values (let ([tbl1 (make-free-id-table _1)])
+                                            (free-id-table-union! tbl1 dependency-map)
+                                            tbl1)
                                           (make-free-id-table _2)
                                           (make-free-id-table _3)))
                ([(name alias-info) (in-free-id-table type-alias-map)])
@@ -163,6 +178,7 @@
                               recursive-aliases
                               free-identifier=?))
       (car component)))
+
   (define other-recursive-aliases
     (for/list ([alias (in-list recursive-aliases)]
                #:unless (member alias
@@ -198,20 +214,32 @@
   ;; Note that the connected component algorithm returns results
   ;; in topologically sorted order, so we want to go through in the
   ;; reverse order of that to avoid unbound type aliases.
-  (for ([id (in-list acyclic-singletons)])
-    (match-define (list _ type-stx args) (free-id-table-ref type-alias-map id))
-    (cond
-      [(not (null? args))
-       (define ty-op (parse-type-operator-abstraction id args type-stx #f
-                                                      type-alias-productivity-map))
-       (register-type-constructor! id ty-op)]
-      [else
-       ;; id can be a simple abbreviation for another type constructor
-       (define rv (parse-type-or-type-constructor type-stx))
-       ((if (TypeConstructor? rv)
-            register-type-constructor!
-            register-resolved-type-alias) id rv)])
-    (complete-type-alias-registration! id))
+  (define acyclic-constr-names
+    (for/fold ([acc '()])
+              ([id (in-list acyclic-singletons)]
+               #:when (free-id-table-ref type-alias-map id #f))
+      (match-define (list _ type-stx args) (free-id-table-ref type-alias-map id #f))
+      (define acc^
+        (cond
+          [(not (null? args))
+           (define ty-op (parse-type-operator-abstraction id args type-stx #f
+                                                          type-alias-productivity-map))
+
+           (register-type-constructor! id ty-op)
+           (cons id acc)]
+          [else
+           ;; id can be a simple abbreviation for another type constructor
+           (define rv (parse-type-or-type-constructor type-stx))
+           (match rv
+             [(? TypeConstructor?)
+              (register-type-constructor! id rv)
+              (if (user-defined-type-constr? rv)
+                  (cons id acc)
+                  acc)]
+             [else (register-resolved-type-alias id rv)
+                   acc])]))
+      (complete-type-alias-registration! id)
+      acc^))
 
   ;; Clear the resolver cache of Name types from this block
 
@@ -236,7 +264,8 @@
                #:result
                (values (reverse type-records)
                        (reverse type-op-records)))
-              ([id (in-list (append other-recursive-aliases class-aliases))])
+              ([id (in-list (append other-recursive-aliases class-aliases))]
+               #:when (free-id-table-ref type-alias-map id #f))
       (define record (free-id-table-ref type-alias-map id))
       (match-define (list _ type-stx args) record)
       (if (null? args)
@@ -250,16 +279,11 @@
     (for/lists (_1 _2 _3)
                ([record (in-list type-records)])
       (match-define (list id type-stx args) record)
-      ;; TODO try parse-type
       (define type (parse-type type-stx type-alias-productivity-map))
       (reset-resolver-cache!)
       (register-type-name id type)
       (complete-type-alias-registration! id)
-      (add-constant-variance! id args)
       (values id type (map syntax-e args))))
-
-  ;; do a pass to refine the variance
-  (refine-variance! names-to-refine types-to-refine tvarss)
 
   (define-values (productive unproductive)
     (partition (match-lambda
@@ -267,24 +291,28 @@
                   (equal? (free-id-table-ref type-alias-productivity-map a #f) #t)])
                type-op-records))
 
-  (let (;; sort unproductive constructors by the number of dependent
-        ;; user-defined constructors in increasing order
-        [unproductive (sort unproductive <
+  ;; sort unproductive constructors by the number of dependent
+  ;; user-defined constructors in increasing order
+  (let ([unproductive (sort unproductive <
                             #:key
                              (match-lambda
                                [(cons a _)
                                 (length (free-id-table-ref type-alias-dependency-map a #f))]))])
-    (for/list ([record (in-list (append productive unproductive))])
-      (match-define (list id type-stx args) record)
-      (define ty-op (parse-type-operator-abstraction id args type-stx
-                                                     (lambda (x)
-                                                       (define res (in-same-component? id x))
-                                                       res)
-                                                     type-alias-productivity-map))
-      (register-type-constructor! id ty-op)
-      (complete-type-alias-registration! id)
-      (reset-resolver-cache!)
-      (add-constant-variance! id args))))
+    (define constr-names
+      (for/list ([record (in-list (append productive unproductive))])
+        (match-define (list id type-stx args) record)
+        (define ty-op (parse-type-operator-abstraction id args type-stx
+                                                       (lambda (x)
+                                                         (in-same-component? id x))
+                                                       type-alias-productivity-map
+                                                       #:delay-variances? #t
+                                                       #:recursive? #t))
+        (register-type-constructor! id ty-op)
+        (complete-type-alias-registration! id)
+        (reset-resolver-cache!)
+        id))
+    (refine-user-defined-constructor-variances! constr-names)
+    (append acyclic-constr-names constr-names)))
 
 ;; Syntax -> Syntax Syntax (Listof Syntax)
 ;; Parse a type alias internal declaration

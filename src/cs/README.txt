@@ -23,16 +23,17 @@ repository, and the rest are in a sibling "pb" repository that that
 Racket repository's top-level makefile checks out.
 
 Building Racket CS from original sources requires an existing Racket
-build:
+or Chez Scheme build:
 
- * Chez Scheme is typically used to compile Chez Scheme boot files,
-   but any recent version of Racket (v7.1 and up) can generate boot
-   files for Chez Scheme.
+ * Chez Scheme (v9.5.3 and up) is typically used to compile Chez
+   Scheme boot files, but any recent version of Racket (v7.1 and up)
+   can generate boot files for Chez Scheme.
 
    When you use `configure` as described in "../README.txt", supply
-   `--enable-racket=...` to select a Racket implementation to build
-   Racket CS boot files. That implementation could be one that is
-   built by first using `configure --enable-bc`.
+   `--enable-scheme=...` to select a Scheme implementation to build
+   boot files, or supply `--enable-racket=...` to select a Racket
+   implementation to build boot files. A Racket implementation could
+   be one that is built by first using `configure --enable-bc`.
 
    Alternatively, boot files for the pb (portable bytecode) Chez
    Scheme variant can be used to compile Chez Scheme on any supported
@@ -41,10 +42,12 @@ build:
    installed in the "../ChezScheme/boot/pb" directory as described by
    "../ChezScheme/BUILDING".
 
-   Supplying `--enable-scheme=...` is also an option if you alerady
-   have the same version of Chez Scheme built on the current platform.
-   Another build will be created, anyway, but more quickly than
-   without Chez Scheme.
+   Supplying `--enable-scheme=...` is also an option if you already have
+   Chez Scheme built on the current platform; it does not need to match
+   the Chez Scheme version as used in the Racket being built; a "reboot"
+   bootstrapping path is able to reconstruct boot files even across
+   versions. Another build will be created anyway, but more quickly
+   than without Chez Scheme.
 
  * Racket is needed to generate the files in the "schemified"
    directory from the sources in sibling directories like "../io". The
@@ -80,8 +83,8 @@ For this development mode, either Chez Scheme needs to be installed as
 `scheme`.
 
 Development mode also needs a Racket installation with at least the
-"compiler-lib" package installed. By default, the makefile looks for
-Racket installed as "../../bin/racket"; if this directory is in a
+"compiler-lib" package installed. By default, the build script looks
+for Racket installed as "../../bin/racket"; if this directory is in a
 clone of the Git repository for Racket, you can get "../../bin/racket"
 with
 
@@ -93,14 +96,14 @@ to set the command for `racket`.
 The use of development mode is described in more detail further below.
 
 Development mode currently doesn't work on Windows, because the
-makefile makes too many Unix-ish assumptions.
+build script makes too many Unix-ish assumptions.
 
 Build Mode
 ----------
 
 To build a Racket CS executable, the `configure` script and makefile
-in "c" subdirectory are normally used via `configure` and `make` in
-the parent directory of this one, as described in "../README.txt".
+in the "c" subdirectory are normally used via `configure` and `make`
+in the parent directory of this one, as described in "../README.txt".
 However, you can use them directly with something like
 
    cd [build]
@@ -191,21 +194,22 @@ could be a good idea.
  Development Mode
 ========================================================================
 
-Development mode is driven by the makefile in this directory.
+Development mode is driven by the build script in this directory.
 
 Building
 --------
 
-Running `zuo` will build the Racket CS implementation. Use `make
-expander-demo` to run a demo that loads `racket/base` from source.
+Running `zuo` will build the Racket CS implementation. You can use
+`zuo . expander-demo` to run a demo that loads `racket/base` from
+source.
 
 Use `zuo . setup` (or `zuo . setup-v` for a verbose version) to build
 ".zo" files for collection-based libraries. You can supply additional
 arguments to `zuo . setup` to be passed along to `raco setup`.
 
-   make setup ARGS="-l typed/racket"  # only sets up TR
-   make setup ARGS="--clean -Dd"      # clears ".zo" files
-   make setup ARGS="--fail-fast"      # stop at the first error
+   zuo . setup ARGS="-l typed/racket"  # only sets up TR
+   zuo . setup ARGS="--clean -Dd"      # clears ".zo" files
+   zuo . setup ARGS="--fail-fast"      # stop at the first error
 
 Running
 -------
@@ -280,8 +284,9 @@ Files in this directory:
          that are `include`d by "io.sls" and "librktio.{so,dylib,dll}"
          is the shared library that implements rktio.
 
-         CAUTION: The makefile here doesn't track dependencies for
-         rktio, so use `make rktio` if you change its implementation.
+         CAUTION: The build script here doesn't track all dependencies
+         for rktio, and you may need use `zuo build.zuo rktio-rktl` in
+         the "rktio" directory if you change its implementation.
 
  primitive/*.ss - for "expander.sls", tables of bindings for
          primitive linklet instances; see "From primitives to modules"
@@ -293,7 +298,7 @@ Files in this directory:
 
  demo/*.ss - Chez Scheme scripts to check that a library basically
          works. For example "demo/regexp.ss" runs the regexp matcher
-         on a few examples. To run "demo/*.ss", use `make *-demo`.
+         on a few examples. To run "demo/*.ss", use `zuo . *-demo`.
 
  other *.rkt - Racket scripts like "convert.rkt" or comparisons like
          "demo/regexp.rkt". For example, you can run "demo/regexp.rkt"
@@ -329,7 +334,7 @@ Safety and Debugging Mode
 -------------------------
 
 If you make changes to files in "rumble", you should turn off
-sunsafe mode by provided `UNSAFE_COMP=no` to `zuo`.
+unsafe mode by provided `UNSAFE_COMP=no` to `zuo`.
 
 You may want to supply `DEBUG_COMP=yes` so that backtraces provide
 expression-specific source locations instead of just
@@ -386,12 +391,13 @@ several different ways:
 Threads, Threads, Atomicity, Atomicity, and Atomicity
 -----------------------------------------------------
 
-Racket's thread layer does not use Chez Scheme threads. Chez Scheme
-threads correspond to OS threads. Racket threads are implemented in
-terms of engines at the Rumble layer. At the same time, futures and
-places use Chez Scheme threads, and so parts of Rumble are meant to be
-thread-safe with respect to Chez Scheme and OS threads. The FFI also
-exposes elements of Chez Scheme / OS threads.
+Racket threads are implemented in terms of engines (basically like
+Chez Scheme engines) at the Rumble layer. Within a place, Racket
+coroutine threads all work in the same Chez Scheme thread. Places,
+futures, and parallel threads use multiple Chez Scheme threads, and so
+parts of Rumble are meant to be thread-safe with respect to Chez
+Scheme and OS threads. The FFI also exposes elements of Chez Scheme /
+OS threads.
 
 As a result of these layers, there are multiple ways to implement
 atomic regions:
@@ -418,20 +424,29 @@ atomic regions:
      - The Racket "thread" layer provides `start-atomic` and
        `end-atomic` to prevent Racket-thread swaps.
 
+       In a Racket parallel thread (as opposed to a coroutine thread),
+       `start-atomic` will block and send its continuation over to a
+       coroutine thread. A balancing `end-atomic` will send the
+       continuation back.
+
        These are the same operations as provided by
        `ffi/unsafe/atomic`.
 
      - Disabling Chez Scheme interrupts will also disable Racket
-       thread swaps, since a thread swap via engines depends on a
-       timer interrupt --- unless something explicitly blocks via the
-       Racket thread scheduler, such as with `(sleep)`.
+       coroutine thread swaps, since a thread swap via engines depends
+       on a timer interrupt (unless something explicitly blocks via
+       the Racket thread scheduler, such as with `(sleep)`, but that
+       generally would be bad).
 
        Disable interrupts for atomicity only at the Rumble level where
-       no Racket-level callbacks are not involved. Also, beware that
-       disabling interrupts will prevent GC interrupts.
+       Racket-level callbacks are not involved and where no atomicity
+       with respect to Racket parallel threads is needed. Also, beware
+       that disabling interrupts will prevent GC interrupts; that
+       turns out to be the main reason that layers on top of Rumble
+       may need disable interrupts.
 
-       The Racket "thread" layer provides `start-atomic/no-interrupts`
-       and `end-atomic/no-interrupts` for both declaring atomicity at
+       The Racket "thread" layer provides `start-atomic/no-gc-interrupts`
+       and `end-atomic/no-gc-interrupts` for both declaring atomicity at
        the Racket level and turning off Chez Scheme interrupts. The
        combination is useful for implementing functionality that might
        be called in response to a GC and might also be called by
@@ -441,11 +456,11 @@ atomic regions:
      - The implementation of engines and continuations uses its own
        flag to protect regions where an engine timeout should not
        happen, such as when the metacontinuation is being manipulated.
-       That flag is managed by `start-uninterrupted` and
-       `end-uninterrupted` in "rumble/interrupt.ss".
+       That flag is managed by `start-engine-uninterrupted` and
+       `end-engine-uninterrupted` in "rumble/interrupt.ss".
 
        It may be tempting to use that flag for other purposes, as a
-       cheap way to disable thread swaps. For now, don't do that.
+       cheap way to disable thread swaps. Don't do that.
 
 Performance Notes
 -----------------

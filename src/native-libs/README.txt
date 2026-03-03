@@ -6,31 +6,30 @@ variants, we expect users to install C-implemented libraries (usually
 through the operating system's package manager). For Windows and Mac
 OS, we supply pre-built libraries in platform-specific packages; the
 corresponding Racket packages include platform-specific dependencies
-on those packages. The "x86_64-linux-natipkg" variant of Racket is
-like Windows and Mac OS, expecting packages to supply native libraries
-for 64-bit Linux.
+on those packages. The "x86_64-linux-natipkg" and
+"aarch64-linux-natipkg" variants of Racket are like Windows and Mac
+OS, expecting packages to supply native libraries for Linux.
 
 This directory contains scripts and patches to build Windows, Mac OS,
 and Linux libraries in a consistent and portable way. Naturally, the
 script and patches are fragile, so we upgrade libraries infrequently.
 Currently, we use the following external packages and versions for
-actively supported platforms (i.e., 32-bit PPC and x86 Mac OS may use
-older versions):
+actively supported platforms:
 
  pkg-config-0.28
  sed-4.2 (Windows only, to avoid non-GNU `sed`)
  sqlite[-autoconf]-3360000 (Windows and Linux)
  libedit-20191231-3.1 (Mac OS only)
- openssl-1.1.1o (Windows AArch64: openssl-3.0.2)
+ openssl-3.4.1 (Mac OS i386 and PowerPC, Linux x86_64: openssl-1.1.1o)
  libiconv-1.15 (Windows only)
  zlib-1.2.12 (Windows and Linux only)
- libffi-3.2.1 (AArch64 Mac OS and Windows: libffi-3.3)
+ libffi-3.2.1 (Mac OS AArch64, Windows AArch64: libffi-3.3)
  expat-2.4.8
  gettext-0.19.8
  glib-2.72.2
  libpng-1.6.37
- pixman-0.38.4
- cairo-1.16.0
+ pixman-0.44.2 (Mac OS i386 and PowerPC, Linux x86_64: pixman-0.38.4)
+ cairo-1.18.2 (Mac OS i386 and PowerPC, Linux x86_64: cairo-1.16.0)
  jpegsrc.v9e
  harfbuzz-1.7.6
  fribidi-1.0.2
@@ -38,7 +37,7 @@ older versions):
  freetype-2.12.1
  pango-1.42.0
  poppler-0.24.5
- mpfr-3.1.6
+ mpfr-3.1.6 (Mac OS AArch64, Windows AArch64: mpfr-4.2.0)
  gmp-6.2.1
  atk-2.28.1
 

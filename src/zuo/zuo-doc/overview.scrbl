@@ -21,7 +21,7 @@ The name ``Zuo'' is derived from the Chinese word for ``make.''
 @section[#:tag "running"]{Building and Running Zuo}
 
 Compile @filepath{zuo.c} from the Zuo sources with a C compiler. No
-additional are files needed for compilation, other than system and
+additional files are needed for compilation, other than system and
 C-library headers. No compiler flags should be needed, although flags
 like @exec{-o zuo} or @exec{-O2} are a good idea.
 
@@ -33,21 +33,39 @@ build.zuo} and @exec{./zuo build.zuo install} (omit the @exec{./} on Windows)
 will do the same thing as @exec{make} and @exec{make install} with
 a default configuration.
 
-The Zuo executable runs only modules. If you run Zuo with no
-command-line arguments, then it loads @filepath{main.zuo} in the
-current directory. Otherwise, the first argument to Zuo is a file to
-run or a directory containing a @filepath{main.zuo} to run, and
-additional arguments are delivered to that program via the
-@racket[runtime-env] procedure. Either way, if this initial script has
-a @racketidfont{main} submodule, the submodule is run.
+The Zuo executable runs only modules:
 
-Note that starting Zuo with the argument @filepath{.} equivalent to
-the argument @filepath{./main.zuo}, which is a convenient shorthand
-for using @exec{zuo} as a replacement for @exec{make} while still
-passing arguments. When Zuo receives the empty string (which would be
-invalid as a file path) as a first argument, it reads a module from
-standard input.
+@itemlist[
 
+ @item{If you run Zuo with no command-line arguments, then it loads
+       @filepath{main.zuo} in the current directory.}
+
+ @item{As long as the @Flag{c} is not used and the first argument is
+       not the empty string, the first argument to Zuo is used as a
+       file to run or a directory containing a @filepath{main.zuo} to
+       run.
+
+       Note that starting Zuo with the argument @filepath{.} is
+       equivalent to the argument @filepath{./main.zuo}, so @exec{zuo
+       .} is a convenient replacement for @exec{make} while still
+       passing arguments.}
+
+ @item{If the @Flag{c} flag is provided to Zuo, the first argument is
+       treated as the text of a module to run, instead of the name of
+       a file or directory.}
+
+ @item{If the first argument to Zuo is the empty string (which would
+       be invalid as a file path), the module to run is read from
+       standard input.}
+
+]
+
+Additional Zuo arguments are delivered to that program via the
+@racket[runtime-env] procedure. When the initial script module has a
+@racketidfont{main} submodule (see @racket[module+]), that submodule
+is run.
+
+@history[#:changed "1.1" @elem{Added the @Flag{c} flag.}]
 
 @section{Library Modules and Startup Performance}
 
@@ -86,9 +104,11 @@ other libraries after @exec{make install} or @exec{./zuo build.zuo
 install}.
 
 You can use images without embedding. The @racket[dump-image-and-exit]
-Zuo kernel permitive creates an image containing all loaded modules,
+Zuo kernel primitive creates an image containing all loaded modules,
 and a @Flag{B} or @DFlag{boot} command-line flag for Zuo uses the
-given boot image on startup.
+given boot image on startup. You can also embed an image created with
+@racket[dump-image-and-exit] by using @filepath{local/image.zuo} with
+the @DFlag{image} flag.
 
 A boot image is machine-independent, whether in a stand-alone file or
 embedded in @filepath{.c} source.
@@ -113,7 +133,7 @@ Zuo's kernel supports the following kinds of data:
 
  @item{booleans;}
 
- @item{integers as 64-bit two's complement with modular arithmetic}
+ @item{integers as 64-bit two's complement with modular arithmetic;}
 
  @item{strings as byte strings (optionally prefixed with @litchar{#}
        and with @litchar{\n}, @litchar{\r}, @litchar{\t},
@@ -145,6 +165,9 @@ Zuo's kernel supports the following kinds of data:
 Notable omissions include floating-point numbers, characters, Unicode
 strings, and vectors. Paths are represented using byte strings (with
 an implied UTF-8 encoding for Windows wide-character paths).
+
+See @secref["reader"] for information on reading literal values as
+S-expression.
 
 
 @section{Zuo Implementation and Macros}
@@ -234,7 +257,7 @@ under no obligation to use any of those.
 
 A call @racket[(module->hash _M)] primitive checks whether the module
 @racket[_M] is already loaded and returns its hash table if so. The
-@racket[zuo/kernel] module is always preloaded, but other modules may
+@racketmodname[zuo/kernel] module is always preloaded, but other modules may
 be preloaded in an image that was created by
 @racket[dump-image-and-exit]. If a module @racket[_M] is not already
 loaded, @racket[module->hash] reads the beginning of @racket[_M]'s
@@ -253,6 +276,15 @@ each representing a submodule. When Zuo runs an initial script, it
 looks for a @racket['main] submodule and runs it (i.e., calls the
 thunk) if present.
 
+The @racketmodname[zuo], @racketmodname[zuo/base], and
+@racketmodname[zuo/hygienic] languages do not specify how their
+provided-variable information is represented in a module hash table,
+but they do specify that @racket['dynamic-require] is mapped to the
+@racket[dynamic-require] function, and then @racket[dynamic-require]
+can be used to access provided values.
+
+@history[#:changed "1.2" @elem{Added the @racket['dynamic-require] key
+        for @racketmodname[zuo] and related languages.}]
 
 @section[#:tag "paths"]{Path Handling}
 
@@ -268,7 +300,7 @@ specific choices about how to work with paths:
        on the filesystem is a symbolic link to to the relative path
        @filepath{x/y/z}---in which case the filesystem would resolve
        @filepath{a/b/../c} the same as @filepath{a/x/y/z/../c}, which
-       is @filepath{a/z/y/c} and not @filepath{a/c}.
+       is @filepath{a/x/y/c} and not @filepath{a/c}.
 
        In short, mixing directory symbolic links with Zuo's path
        functions can be different than what the filesystem would do,
@@ -300,7 +332,7 @@ specific choices about how to work with paths:
 
        The way that you start a Zuo script affects the script's
        operation in terms of absolute or relative paths. If you start
-       a Zuo script with a relative patch, such as @exec{zuo
+       a Zuo script with a relative path, such as @exec{zuo
        scripts/go.zuo}, the @racket[quote-module-path] form will
        report a relative path for the enclosing script. If you start
        it with an absolute path, such as @exec{zuo

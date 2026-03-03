@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define deps (quote ("base" "scribble-lib" "racket-index" "scheme-lib"))) (define build-deps (quote ())) (define pkg-desc "Racket Documentation executables") (define pkg-authors (quote (eli jay matthias mflatt robby ryanc samth))) (define version "1.0") (define license (quote (Apache-2.0 OR MIT)))))

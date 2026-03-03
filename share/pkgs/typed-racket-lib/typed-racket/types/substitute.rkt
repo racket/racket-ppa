@@ -75,13 +75,16 @@
   (let sub ([target target])
     (match target
       [(ListDots: dty dbound)
-       (if (eq? name dbound)
-           ;; We need to recur first, just to expand out any dotted usages of this.
-           (let ([expanded (sub dty)])
-             (for/fold ([t (if rimage (-lst rimage) -Null)])
-                       ([img (in-list (reverse images))])
-               (make-Pair (substitute img name expanded) t)))
-           (make-ListDots (sub dty) dbound))]
+       (cond
+         [(eq? name dbound)
+          ;; We need to recur first, just to expand out any dotted usages of this.
+          (define expanded (sub dty))
+          (for/fold ([t (if rimage
+                            (-lst rimage)
+                            -Null)])
+                    ([img (in-list (reverse images))])
+            (make-Pair (substitute img name expanded) t))]
+         [else (make-ListDots (sub dty) dbound)])]
       [(SequenceDots: types dty dbound)
        (if (eq? name dbound)
            (if rimage
@@ -108,7 +111,7 @@
                  (for/list ([img (in-list images)])
                    (-result (substitute img name expanded))))))])]
          [else (make-ValuesDots (map sub types) (sub dty) dbound)])]
-      [(Arrow: dom (RestDots: dty dbound) kws rng)
+      [(Arrow: dom (RestDots: dty dbound) kws rng rng-T+)
        #:when (eq? name dbound)
        (make-Arrow
         (append
@@ -119,7 +122,8 @@
                 images)))
         (if (Type? rimage) (make-Rest (list rimage)) rimage)
         (map sub kws)
-        (sub rng))]
+        (sub rng)
+        rng-T+)]
       [_ (Rep-fmap target sub)])))
 
 ;; implements curly brace substitution from the formalism, with the addition
@@ -146,7 +150,7 @@
                                   pre-image)
                           (sub dty)
                           image-bound)]
-      [(Arrow: dom (RestDots: dty dbound) kws rng)
+      [(Arrow: dom (RestDots: dty dbound) kws rng rng-T+)
        #:when (eq? name dbound)
        (make-Arrow
         (append (map sub dom) pre-image)
@@ -154,7 +158,8 @@
          (substitute image dbound (sub dty))
          image-bound)
         (map sub kws)
-        (sub rng))]
+        (sub rng)
+        rng-T+)]
       [_ (Rep-fmap target sub)])))
 
 ;; substitute many variables

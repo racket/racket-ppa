@@ -11,8 +11,8 @@ midnight UTC, January 1, 1970.}
 
 @defproc[(current-inexact-milliseconds) real?]{
 
-Returns the current time in milliseconds since midnight UTC, January
-1, 1970. The result may contain fractions of a millisecond.
+Returns the current time in milliseconds since @tech{the epoch}.
+The result may contain fractions of a millisecond.
 
 @examples[(eval:alts
 (current-inexact-milliseconds)
@@ -45,9 +45,9 @@ are not comparable.
                         [local-time? any/c #t])
          date*?]{
 
-Takes @racket[secs-n], a platform-specific time in seconds returned by
-@racket[current-seconds], @racket[file-or-directory-modify-seconds],
-or 1/1000th of @racket[current-inexact-milliseconds], and returns an
+Takes @racket[secs-n], a time in seconds since @tech{the epoch} (like the value of
+@racket[(current-seconds)], @racket[(file-or-directory-modify-seconds _path)],
+or @racket[(/ (current-inexact-milliseconds) 1000)]), and returns an
 instance of the @racket[date*] structure type. Note that
 @racket[secs-n] can include fractions of a second. If @racket[secs-n]
 is too small or large, the @exnraise[exn:fail].
@@ -233,7 +233,7 @@ date)] if @racket[date] is a @racket[date*] instance.}
                        [hour (integer-in 0 23)]
                        [day (integer-in 1 31)]
                        [month (integer-in 1 12)]
-                       [year exact-nonnegative-integer?]
+                       [year exact-integer?]
                        [local-time? any/c #t])
          exact-integer?]{
 
@@ -241,7 +241,9 @@ Finds the representation of a date in platform-specific seconds. The
 arguments correspond to the fields of the @racket[date] structure---in
 local time by default or UTC if @racket[local-time?] is
 @racket[#f]. If the platform cannot represent the specified date, an
-error is signaled, otherwise an integer is returned.}
+error is signaled, otherwise an integer is returned.
+
+@history[#:changed "9.0.0.4" @elem{Allow negative numbers for @racket[year].}]}
 
 
 @defproc[(date->julian/scaliger [date date?]) exact-integer?]{

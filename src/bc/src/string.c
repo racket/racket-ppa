@@ -54,6 +54,8 @@ Scheme_Object *scheme_system_type_proc;
 static Scheme_Object *make_string (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_p (int argc, Scheme_Object *argv[]);
+static Scheme_Object *immutable_string_p (int argc, Scheme_Object *argv[]);
+static Scheme_Object *mutable_string_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_length (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_eq (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_locale_eq (int argc, Scheme_Object *argv[]);
@@ -77,9 +79,14 @@ static Scheme_Object *string_titlecase (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_foldcase (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_locale_upcase (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_locale_downcase (int argc, Scheme_Object *argv[]);
+static Scheme_Object *char_grapheme_cluster_step (int argc, Scheme_Object *argv[]);
+static Scheme_Object *string_grapheme_cluster_span (int argc, Scheme_Object *argv[]);
+static Scheme_Object *string_grapheme_cluster_count (int argc, Scheme_Object *argv[]);
 static Scheme_Object *substring (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_append (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_append_immutable (int argc, Scheme_Object *argv[]);
+static Scheme_Object *apply_string_append (int argc, Scheme_Object *argv[]);
+static Scheme_Object *apply_string_append_immutable (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_to_list (int argc, Scheme_Object *argv[]);
 static Scheme_Object *list_to_string (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_copy (int argc, Scheme_Object *argv[]);
@@ -98,12 +105,15 @@ static Scheme_Object *make_byte_string (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string_p (int argc, Scheme_Object *argv[]);
+static Scheme_Object *immutable_byte_string_p (int argc, Scheme_Object *argv[]);
+static Scheme_Object *mutable_byte_string_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string_length (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string_eq (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string_lt (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string_gt (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_substring (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string_append (int argc, Scheme_Object *argv[]);
+static Scheme_Object *apply_byte_string_append (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string_to_list (int argc, Scheme_Object *argv[]);
 static Scheme_Object *list_to_byte_string (int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string_copy (int argc, Scheme_Object *argv[]);
@@ -177,19 +187,20 @@ static void cache_locale_or_close(int to_bytes, rktio_converter_t *cd, char *le)
 
 #define portable_isspace(x) (((x) < 128) && isspace(x))
 
-ROSYM static Scheme_Object *sys_symbol, *sys_os_symbol, *sys_arch_symbol;
+ROSYM static Scheme_Object *sys_symbol, *sys_os_symbol, *sys_arch_symbol, *sys_so_find_symbol;
 ROSYM static Scheme_Object *link_symbol, *machine_symbol, *vm_symbol, *gc_symbol;
 ROSYM static Scheme_Object *so_suffix_symbol, *so_mode_symbol, *word_symbol;
-ROSYM static Scheme_Object *os_symbol, *os_star_symbol, *arch_symbol;
+ROSYM static Scheme_Object *os_symbol, *os_star_symbol, *arch_symbol, *so_find_symbol, *platform_symbol;
 ROSYM static Scheme_Object *fs_change_symbol, *target_machine_symbol, *cross_symbol;
 ROSYM static Scheme_Object *racket_symbol, *cgc_symbol, *_3m_symbol, *cs_symbol;
 ROSYM static Scheme_Object *force_symbol, *infer_symbol;
-ROSYM static Scheme_Object *platform_3m_path, *platform_cgc_path, *platform_cs_path;
-READ_ONLY static Scheme_Object *zero_length_char_string;
-READ_ONLY static Scheme_Object *zero_length_char_immutable_string;
-READ_ONLY static Scheme_Object *zero_length_byte_string;
+ROSYM static Scheme_Object *platform_3m_path, *platform_cgc_path, *platform_cs_path, *platform_str;
+READ_ONLY Scheme_Object *scheme_zero_length_char_string;
+READ_ONLY Scheme_Object *scheme_zero_length_char_immutable_string;
+READ_ONLY Scheme_Object *scheme_zero_length_byte_string;
 
 SHARED_OK static char *embedding_banner;
+SHARED_OK static char build_stamp_banner[128];
 SHARED_OK static Scheme_Object *vers_str;
 SHARED_OK static Scheme_Object *banner_str;
 
@@ -216,6 +227,8 @@ static void reset_locale(void);
 
 #define current_locale_name ((const mzchar *)current_locale_name_ptr)
 
+static void update_banner(const char *build_stamp);
+
 static const mzchar empty_char_string[1] = { 0 };
 static const mzchar xes_char_string[2] = { 0x78787878, 0 };
 
@@ -227,9 +240,21 @@ scheme_init_string (Scheme_Startup_Env *env)
   REGISTER_SO(sys_symbol);
   REGISTER_SO(sys_os_symbol);
   REGISTER_SO(sys_arch_symbol);
+  REGISTER_SO(sys_so_find_symbol);
   sys_symbol = scheme_intern_symbol(SYSTEM_TYPE_NAME);
   sys_os_symbol = scheme_intern_symbol(SCHEME_OS);
   sys_arch_symbol = scheme_intern_symbol(SCHEME_ARCH);
+  if (SPLS_SUFFIX[0] == 0) {
+# if defined(DOS_FILE_SYSTEM) || defined(OS_X)
+    sys_so_find_symbol = scheme_intern_symbol("natipkg");
+# else
+    sys_so_find_symbol = scheme_intern_symbol("system");
+# endif
+  } else {
+    const char *s = SPLS_SUFFIX;
+    s++;
+    sys_so_find_symbol = scheme_intern_symbol(s);
+  }
 
   REGISTER_SO(link_symbol);
   REGISTER_SO(machine_symbol);
@@ -241,6 +266,8 @@ scheme_init_string (Scheme_Startup_Env *env)
   REGISTER_SO(os_symbol);
   REGISTER_SO(os_star_symbol);
   REGISTER_SO(arch_symbol);
+  REGISTER_SO(so_find_symbol);
+  REGISTER_SO(platform_symbol);
   REGISTER_SO(fs_change_symbol);
   REGISTER_SO(target_machine_symbol);
   REGISTER_SO(cross_symbol);
@@ -254,6 +281,8 @@ scheme_init_string (Scheme_Startup_Env *env)
   os_symbol = scheme_intern_symbol("os");
   os_star_symbol = scheme_intern_symbol("os*");
   arch_symbol = scheme_intern_symbol("arch");
+  so_find_symbol = scheme_intern_symbol("so-find");
+  platform_symbol = scheme_intern_symbol("platform");
   fs_change_symbol = scheme_intern_symbol("fs-change");
   target_machine_symbol = scheme_intern_symbol("target-machine");
   cross_symbol = scheme_intern_symbol("cross");
@@ -272,13 +301,13 @@ scheme_init_string (Scheme_Startup_Env *env)
   force_symbol = scheme_intern_symbol("force");
   infer_symbol = scheme_intern_symbol("infer");
 
-  REGISTER_SO(zero_length_char_string);
-  REGISTER_SO(zero_length_char_immutable_string);
-  REGISTER_SO(zero_length_byte_string);
-  zero_length_char_string = scheme_alloc_char_string(0, 0);
-  zero_length_char_immutable_string = scheme_alloc_char_string(0, 0);
-  SCHEME_SET_CHAR_STRING_IMMUTABLE(zero_length_char_immutable_string);
-  zero_length_byte_string = scheme_alloc_byte_string(0, 0);
+  REGISTER_SO(scheme_zero_length_char_string);
+  REGISTER_SO(scheme_zero_length_char_immutable_string);
+  REGISTER_SO(scheme_zero_length_byte_string);
+  scheme_zero_length_char_string = scheme_alloc_char_string(0, 0);
+  scheme_zero_length_char_immutable_string = scheme_alloc_char_string(0, 0);
+  SCHEME_SET_CHAR_STRING_IMMUTABLE(scheme_zero_length_char_immutable_string);
+  scheme_zero_length_byte_string = scheme_alloc_byte_string(0, 0);
 
   REGISTER_SO(complete_symbol);
   REGISTER_SO(continues_symbol);
@@ -300,9 +329,12 @@ scheme_init_string (Scheme_Startup_Env *env)
   REGISTER_SO(platform_3m_path);
   REGISTER_SO(platform_cgc_path);
   REGISTER_SO(platform_cs_path);
+  REGISTER_SO(platform_str);
   platform_cgc_path = scheme_make_path(SCHEME_PLATFORM_LIBRARY_SUBPATH SPLS_SUFFIX);
   platform_3m_path = scheme_make_path(SCHEME_PLATFORM_LIBRARY_SUBPATH SPLS_SUFFIX MZ3M_SUBDIR);
   platform_cs_path = scheme_make_path(SCHEME_PLATFORM_LIBRARY_SUBPATH SPLS_SUFFIX MZCS_SUBDIR);
+  platform_str = scheme_make_utf8_string(SCHEME_PLATFORM_LIBRARY_SUBPATH SPLS_SUFFIX);
+  SCHEME_SET_CHAR_STRING_IMMUTABLE(platform_str);
 
   REGISTER_SO(embedding_banner);
   REGISTER_SO(vers_str);
@@ -310,8 +342,7 @@ scheme_init_string (Scheme_Startup_Env *env)
 
   vers_str = scheme_make_utf8_string(scheme_version());
   SCHEME_SET_CHAR_STRING_IMMUTABLE(vers_str);
-  banner_str = scheme_make_utf8_string(scheme_banner());
-  SCHEME_SET_CHAR_STRING_IMMUTABLE(banner_str);
+  update_banner(NULL);
 
   REGISTER_SO(scheme_string_p_proc);
   p = scheme_make_folding_prim(string_p, "string?", 1, 1, 1);
@@ -320,6 +351,16 @@ scheme_init_string (Scheme_Startup_Env *env)
                                                             | SCHEME_PRIM_PRODUCES_BOOL);
   scheme_addto_prim_instance("string?", p, env);
   scheme_string_p_proc = p;
+
+  p = scheme_make_folding_prim(immutable_string_p, "immutable-string?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_OMITABLE
+                                                            | SCHEME_PRIM_PRODUCES_BOOL);
+  scheme_addto_prim_instance("immutable-string?", p, env);
+
+  p = scheme_make_folding_prim(mutable_string_p, "mutable-string?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_OMITABLE
+                                                            | SCHEME_PRIM_PRODUCES_BOOL);
+  scheme_addto_prim_instance("mutable-string?", p, env);
 
   scheme_addto_prim_instance("make-string",
 			     scheme_make_immed_prim(make_string,
@@ -528,6 +569,23 @@ scheme_init_string (Scheme_Startup_Env *env)
 						    1, 1),
 			     env);
 
+  scheme_addto_prim_instance("char-grapheme-step",
+			     scheme_make_prim_w_arity2(char_grapheme_cluster_step,
+                                                       "char-grapheme-step",
+                                                       2, 2,
+                                                       2, 2),
+			     env);
+  scheme_addto_prim_instance("string-grapheme-span",
+			     scheme_make_immed_prim(string_grapheme_cluster_span,
+						    "string-grapheme-span",
+						    2, 3),
+			     env);
+  scheme_addto_prim_instance("string-grapheme-count",
+			     scheme_make_immed_prim(string_grapheme_cluster_count,
+						    "string-grapheme-count",
+						    1, 3),
+			     env);
+
   scheme_addto_prim_instance("current-locale",
 			     scheme_register_parameter(current_locale,
 						       "current-locale",
@@ -606,6 +664,16 @@ scheme_init_string (Scheme_Startup_Env *env)
                                                             | SCHEME_PRIM_PRODUCES_BOOL);
   scheme_addto_prim_instance("bytes?", p, env);
   scheme_byte_string_p_proc = p;
+
+  p = scheme_make_folding_prim(immutable_byte_string_p, "immutable-bytes?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_OMITABLE
+                                                            | SCHEME_PRIM_PRODUCES_BOOL);
+  scheme_addto_prim_instance("immutable-bytes?", p, env);
+
+  p = scheme_make_folding_prim(mutable_byte_string_p, "mutable-bytes?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_OMITABLE
+                                                            | SCHEME_PRIM_PRODUCES_BOOL);
+  scheme_addto_prim_instance("mutable-bytes?", p, env);
 
   scheme_addto_prim_instance("make-bytes",
 			     scheme_make_immed_prim(make_byte_string,
@@ -836,6 +904,27 @@ scheme_init_string (Scheme_Startup_Env *env)
 #ifdef MZ_PRECISE_GC
   register_traversers();
 #endif
+}
+
+
+void
+scheme_init_internal_string (Scheme_Startup_Env *env)
+{
+  scheme_addto_prim_instance("apply-string-append",
+                             scheme_make_immed_prim(apply_string_append,
+                                                    "apply-string-append",
+                                                    2, 2),
+                             env);
+  scheme_addto_prim_instance("apply-string-append-immutable",
+                             scheme_make_immed_prim(apply_string_append_immutable,
+                                                    "apply-string-append-immutable",
+                                                    2, 2),
+                             env);
+  scheme_addto_prim_instance("apply-bytes-append",
+                             scheme_make_immed_prim(apply_byte_string_append,
+                                                    "apply-bytes-append",
+                                                    2, 2),
+                             env);
 }
 
 void scheme_init_string_places(void) {
@@ -1101,11 +1190,24 @@ Scheme_Object *string_append_immutable(int argc, Scheme_Object *argv[])
 
   r = do_string_append("string-append-immutable", argc, argv);
 
-  if (r == zero_length_char_string)
-    return zero_length_char_immutable_string;
+  if (r == scheme_zero_length_char_string)
+    return scheme_zero_length_char_immutable_string;
 
   SCHEME_SET_CHAR_STRING_IMMUTABLE(r);
 
+  return r;
+}
+
+Scheme_Object *apply_string_append(int argc, Scheme_Object *argv[])
+{
+  return do_apply_char_string_append("string-append", argc, argv);
+}
+
+Scheme_Object *apply_string_append_immutable(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *r;
+  r = do_apply_char_string_append("string-append-immutable", argc, argv);
+  SCHEME_SET_CHAR_STRING_IMMUTABLE(r);
   return r;
 }
 
@@ -1181,6 +1283,11 @@ Scheme_Object *scheme_byte_string_eq_2(Scheme_Object *str1, Scheme_Object *str2)
   a[0] = str1;
   a[1] = str2;       
   return byte_string_eq(2, a);
+}
+
+Scheme_Object *apply_byte_string_append(int argc, Scheme_Object *argv[])
+{
+  return do_apply_byte_string_append("bytes-append", argc, argv);
 }
 
 /**********************************************************************/
@@ -2028,19 +2135,60 @@ char *scheme_version(void)
 # endif
 #endif
 
+#define RACKET_BANNER_FMT(insert)               \
+  ("Welcome to Racket"                          \
+   " v" MZSCHEME_VERSION insert VERSION_SUFFIX  \
+   ".\n")
+
 char *scheme_banner(void)
 {
   if (embedding_banner)
     return embedding_banner;
-  else
-    return ("Welcome to Racket"
-            " v" MZSCHEME_VERSION VERSION_SUFFIX
-            ".\n");
+
+  if (build_stamp_banner[0])
+    return build_stamp_banner;
+
+  return RACKET_BANNER_FMT("");
 }
 
 void scheme_set_banner(char *s)
 {
   embedding_banner = s;
+}
+
+void scheme_set_build_stamp(char *s)
+{
+  update_banner(s);
+}
+
+/* if build_stamp is not NULL, assume that we're in the main place */
+static void update_banner(const char *build_stamp)
+{
+#if defined(MZ_USE_PLACES)
+  void *gc_state;
+#endif
+
+  if (build_stamp && build_stamp[0]) {
+    snprintf(build_stamp_banner, sizeof(build_stamp_banner),
+             RACKET_BANNER_FMT("-%s"),
+             build_stamp);
+  } else
+    build_stamp_banner[0] = 0;
+
+#if defined(MZ_USE_PLACES)
+  if (build_stamp)
+    gc_state = GC_switch_to_master_gc();
+  else
+    gc_state = NULL;
+#endif
+
+  banner_str = scheme_make_utf8_string(scheme_banner());
+  SCHEME_SET_CHAR_STRING_IMMUTABLE(banner_str);
+
+#if defined(MZ_USE_PLACES)
+  if (build_stamp)
+    GC_switch_back_from_master(gc_state);
+#endif
 }
 
 int scheme_byte_string_has_null(Scheme_Object *o)
@@ -2465,9 +2613,18 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
       return sys_arch_symbol;
     }
 
+    if (SAME_OBJ(argv[0], so_find_symbol)) {
+      return sys_so_find_symbol;
+    }
+
+    if (SAME_OBJ(argv[0], platform_symbol)) {
+      return platform_str;
+    }
+
     if (!SAME_OBJ(argv[0], os_symbol)) {
       scheme_wrong_contract("system-type",
-                            ("(or/c 'os 'os* 'arch 'word 'link 'machine 'target-machine\n"
+                            ("(or/c 'os 'os* 'arch 'word 'so-find 'platform\n"
+                             "      'link 'machine 'target-machine\n"
                              "      'vm 'gc 'so-suffix 'so-mode 'word 'fs-change 'cross)"),
                             0, argc, argv);
       return NULL;
@@ -3160,7 +3317,7 @@ int mz_locale_strcoll(char *s1, int d1, int l1, char *s2, int d2, int l2, int cv
     if (!origl1)
       return -1;
 
-    /* Compare an unconverable character directly. No case conversions
+    /* Compare an unconvertable character directly. No case conversions
        if it's outside the locale. */
     if (((unsigned int *)s1)[d1] > ((unsigned int *)s2)[d2])
       return 1;
@@ -3219,7 +3376,7 @@ int do_locale_comp(const char *who, const mzchar *us1, intptr_t ul1, const mzcha
   }
 
   /* Walk back through the strings looking for nul characters. If we
-     find one, compare the part after the null character to update
+     find one, compare the part after the nul character to update
      endres, then continue. Unfortunately, we do too much work if an
      earlier part of the string (tested later) determines the result,
      but hopefully nul characters are rare. */
@@ -3349,6 +3506,13 @@ static Scheme_Object *mz_recase(const char *who, int to_up, mzchar *us, intptr_t
 
   reset_locale();
 
+  if (!locale_on) {
+    int len = ulen;
+    int mode = (to_up ? 1 : 0);
+    us = scheme_string_recase(us, 0, len, mode, 0, &len);
+    return scheme_make_sized_char_string(us, len, 0);
+  }
+
   if (current_locale_name
       && !*current_locale_name
       && (rktio_convert_properties(scheme_rktio) & RKTIO_CONVERT_RECASE_UTF16)) {
@@ -3430,9 +3594,198 @@ string_locale_downcase(int argc, Scheme_Object *argv[])
   return unicode_recase("string-locale-downcase", 0, argc, argv);
 }
 
+int scheme_grapheme_cluster_step(mzchar c, int *_state) {
+  /* We encode the state of finding cluster boundaries as a fixnum,
+     where the low bits are the previous character's grapheme-break
+     property plus one, and the high bits are the state for
+     Extended_Pictographic matching. A 0 state is treated as a
+     previous property that doesn't match anything (and that's why
+     we add one to the previous character's property otherwise).
+     Use 0 for the state for the start of a sequence.
+    
+     The result of taking a step is two values:
+       * a boolean indicating whether an cluster end was found
+       * a new state
+     The result state is 0 only if the character sent in is consumed
+     as part of a cluster (in which case the first result will be #t).
+     Otherwise, a true first result indicates that a boundary was
+     found just before the provided character (and the provided character's
+     grapheme end is still pending).
+    
+     So, if you get to the end of a string with a non-0 state, then
+     "flush" the state by consuming that last grapheme cluster. */
+
+  int old_state = *_state;
+  int prev = (int)((old_state - 1) & ((1 << (MZ_GRAPHBREAK_BITS+1))-1));
+  int ext_pict = (int)((old_state) >> (MZ_GRAPHBREAK_BITS+1));
+  int prop;
+
+  prop = scheme_grapheme_cluster_break(c);
+
+#define MZ_GRAPHBREAK_EXTENDED_PICTOGRAPHIC MZ_GRAPHBREAK_COUNT  
+#define MZG_PROP_STATE() (prop+1)
+#define MZG_NEXT_STATE() ((prop+1) | (scheme_isextpict(c) \
+                                      ? (MZ_GRAPHBREAK_EXTENDED_PICTOGRAPHIC << (MZ_GRAPHBREAK_BITS+1)) \
+                                      : 0))
+  
+  if (prev == MZ_GRAPHBREAK_CR) { /* some of GB3 and some of GB4 */
+    if (prop == MZ_GRAPHBREAK_LF)
+      *_state = 0;
+    else
+      *_state = MZG_NEXT_STATE();
+    return 1;
+  } else if (prop == MZ_GRAPHBREAK_CR) { /* some of GB3 and some of GB5 */
+    *_state = MZG_PROP_STATE();
+    return (old_state > 0);
+  } else if ((prev == MZ_GRAPHBREAK_CONTROL) || (prev == MZ_GRAPHBREAK_LF)) { /* rest of GB4 */
+    *_state = MZG_NEXT_STATE();
+    return 1;
+  } else if ((prop == MZ_GRAPHBREAK_CONTROL) || (prop == MZ_GRAPHBREAK_LF)) { /* rest of GB5 */
+    if (old_state == 0)
+      *_state = 0;
+    else
+      *_state = MZG_PROP_STATE();
+    return 1;
+  } else if ((prev == MZ_GRAPHBREAK_L)
+             && ((prop == MZ_GRAPHBREAK_L)
+                 || (prop == MZ_GRAPHBREAK_V)
+                 || (prop == MZ_GRAPHBREAK_LV)
+                 || (prop == MZ_GRAPHBREAK_LVT))) { /* GB6 */
+    *_state = MZG_PROP_STATE();
+    return 0;
+  } else if (((prev == MZ_GRAPHBREAK_LV)
+              || (prev == MZ_GRAPHBREAK_V))
+             && ((prop == MZ_GRAPHBREAK_V)
+                 || (prop == MZ_GRAPHBREAK_T))) { /* GB7 */
+    *_state = MZG_PROP_STATE();
+    return 0;
+  } else if (((prev == MZ_GRAPHBREAK_LVT)
+              || (prev == MZ_GRAPHBREAK_T))
+             && (prop == MZ_GRAPHBREAK_T)) { /* GB8 */
+    *_state = MZG_PROP_STATE();
+    return 0;
+  } else if ((prop == MZ_GRAPHBREAK_EXTEND)
+             || (prop == MZ_GRAPHBREAK_ZWJ)) { /* GB9 */
+    if ((ext_pict == MZ_GRAPHBREAK_EXTENDED_PICTOGRAPHIC)
+        || (ext_pict == MZ_GRAPHBREAK_EXTEND)) {
+      *_state = (MZG_PROP_STATE()
+                 | (prop << (MZ_GRAPHBREAK_BITS+1)));
+    } else
+      *_state = MZG_PROP_STATE();
+    return 0;
+  } else if (prop == MZ_GRAPHBREAK_SPACINGMARK) { /* GB9a */
+    *_state = MZG_PROP_STATE();
+    return 0;
+  } else if (prev == MZ_GRAPHBREAK_PREPEND) { /* GB9b */
+    *_state = MZG_NEXT_STATE();
+    return 0;
+  } else if ((ext_pict == MZ_GRAPHBREAK_ZWJ)
+             && scheme_isextpict(c)) { /* GB11 */
+    *_state = (MZG_PROP_STATE()
+               | (MZ_GRAPHBREAK_EXTENDED_PICTOGRAPHIC << (MZ_GRAPHBREAK_BITS+1)));
+    return 0;
+  } else if (prev == MZ_GRAPHBREAK_REGIONAL_INDICATOR) { /* GB12 and GB13 */
+    if (prop == MZ_GRAPHBREAK_REGIONAL_INDICATOR) {
+      *_state = (MZ_GRAPHBREAK_OTHER+1);
+      return 0;
+    } else {
+      *_state = MZG_NEXT_STATE();
+      return 1;
+    }
+  } else { /* GB999 */
+    *_state = MZG_NEXT_STATE();
+    return (old_state > 0);
+  }
+}
+
+static Scheme_Object *char_grapheme_cluster_step(int argc, Scheme_Object *argv[])
+{
+  const char *who = "char-grapheme-step";
+  int state;
+  int consumed;
+  Scheme_Object *a[2];
+  
+  if (!SCHEME_CHARP(argv[0]))
+    scheme_wrong_contract(who, "char?", 0, argc, argv);
+  if (!SCHEME_INTP(argv[1]))
+    scheme_wrong_contract(who, "fixnum?", 1, argc, argv);
+
+  state = (int)(SCHEME_INT_VAL(argv[1]));
+  
+  consumed = scheme_grapheme_cluster_step(SCHEME_CHAR_VAL(argv[0]), &state);
+
+  a[0] = (consumed ? scheme_true : scheme_false);
+  a[1] = scheme_make_integer(state);
+
+  return scheme_values(2, a);
+}
+
+intptr_t scheme_grapheme_cluster_span(const mzchar *str, intptr_t start, intptr_t finish)
+{
+  intptr_t i;
+  int state;
+  int consumed;
+  
+  if (start == finish)
+    return 0;
+
+  state = 0;
+  consumed = scheme_grapheme_cluster_step(str[start], &state);
+  if (consumed)
+    return 1;
+
+  for (i = start + 1; i < finish; i++) {
+    consumed = scheme_grapheme_cluster_step(str[i], &state);
+    if (consumed) {
+      if (state == 0)
+        return (i - start) + 1; /* CRLF, consumed both */
+      else
+        return i - start;
+    }
+  }
+
+  return i - start;
+}
+
+static Scheme_Object *string_grapheme_cluster_span(int argc, Scheme_Object *argv[])
+{
+  const char *who = "string-grapheme-span";
+  intptr_t start, finish;
+
+  if (!SCHEME_CHAR_STRINGP(argv[0]))
+    scheme_wrong_contract(who, "string?", 0, argc, argv);
+
+  scheme_do_get_substring_indices(who, argv[0], argc, argv, 1, 2,
+                                  &start, &finish, SCHEME_CHAR_STRTAG_VAL(argv[0]));
+
+  return scheme_make_integer(scheme_grapheme_cluster_span(SCHEME_CHAR_STR_VAL(argv[0]), start, finish));
+}
+
+static Scheme_Object *string_grapheme_cluster_count(int argc, Scheme_Object *argv[])
+{
+  const char *who = "string-grapheme-count";
+  intptr_t start, finish, len, count;
+  mzchar *str;
+
+  if (!SCHEME_CHAR_STRINGP(argv[0]))
+    scheme_wrong_contract(who, "string?", 0, argc, argv);
+
+  scheme_do_get_substring_indices(who, argv[0], argc, argv, 1, 2,
+                                  &start, &finish, SCHEME_CHAR_STRTAG_VAL(argv[0]));
+
+  str = SCHEME_CHAR_STR_VAL(argv[0]);
+
+  for (count = 0; start < finish; start += len, count++) {
+    len = scheme_grapheme_cluster_span(str, start, finish);
+  }
+
+  return scheme_make_integer(count);
+}
+
 static void reset_locale(void)
 {
   Scheme_Object *v;
+  intptr_t start, finish;
   const mzchar *name;
 
   /* This function needs to work before threads are set up: */
@@ -3783,7 +4136,7 @@ XFORM_NONGCING mzchar get_canon_decomposition(mzchar key, mzchar *b)
   }
 }
 
-XFORM_NONGCING int get_kompat_decomposition(mzchar key, unsigned short **chars)
+XFORM_NONGCING int get_kompat_decomposition(mzchar key, unsigned int **chars)
 {
   int pos = (KOMPAT_DECOMPOSE_TABLE_SIZE >> 1), new_pos;
   int below_len = pos;
@@ -3910,7 +4263,7 @@ static Scheme_Object *normalize_d(Scheme_Object *o, int kompat)
     if (scheme_needs_decompose(s[i])) {
       int klen;
       mzchar snd;
-      GC_CAN_IGNORE unsigned short *start;
+      GC_CAN_IGNORE unsigned int *start;
 
       tmp = s[i];
       while (scheme_needs_decompose(tmp)) {
@@ -3954,7 +4307,7 @@ static Scheme_Object *normalize_d(Scheme_Object *o, int kompat)
     if (scheme_needs_decompose(s[i])) {
       mzchar snd, tmp2;
       int snds = 0, klen = 0, k;
-      GC_CAN_IGNORE unsigned short*start;
+      GC_CAN_IGNORE unsigned int *start;
 
       tmp = s[i];
       while (scheme_needs_decompose(tmp)) {
@@ -4059,6 +4412,10 @@ static Scheme_Object *do_string_normalize_c (const char *who, int argc, Scheme_O
 	&& scheme_combining_class(s[i+1])
 	&& (scheme_combining_class(s[i+1]) < scheme_combining_class(s[i]))) {
       /* Need to reorder */
+      break;
+    } else if ((s[i] >= MZ_JAMO_SYLLABLE_START)
+               && (s[i] <= MZ_JAMO_SYLLABLE_END)) {
+      /* Need Hangul decomposition */
       break;
     } else if ((s[i] >= MZ_JAMO_INITIAL_CONSONANT_START)
 	       && (s[i] <= MZ_JAMO_INITIAL_CONSONANT_END)
@@ -4974,7 +5331,7 @@ static intptr_t utf8_decode_x(const unsigned char *s, intptr_t start, intptr_t e
 		if (pending_surrogate) {
 		  if (us)
 		    ((unsigned short *)us)[j] = pending_surrogate;
-		  j++; /* Accept previousy written unpaired surrogate */
+		  j++; /* Accept previously written unpaired surrogate */
 		  pending_surrogate = 0;
 		  if (j >= dend)
 		    break;
@@ -4988,7 +5345,7 @@ static intptr_t utf8_decode_x(const unsigned char *s, intptr_t start, intptr_t e
 	      if (pending_surrogate) {
 		if (us)
 		  ((unsigned short *)us)[j] = pending_surrogate;
-		j++; /* Accept previousy written unpaired surrogate */
+		j++; /* Accept previously written unpaired surrogate */
 		pending_surrogate = 0;
 		if (j >= dend)
 		  break;
@@ -5191,7 +5548,7 @@ mzchar *scheme_utf8_decode_to_buffer(const unsigned char *s, intptr_t len,
 intptr_t scheme_utf8_decode_count(const unsigned char *s, intptr_t start, intptr_t end,
 			     int *_state, int might_continue, int permissive)
 {
-  intptr_t pos = 0;
+  intptr_t pos = 0, r;
 
   if (!_state || !*_state) {
     /* Try fast path (all ASCII): */

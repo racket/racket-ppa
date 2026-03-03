@@ -10,6 +10,7 @@
           "mreval.rkt"
           "keep.rkt"
           scribble/urls
+          scribblings/private/docname
           scribble/struct
           racket/class
 
@@ -188,7 +189,7 @@ bindings. For example, it can be used inside a function body:
 (four (circle 10))
 ]
 
-More typically, Racketeers use the @racket[let] or @racket[let*] form
+Sometimes, Racketeers use the @racket[let] or @racket[let*] form
 for local binding. An advantage of @racket[let] is that it can be used
 in any expression position. Also, it binds many identifiers at once,
 instead of requiring a separate @racket[define] for each identifier:
@@ -594,8 +595,7 @@ If you are new to programming or if you have the patience to work
 through a textbook, we recommend reading
 @italic{@link["http://www.htdp.org/"]{How to Design Programs}}. If you
 have already read it, or if you want to see where the book will take
-you, then see @other-manual['(lib
-"web-server/scribblings/tutorial/continue.scrbl")].
+you, then see @Continue[Continue-title].
 
 For experienced programmers, to continue touring Racket from a
 systems-oriented perspective instead of pictures, your next stop is

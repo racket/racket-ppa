@@ -4,6 +4,7 @@
          "html-properties.rkt"
          "private/literal-anchor.rkt"
          racket/class
+         racket/match
          racket/path
          racket/file
          racket/port
@@ -183,6 +184,13 @@
                       `((style ,(format "background-color: ~a" (color->string (background-color-property-color v)))))]
                      [(hover-property? v)
                       `((title ,(hover-property-text v)))]
+                     [(cell-padding-property? v)
+                      (define (ex n) (exact->inexact n))
+                      `((style ,(format "padding: ~aex ~aex ~aex ~aex;"
+                                        (ex (cell-padding-property-top v))
+                                        (ex (cell-padding-property-right v))
+                                        (ex (cell-padding-property-bottom v))
+                                        (ex (cell-padding-property-left v)))))]
                      [else null]))
                   (style-properties style))))])
     (let ([name (style-name style)])
@@ -231,7 +239,7 @@
          [placeholder ,emptylabel]
          [title "Enter a search string to search the manuals"]
          [onkeypress ,(format "return DoSearchKey(event, this, ~s, ~s);"
-                              (version) top-path)])))))
+                              (get-installation-name) top-path)])))))
 (define search-box (make-search-box "../"))
 (define top-search-box (make-search-box ""))
 
@@ -273,6 +281,7 @@
              extract-version
              extract-authors
              extract-pretitle
+             extend-part-context
              link-render-style-at-element)
     (inherit-field prefix-file style-file style-extra-files image-preferences)
 
@@ -282,6 +291,7 @@
                 ;; user start page). If it's a path, then it's also
                 ;; used for the "top" link on the page.
                 [up-path #f]
+                [search-up-path up-path]
                 [script-path #f]
                 [script-file #f]
                 [search-box? #f])
@@ -727,8 +737,8 @@
           (define ps
             ((if (or (nearly-top? d) (eq? d top)) values (lambda (p) (if (pair? p) (cdr p) null)))
              (let flatten ([d d] [prefixes null] [top? #t])
-               (let ([prefixes (if (and (not top?) (part-tag-prefix d))
-                                   (cons (part-tag-prefix d) prefixes)
+               (let ([prefixes (if (and (not top?) (part-tag-prefix-string d))
+                                   (cons (part-tag-prefix-string d) prefixes)
                                    prefixes)])
                  (append*
                   ;; don't include the section if it's in the TOC
@@ -766,7 +776,7 @@
                                               ,@(format-number
                                                  (collected-info-number
                                                   (part-collected-info p ri))
-                                                 '((tt nbsp)))))
+                                                 '((span ([class "stt"]) nbsp)))))
                                       '(""))
                                 ,@(if (toc-element? p)
                                       (render-content (toc-element-toc-content p)
@@ -814,6 +824,9 @@
 
     (define/public (extract-part-source d ri)
       (extract-inherited d ri document-source? document-source-module-path))
+
+    (define/public (extract-show-language-family d ri)
+      (extract-inherited d ri (lambda (v) (eq? v 'show-language-family)) values))
 
     (define/public (part-nesting-depth d ri)
       0)
@@ -903,7 +916,6 @@
                            (extract js-addition? js-addition-path)
                            (extract js-style-addition? js-style-addition-path)
                            (reverse extra-script-files)))
-                   ,(xml:comment "[if IE 6]><style type=\"text/css\">.SIEHidden { overflow: hidden; }</style><![endif]")
                    ,@(extract head-addition? head-addition-xexpr)
                    ,@(for/list ([p (style-properties (part-style d))]
                                 #:when (head-extra? p))
@@ -917,6 +929,7 @@
                      (div ([class "main"])
                        ,@(parameterize ([current-version (extract-version d)])
                            (render-version d ri))
+                       ,@(render-language-family d ri)
                        ,@(navigation d ri #t)
                        ,@(render-part d ri)
                        ,@(navigation d ri #f)))
@@ -1017,12 +1030,30 @@
            `([title . ,(if title* (string-append label " to " title*) label)]
              [data-pltdoc . "x"]
              ,@more)))))
+      (define no-nav? (and (memq 'no-navigation (style-properties (part-style d))) #t))
+      (define family-nav? (and (memq 'family-navigation (style-properties (part-style d))) #t))
+      (define show-fam? (extract-show-language-family d ri))
+      (define fam (and (or family-nav? show-fam?)
+                       (or (search-extras (hash-ref (extend-part-context d) 'index-extras #hasheq()) 'language-family)
+                           '("Racket"))))
+      (define (wrap-family c)
+        (if family-nav?
+            `((div ([style "display: none;"]
+                    [class "family-navigation"]
+                    [data-familynav ,(string-join fam ",")])
+                   ,@c))
+            c))
       (define top-link
         (titled-url
-         "up" (if (path? up-path)
-                  (url->string* (path->url up-path))
-                  "../index.html")
-         `[onclick . ,(format "return GotoPLTRoot(\"~a\");" (version))]))
+         "up" (cond
+                [(path? up-path) (url->string* (path->url up-path))]
+                [up-path "../index.html"]
+                [else "index.html"])
+         `[onclick . ,(format "return GotoPLTRoot(\"~a\", \"index.html\", \"~a\");"
+                              (get-installation-name)
+                              (if up-path
+                                  "../"
+                                  ""))]))
       (define tocset-toggle
         (make-element "tocsettoggle"
                       (list
@@ -1037,54 +1068,58 @@
       (define navleft
         `(span ([class "navleft"])
            ,@(if search-box?
-                 (list (if up-path search-box top-search-box))
+                 (list (if search-up-path search-box top-search-box))
                  (list `(div ([class "nosearchform"]))))
-           ,@(render
-              sep-element
-              (and up-path (make-element top-link top-content))
-              tocset-toggle
-              ;; sep-element
-              ;; (make-element
-              ;;  (if parent (make-target-url "index.html" #f) "nonavigation")
-              ;;  contents-content)
-              ;; sep-element
-              ;; (if (or (not index) (eq? d index))
-              ;;   (make-element "nonavigation" index-content)
-              ;;   (make-link-element #f index-content (car (part-tags/nonempty index))))
-              )))
+           ,@(wrap-family
+              (render
+               sep-element
+               (and (or up-path family-nav?) (not no-nav?) (make-element top-link top-content))
+               tocset-toggle
+               ;; sep-element
+               ;; (make-element
+               ;;  (if parent (make-target-url "index.html" #f) "nonavigation")
+               ;;  contents-content)
+               ;; sep-element
+               ;; (if (or (not index) (eq? d index))
+               ;;   (make-element "nonavigation" index-content)
+               ;;   (make-link-element #f index-content (car (part-tags/nonempty index))))
+               ))))
       (define navright
-        (if (not (or parent up-path next))
-          ""
-          `(span ([class "navright"])
-             ,@(render
-                ;; put space here for text browsers and to avoid an Opera issue
-                sep-element
-                (make-element
-                 (cond [(not parent) "nonavigation"]
-                       [prev (titled-url "backward" prev)]
-                       [else (titled-url "backward" "index.html"
-                                         #:title-from
-                                         (and (part? parent) parent))])
-                 prev-content)
-                sep-element
-                (make-element
-                 (cond
-                   [(and (part? parent) (toc-part? parent ri)
-                         (part-parent parent ri))
-                    (titled-url "up" parent)]
-                   [parent (titled-url "up" "index.html" #:title-from parent)]
-                   ;; up-path = #t => go up to the start page, using
-                   ;; cookies to get to the user's version of it (see
-                   ;; scribblings/main/private/utils for the code that
-                   ;; creates these cookies.)
-                   [(eq? #t up-path) top-link]
-                   [up-path (titled-url "up" up-path)]
-                   [else "nonavigation"])
-                 up-content)
-                sep-element
-                (make-element
-                 (if next (titled-url "forward" next) "nonavigation")
-                 next-content)))))
+        (if (or (not (or parent up-path next family-nav?)) no-nav?)
+            ""
+            `(span ([class "navright"])
+                   ,@(wrap-family
+                      (render
+                       ;; put space here for text browsers and to avoid an Opera issue
+                       sep-element
+                       (make-element
+                        (cond [(not parent) "nonavigation"]
+                              [prev (titled-url "backward" prev '[rel . "prev"])]
+                              [else (titled-url "backward" "index.html" '[rel . "prev"]
+                                                #:title-from
+                                                (and (part? parent) parent))])
+                        prev-content)
+                       sep-element
+                       (make-element
+                        (cond
+                          [(and (part? parent) (toc-part? parent ri)
+                                (part-parent parent ri))
+                           (titled-url "up" parent)]
+                          [parent
+                           (titled-url "up" "index.html" #:title-from parent)]
+                          ;; up-path = #t => go up to the start page using
+                          ;; query or cookies to get to the user's version of it (see
+                          ;; scribblings/main/private/utils for the code that
+                          ;; creates these cookies.)
+                          [(or (eq? #t up-path) family-nav?)
+                           top-link]
+                          [up-path (titled-url "up" up-path)]
+                          [else "nonavigation"])
+                        up-content)
+                       sep-element
+                       (make-element
+                        (if next (titled-url "forward" next '[rel . "next"]) "nonavigation")
+                        next-content))))))
       (define navbar
         `(div ([class ,(if top? "navsettop" "navsetbottom")])
            ,navleft ,navright nbsp)) ; need nbsp to make the navset bg visible
@@ -1110,83 +1145,140 @@
                       d
                       ri))))))
 
+    (define/private (render-language-family d ri)
+      (define show-fam? (extract-show-language-family d ri))
+      (define fam (and show-fam?
+                       (or (search-extras (hash-ref (extend-part-context d) 'index-extras #hasheq()) 'language-family)
+                           '("Racket"))))
+      (if show-fam?
+          (let ([fam (or fam '("Racket"))])
+            (list `(div ([class "navfamily"]
+                         [data-fam ,(string-join fam ",")]
+                         [data-fam-path ,(if search-up-path "../" "")]
+                         [data-version ,(get-installation-name)])
+                        ,@(if (null? fam)
+                              null
+                              `((span ([class "docfamily"])
+                                      ,(car fam)))))))
+          null))
+
     (define/public (extract-render-convertible-as d)
       (for/or ([v (in-list (style-properties (part-style d)))])
         (and (render-convertible-as? v)
              (render-convertible-as-types v))))
-    
+
     (define/override (render-part-content d ri)
       (parameterize ([current-render-convertible-requests (or (extract-render-convertible-as d) 
                                                               (current-render-convertible-requests))])
-        (let ([number (collected-info-number (part-collected-info d ri))])
-          `(,@(let ([pres (extract-pretitle d)])
-                (append-map (lambda (pre)
-                              (do-render-paragraph pre d ri #f #t))
-                            pres))
-            ,@(cond
-                [(and (not (part-title-content d)) (null? number)) null]
-                [(part-style? d 'hidden)
-                 (map (lambda (t)
-                        `(a ((name ,(format "~a" (anchor-name 
-                                                  (add-current-tag-prefix
-                                                   (tag-key t ri))))))))
-                      (part-tags d))]
-                [else `((,(case (number-depth number)
-                            [(0) 'h2]
-                            [(1) 'h3]
-                            [(2) 'h4]
-                            [else 'h5])
-                         ,(let ([src (extract-part-source d ri)]
-                                [taglet (for/or ([t (in-list (part-tags d))])
-                                          (and (pair? t)
-                                               (eq? 'part (car t))
-                                               (= 2 (length t))
-                                               (cadr t)))])
-                            (if (and src taglet)
-                                `([x-source-module ,(format "~s" src)]
-                                  ,@(let* ([path (resolved-module-path-name
-                                                  (module-path-index-resolve
-                                                   (module-path-index-join src #f)))]
-                                           [pkg (and (path? path)
-                                                     (path->pkg path #:cache pkg-cache))])
-                                      (if pkg
-                                          `([x-source-pkg ,pkg])
-                                          null))
-                                  ,@(let ([prefixes (current-tag-prefixes)])
-                                      (if (null? prefixes)
-                                          null
-                                          `([x-part-prefixes ,(format "~s" prefixes)])))
-                                  [x-part-tag ,(format "~s" taglet)])
-                                '()))
-                         ,@(format-number number '((tt nbsp)))
-                         ,@(map (lambda (t)
-                                  `(a ([name ,(format "~a" (anchor-name
-                                                            (add-current-tag-prefix
-                                                             (tag-key t ri))))])))
-                                (part-tags d))
-                         ,@(if (part-title-content d)
-                               (render-content (part-title-content d) d ri)
-                               null)))])
-            ,@(let ([auths (extract-authors d)])
-                (if (null? auths)
-                    null
-                    `((div ([class "SAuthorListBox"])
-                           (span ([class "SAuthorList"])
-                                 ,@(apply
-                                    append
-                                    (for/list ([auth (in-list auths)]
-                                               [pos (in-naturals)])
-                                      (let ([v (do-render-paragraph auth d ri #f #t)])
-                                        (if (zero? pos)
-                                            v
-                                            (cons '(span ([class "SAuthorSep"]) (br)) v))))))))))
-            ,@(render-flow* (part-blocks d) d ri #f #f)
-            ,@(let loop ([pos 1]
-                         [secs (part-parts d)])
-                (if (null? secs)
-                    null
-                    (append (render-part (car secs) ri)
-                            (loop (add1 pos) (cdr secs)))))))))
+        (define (add-title-and-content-wrapper l)
+          (define w (ormap (lambda (v) (and (part-title-and-content-wrapper? v) v))
+                           (style-properties (part-style d))))
+          (cond
+            [w `((,(string->symbol (part-title-and-content-wrapper-tag w))
+                  ,(part-title-and-content-wrapper-attribs w)
+                  ,@l))]
+            [else l]))
+        (let* ([number (collected-info-number (part-collected-info d ri))]
+               [depth (add1 (number-depth number))]
+               [formatted-number (format-number number "")]
+               [number-string
+                (if (null? formatted-number)
+                    "0"
+                    (car formatted-number))])
+          (add-title-and-content-wrapper
+           `((section ([class ,(format "SsectionLevel~a" depth)]
+                       [id ,(format "section ~a" number-string)])
+             ,@(let ([pres (extract-pretitle d)])
+                 (append-map (lambda (pre)
+                               (do-render-paragraph pre d ri #f #t))
+                             pres))
+             ,@(cond
+                 [(and (not (part-title-content d)) (null? number)) null]
+                 [(part-style? d 'hidden)
+                  (map (lambda (t)
+                         `(a ((name ,(format "~a" (anchor-name 
+                                                   (add-current-tag-prefix
+                                                    (tag-key t ri))))))))
+                       (part-tags d))]
+                 [else
+                  (define src (extract-part-source d ri))
+                  (define taglet
+                    (for/or ([t (in-list (part-tags d))])
+                      (and (pair? t)
+                           (eq? 'part (car t))
+                           (= 2 (length t))
+                           (cadr t))))
+                  `((,(case (number-depth number)
+                        [(0) 'h1]
+                        [(1) 'h2]
+                        [(2) 'h3]
+                        [(3) 'h4]
+                        [else 'h5])
+                     ,(append
+                       (if (and src taglet)
+                           `([x-source-module ,(format "~s" src)]
+                             ,@(let* ([path (resolved-module-path-name
+                                             (module-path-index-resolve
+                                              (module-path-index-join src #f)))]
+                                      [pkg (and (path? path)
+                                                (path->pkg path #:cache pkg-cache))])
+                                 (if pkg
+                                     `([x-source-pkg ,pkg])
+                                     null))
+                             ,@(let ([prefixes (current-tag-prefixes)])
+                                 (if (null? prefixes)
+                                     null
+                                     `([x-part-prefixes ,(format "~s" prefixes)])))
+                             [x-part-tag ,(format "~s" taglet)])
+                           '())
+                       (list '[class "heading"])
+                       (style->attribs (part-style d)))
+                     ,@(format-number number '((span ([class "stt"]) nbsp)))
+                     ,@(map (lambda (t)
+                              `(a ([name ,(format "~a" (anchor-name (add-current-tag-prefix (tag-key t ri))))])))
+                            (part-tags d))
+                     ,@(if (part-title-content d)
+                           (render-content (part-title-content d) d ri)
+                           null)
+                     ,@(if (part-style? d 'no-header-controls)
+                           null
+                           `((span ([class "button-group"])
+                                   ,@(match (part-tags d)
+                                       ['() '()]
+                                       [(cons t _)
+                                        (list `(a ([href ,(format "#~a" (anchor-name
+                                                                         (add-current-tag-prefix
+                                                                          (tag-key t ri))))]
+                                                   [class "heading-anchor"]
+                                                   [title "Link to here"])
+                                                  "🔗"))])
+                                   ,@(if (and src taglet)
+                                         (list '(a ([class "heading-source"]
+                                                    [title "Internal Scribble link and Scribble source"]) "ℹ"))
+                                         '())
+                                   ;; this is a dummy node so that the line height of heading-anchor
+                                   ;; and heading-source are correct (even when their font size is not 100%)
+                                   (span ([style "visibility: hidden"]) " "))))))])
+             ,@(let ([auths (extract-authors d)])
+                 (if (null? auths)
+                     null
+                     `((div ([class "SAuthorListBox"])
+                            (div ([class "SAuthorList"])
+                                  ,@(apply
+                                     append
+                                     (for/list ([auth (in-list auths)]
+                                                [pos (in-naturals)])
+                                       (let ([v (do-render-paragraph auth d ri #f #t)])
+                                         (if (zero? pos)
+                                             v
+                                             (cons '(span ([class "SAuthorSep"]) (br)) v))))))))))
+             ,@(render-flow* (part-blocks d) d ri #f #f)
+             ,@(let loop ([pos 1]
+                          [secs (part-parts d)])
+                 (if (null? secs)
+                     null
+                     (append (render-part (car secs) ri)
+                             (loop (add1 pos) (cdr secs)))))))))))
 
     (define/private (render-flow* p part ri starting-item? special-last?)
       ;; Wrap each table with <p>, except for a trailing table
@@ -1695,7 +1787,8 @@
                                                 (filter (lambda (a)
                                                           (or (attributes? a)
                                                               (color-property? a)
-                                                              (background-color-property? a)))
+                                                              (background-color-property? a)
+                                                              (cell-padding-property? a)))
                                                         (style-properties column-style)))
                                                (let ([ps (style-properties column-style)])
                                                  (cond
@@ -1920,7 +2013,7 @@
         (apply
          string-append
          (for/list ([p (in-list parents)])
-           (or (part-tag-prefix p) "")))))
+           (or (part-tag-prefix-string p) "")))))
 
     (define/override (part-nesting-depth d ri)
       (min (part-depth d ri) (sub1 directory-depth)))
@@ -2117,3 +2210,10 @@
             (string-append "file://" (path->string p))
             (url->string (path->url p))))
       (url->string (path->url p))))
+
+(define (search-extras extras-tree key)
+  (cond
+    [(hash? extras-tree) (hash-ref extras-tree key #f)]
+    [(pair? extras-tree) (or (search-extras (car extras-tree) key)
+                             (search-extras (cdr extras-tree) key))]
+    [else #f]))

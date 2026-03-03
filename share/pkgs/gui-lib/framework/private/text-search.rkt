@@ -3,6 +3,8 @@
 (require racket/unit
          racket/class
          racket/list
+         racket/match
+         racket/dict
          mred/mred-sig
          "coroutine.rkt"
          "sig.rkt"
@@ -16,6 +18,7 @@
           [prefix frame: framework:frame^]
           [prefix editor: framework:editor^]
           [prefix keymap: framework:keymap^]
+          [prefix color-prefs: framework:color-prefs^]
           text-basic^)
   (export text-search^)
 
@@ -38,6 +41,51 @@
         (f (send normal-search-color green))
         (f (send normal-search-color blue)))))
   (define white-on-black-yellow-bubble-color (make-object color% 50 50 5))
+
+  (define-local-member-name
+    when-searching-str-redo-search
+    position-possibly-in-embedded-editor-changed)
+
+  (define searching-embedded<%>
+    (interface ()
+      ))
+
+  (define searching-embedded-mixin
+    (mixin ((class->interface text%)) (searching-embedded<%>)
+      (inherit get-admin)
+      ;; also need to call position-possibly-in-embedded-editor-changed
+      ;; when the text gets the focus from its
+      ;; enclosing editor-snip
+      (define/augment (after-insert start len)
+        (need-searching-update 'insert)
+        (inner (void) after-insert start len))
+      (define/augment (after-delete start len)
+        (need-searching-update 'delete)
+        (inner (void) after-delete start len))
+      (define/augment (after-set-position)
+        (need-searching-update 'set-position)
+        (inner (void) after-set-position))
+
+      (define/private (need-searching-update what)
+        (let loop ([txt this])
+          (define txt-admin (send txt get-admin))
+          (cond
+            [(is-a? txt-admin editor-snip-editor-admin<%>)
+             (define snip (send txt-admin get-snip))
+             (define snip-admin (send snip get-admin))
+             (when snip-admin
+               (define ed (send snip-admin get-editor))
+               (loop ed))]
+            [else
+             (when (is-a? txt searching<%>)
+               (match what
+                 ['insert
+                  (send txt when-searching-str-redo-search)]
+                 ['delete
+                  (send txt when-searching-str-redo-search)]
+                 ['set-position
+                  (send txt position-possibly-in-embedded-editor-changed)]))])))
+      (super-new)))
 
   (define searching-mixin
     (mixin (editor:basic<%> editor:keymap<%> basic<%>) (searching<%>)
@@ -64,7 +112,11 @@
       ;; (and thus we have light/dark bubbles)
       (define replace-mode? #f)
     
-      ;; to-replace-highlight : (or/c #f (cons/c number number))
+      ;; to-replace-highlight :
+      #;(or/c #f
+              (cons/c (list*of (is-a?/c text%)
+                               natural?)
+                      natural?))
       ;; the location where the next replacement will happen, or #f
       ;; if there isn't one (in case the insertion point is past
       ;; the last search hit, or replace-mode? is #f)
@@ -75,9 +127,9 @@
       ;; search-bubble-table : hash-table[(cons number number) -o> #t]
       (define search-bubble-table (make-hash))
     
-      ;; get-replace-search-hit : -> (or/c number #f)
+      ;; get-replace-search-hit : -> (or/c (list*of (is-a?/c text%) natural?) #f)
       ;; returns the nearest search hit after `replace-start'
-      (define/public (get-replace-search-hit) 
+      (define/public (get-replace-search-hit)
         (and searching-str
              to-replace-highlight
              (car to-replace-highlight)))
@@ -119,14 +171,16 @@
     
       (define/override (get-keymaps)
         (editor:add-after-user-keymap (keymap:get-search) (super get-keymaps)))
-    
-      (define/augment (after-insert start len)
+
+      (define/public (when-searching-str-redo-search)
         (when searching-str
-          (redo-search #t))
+          (redo-search #t)))
+
+      (define/augment (after-insert start len)
+        (when-searching-str-redo-search)
         (inner (void) after-insert start len))
       (define/augment (after-delete start len)
-        (when searching-str
-          (redo-search #t))
+        (when-searching-str-redo-search)
         (inner (void) after-delete start len))
     
       (define/override (on-focus on?)
@@ -141,10 +195,13 @@
                (update-yellow)])))
         (super on-focus on?))
     
-      (define/augment (after-set-position)
+      (define/public (position-possibly-in-embedded-editor-changed)
         (update-yellow)
         (maybe-queue-update-replace-bubble)
-        (maybe-queue-search-position-update)
+        (maybe-queue-search-position-update))
+
+      (define/augment (after-set-position)
+        (position-possibly-in-embedded-editor-changed)
         (inner (void) after-set-position))
     
       (define/private (maybe-queue-update-replace-bubble)
@@ -158,8 +215,7 @@
                ;; the replace bubble to its proper color
                ;; before it finishes so we can just let
                ;; do this job
-             
-             
+
                (define (replace-highlight->normal-hit)
                  (when to-replace-highlight
                    (let ([old-to-replace-highlight to-replace-highlight])
@@ -172,7 +228,7 @@
                   (when to-replace-highlight
                     (unhighlight-replace))]
                  [else
-                  (define next (do-search (get-start-position)))
+                  (define next (do-search (get-focus-editor-start-position)))
                   (begin-edit-sequence #t #f)
                   (cond
                     [next
@@ -210,18 +266,20 @@
           (queue-callback
            (λ ()
              (when searching-str
-               (define start-pos (get-focus-editor-start-position))
-               (define (how-many-to-add k)
-                 (if (search-result-compare <= (car k) start-pos) 1 0))
-               (define count
-                 (+ (if to-replace-highlight
-                        (how-many-to-add to-replace-highlight)
-                        0)
-                    (for/sum ([(k v) (in-hash search-bubble-table)])
-                      (how-many-to-add k))))
-               (update-before-caret-search-hit-count count))
+               (update-before-caret-search-hit-count
+                (calculate-before-caret-search-hit-count)))
              (set! search-position-callback-running? #f))
            #f)))
+
+      (define/private (calculate-before-caret-search-hit-count)
+        (define start-pos (get-focus-editor-start-position))
+        (define (how-many-to-add k)
+          (if (search-result-compare <= (car k) start-pos) 1 0))
+        (+ (if to-replace-highlight
+               (how-many-to-add to-replace-highlight)
+               0)
+           (for/sum ([(k v) (in-hash search-bubble-table)])
+             (how-many-to-add k))))
 
       (define/private (get-focus-editor-start-position)
         (let loop ([txt this])
@@ -264,7 +322,7 @@
                   (when (find-string searching-str 'forward start end #t case-sensitive?)
                     (set! clear-yellow (highlight-range
                                         start end
-                                        (if (preferences:get 'framework:white-on-black?)
+                                        (if (color-prefs:white-on-black-color-scheme?)
                                             white-on-black-yellow-bubble-color
                                             "khaki")
                                         #f 'low 'ellipse))))
@@ -346,15 +404,14 @@
             (define new-search-bubbles '())
             (define new-replace-bubble #f)
             (define first-hit (do-search 0))
-         
-            (define-values (this-search-hit-count this-before-caret-search-hit-count)
+
+            ;; TODO (maybe-queue-search-position-update)
+            (define this-search-hit-count
               (cond
                 [first-hit
                  (define sp (get-focus-editor-start-position))
                  (let loop ([bubble-start first-hit]
-                            [search-hit-count 0]
-                            [before-caret-search-hit-count
-                             (if (search-result-compare < first-hit sp) 1 0)])
+                            [search-hit-count 0])
                    (maybe-pause)
                    (define bubble-end (search-result+ bubble-start (string-length searching-str)))
                    (define bubble (cons bubble-start (string-length searching-str)))
@@ -371,23 +428,15 @@
 
                    (define next (do-search bubble-end))
                 
-                   (define next-before-caret-search-hit-count
-                     (if (and next (search-result-compare < next sp))
-                         (+ 1 before-caret-search-hit-count)
-                         before-caret-search-hit-count))
                    (cond
                      [next
                       ;; start a new one if there is another hit
-                      (loop next 
-                            (+ search-hit-count 1)
-                            next-before-caret-search-hit-count)]
+                      (loop next (+ search-hit-count 1))]
                      [else
-                      (values (+ search-hit-count 1) 
-                              before-caret-search-hit-count)]))]
-                [else (values 0 0)]))
+                      (+ search-hit-count 1)]))]
+                [else 0]))
          
             (set! search-hit-count this-search-hit-count)
-            (set! before-caret-search-hit-count this-before-caret-search-hit-count)
          
             (maybe-pause)
          
@@ -404,7 +453,8 @@
                  (highlight-hit search-bubble)])
               (maybe-pause))
          
-            (update-yellow) 
+            (update-yellow)
+            (set! before-caret-search-hit-count (calculate-before-caret-search-hit-count))
             (end-edit-sequence)]
            [else
             (begin-edit-sequence #t #f)
@@ -458,13 +508,13 @@
                 (lt (get-the-position (car l))
                     (get-the-position (car r)))])])))
 
-      (define all-txt-with-regions-to-clear (make-hasheq))
+      (define all-txt-with-regions-to-clear (make-mutable-object=-hash))
       (define/private (clear-all-regions) 
         (when to-replace-highlight 
           (unhighlight-replace))
-        (for ([(txt _) (in-hash all-txt-with-regions-to-clear)])
+        (for ([(txt _) (in-dict all-txt-with-regions-to-clear)])
           (send txt unhighlight-ranges/key 'plt:framework:search-bubbles))
-        (set! all-txt-with-regions-to-clear (make-hasheq))
+        (set! all-txt-with-regions-to-clear (make-mutable-object=-hash))
         (set! search-bubble-table (make-hash)))
 
       ;; do-search : context+search-position -> context+search-position
@@ -486,7 +536,8 @@
                    [context context])
           (define found-at-this-level
             (send (car context) find-string-embedded
-                  searching-str 'forward position 'eof #t case-sensitive?))
+                  searching-str 'forward position 'eof #t case-sensitive?
+                  #:recur-inside? (λ (x) (is-a? (send x get-editor) searching-embedded<%>))))
           (cond
             [found-at-this-level
              (let loop ([context context]
@@ -528,7 +579,7 @@
         (hash-set! search-bubble-table bubble #t)
         (define-values (txt start end) (get-highlighting-text-and-range bubble))
         (when txt
-          (hash-set! all-txt-with-regions-to-clear txt #t)
+          (dict-set! all-txt-with-regions-to-clear txt #t)
           (send txt highlight-range
                 start end
                 (if replace-mode? light-search-color normal-search-color)
@@ -584,3 +635,5 @@
         (highlight-range anchor-pos anchor-pos "red"))
     
       (super-new))))
+
+(define-custom-hash-types object=-hash #:key? object? object=? object=-hash-code)

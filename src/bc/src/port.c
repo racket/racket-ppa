@@ -234,7 +234,6 @@ static void rw_evt_wakeup(Scheme_Object *rww, void *fds);
 
 static int progress_evt_ready(Scheme_Object *rww, Scheme_Schedule_Info *sinfo);
 static int closed_evt_ready(Scheme_Object *rww, Scheme_Schedule_Info *sinfo);
-static int filesystem_change_evt_ready(Scheme_Object *evt, Scheme_Schedule_Info *sinfo);
 
 static void filesystem_change_evt_need_wakeup (Scheme_Object *port, void *fds);
 
@@ -254,7 +253,7 @@ static void force_close_input_port(Scheme_Object *port);
 ROSYM static Scheme_Object *text_symbol, *binary_symbol, *module_symbol;
 ROSYM static Scheme_Object *append_symbol, *error_symbol, *update_symbol, *can_update_symbol;
 ROSYM static Scheme_Object *replace_symbol, *truncate_symbol, *truncate_replace_symbol;
-ROSYM static Scheme_Object *must_truncate_symbol;
+ROSYM static Scheme_Object *must_truncate_symbol, *replace_permissions_symbol;
 
 ROSYM Scheme_Object *scheme_none_symbol, *scheme_line_symbol, *scheme_block_symbol;
 
@@ -294,6 +293,7 @@ scheme_init_port (Scheme_Startup_Env *env)
   REGISTER_SO(update_symbol);
   REGISTER_SO(can_update_symbol);
   REGISTER_SO(must_truncate_symbol);
+  REGISTER_SO(replace_permissions_symbol);
 
   text_symbol = scheme_intern_symbol("text");
   binary_symbol = scheme_intern_symbol("binary");
@@ -306,6 +306,7 @@ scheme_init_port (Scheme_Startup_Env *env)
   update_symbol = scheme_intern_symbol("update");
   can_update_symbol = scheme_intern_symbol("can-update");
   must_truncate_symbol = scheme_intern_symbol("must-truncate");
+  replace_permissions_symbol = scheme_intern_symbol("replace-permissions");
 
   REGISTER_SO(scheme_none_symbol);
   REGISTER_SO(scheme_line_symbol);
@@ -394,7 +395,7 @@ void scheme_init_port_wait()
   scheme_add_evt(scheme_progress_evt_type, (Scheme_Ready_Fun)progress_evt_ready, NULL, NULL, 1);
   scheme_add_evt(scheme_write_evt_type, (Scheme_Ready_Fun)rw_evt_ready, rw_evt_wakeup, NULL, 1);
   scheme_add_evt(scheme_port_closed_evt_type, (Scheme_Ready_Fun)closed_evt_ready, NULL, NULL, 1);
-  scheme_add_evt(scheme_filesystem_change_evt_type, (Scheme_Ready_Fun)filesystem_change_evt_ready, 
+  scheme_add_evt(scheme_filesystem_change_evt_type, (Scheme_Ready_Fun)scheme_filesystem_change_evt_ready,
                  filesystem_change_evt_need_wakeup, NULL, 1);
 }
 
@@ -967,8 +968,9 @@ static void post_progress(Scheme_Input_Port *ip)
   ip->progress_evt = NULL;
 }
 
-XFORM_NONGCING static void inc_pos(Scheme_Port *ip, int a)
+XFORM_NONGCING static void inc_pos_for_special(Scheme_Port *ip)
 {
+  int a = 1;
   if (ip->column >= 0)
     ip->column += a;
   if (ip->readpos >= 0)
@@ -1239,7 +1241,7 @@ intptr_t scheme_get_byte_string_unless(const char *who,
 	if (ip->p.position >= 0)
 	  ip->p.position++;
 	if (ip->p.count_lines)
-	  inc_pos((Scheme_Port *)ip, 1);
+	  inc_pos_for_special((Scheme_Port *)ip);
       }
 
       if (!peek && ip->progress_evt)
@@ -1399,7 +1401,7 @@ intptr_t scheme_get_byte_string_unless(const char *who,
 	    if (ip->p.position >= 0)
 	      ip->p.position++;
 	    if (ip->p.count_lines)
-	      inc_pos((Scheme_Port *)ip, 1);
+	      inc_pos_for_special((Scheme_Port *)ip);
 	  }
 	  
 	  return SCHEME_SPECIAL;
@@ -1537,23 +1539,18 @@ int scheme_unless_ready(Scheme_Object *unless)
 void scheme_wait_input_allowed(Scheme_Input_Port *ip, int nonblock)
 {
   while (ip->input_lock) {
+    ip->direct_read_waiting = 1;
     scheme_post_sema_all(ip->input_giveup);
     scheme_wait_sema(ip->input_lock, nonblock ? -1 : 0);
   }
 }
 
-static void release_input_lock(Scheme_Input_Port *ip)
+static void release_input_lock_and_elect_new_leader(Scheme_Input_Port *ip)
 {
   scheme_post_sema_all(ip->input_lock);
   ip->input_lock = NULL;
   ip->input_giveup = NULL;
 
-  if (scheme_current_thread->running & MZTHREAD_NEED_SUSPEND_CLEANUP)
-    scheme_current_thread->running -= MZTHREAD_NEED_SUSPEND_CLEANUP;
-}
-
-static void elect_new_main(Scheme_Input_Port *ip)
-{
   if (ip->input_extras_ready) {
     scheme_post_sema_all(ip->input_extras_ready);
     ip->input_extras = NULL;
@@ -1561,14 +1558,13 @@ static void elect_new_main(Scheme_Input_Port *ip)
   }
 }
 
-static void release_input_lock_and_elect_new_main(void *_ip)
+static void do_release_input_lock_and_elect_new_leader(void *_ip)
 {
   Scheme_Input_Port *ip;
 
   ip = scheme_input_port_record(_ip);
 
-  release_input_lock(ip);
-  elect_new_main(ip);
+  release_input_lock_and_elect_new_leader(ip);
 }
 
 static void check_suspended()
@@ -1577,16 +1573,13 @@ static void check_suspended()
     scheme_thread_block(0.0);
 }
 
-static void remove_extra(void *ip_v)
+static void remove_extra(Scheme_Input_Port *ip, Scheme_Object *v)
 {
-  Scheme_Input_Port *ip;
-  Scheme_Object *v = SCHEME_CDR(ip_v), *ll, *prev;
-
-  ip = scheme_input_port_record(SCHEME_CAR(ip_v));
+  Scheme_Object *ll, *prev;
 
   prev = NULL;
   for (ll = ip->input_extras; ll; prev = ll, ll = SCHEME_CDR(ll)) {
-    if (SAME_OBJ(ll, SCHEME_CDR(v))) {
+    if (SAME_OBJ(v, SCHEME_CAR(ll))) {
       if (prev)
 	SCHEME_CDR(prev) = SCHEME_CDR(ll);
       else
@@ -1596,7 +1589,21 @@ static void remove_extra(void *ip_v)
     }
   }
 
-  /* Tell the main commit thread (if any) to reset */
+  /* Tell the leader commit thread (if any) to reset */
+  if (ip->input_giveup)
+    scheme_post_sema_all(ip->input_giveup);
+}
+
+static void remove_extra_and_reset(void *ip_v)
+{
+  Scheme_Input_Port *ip;
+  Scheme_Object *v = SCHEME_CDR(ip_v);
+
+  ip = scheme_input_port_record(SCHEME_CAR(ip_v));
+
+  remove_extra(ip, v);
+
+  /* Tell the leader commit thread (if any) to reset */
   if (ip->input_giveup)
     scheme_post_sema_all(ip->input_giveup);
 }
@@ -1735,56 +1742,80 @@ int scheme_peeked_read_via_get(Scheme_Input_Port *ip,
   while (1) {
     if (scheme_wait_sema(unless_evt, 1)) {
       if (current_leader)
-	elect_new_main(ip);
+	release_input_lock_and_elect_new_leader(ip);
       return 0;
     }
 
     if (!current_leader && ip->input_giveup) {
-      /* Some other thread is already trying to commit.
+      /* Some other thread is already trying to commit and is the leader.
 	 Ask it to sync on our target, too */
       v = scheme_make_pair(scheme_make_integer(_size), target_evt);
       l = scheme_make_raw_pair(v, ip->input_extras);
       ip->input_extras = l;
-
-      scheme_post_sema_all(ip->input_giveup);
 
       if (!ip->input_extras_ready) {
 	sema = scheme_make_sema(0);
 	ip->input_extras_ready = sema;
       }
 
+      /* Notify leader of a change */
+      scheme_post_sema_all(ip->input_giveup);
+
       a[0] = ip->input_extras_ready;
+      a[1] = scheme_get_thread_suspend(scheme_current_thread); /* if this thread is suspended, then stop trying to commit */
+
+      scheme_current_thread->running |= MZTHREAD_NEED_SUSPEND_CLEANUP;
       l = scheme_make_pair((Scheme_Object *)ip, v);
-      BEGIN_ESCAPEABLE(remove_extra, l);
-      scheme_sync(1, a);
+      BEGIN_ESCAPEABLE(remove_extra_and_reset, l);
+      scheme_sync(2, a);
       END_ESCAPEABLE();
+
+      if (scheme_current_thread->running & MZTHREAD_NEED_SUSPEND_CLEANUP)
+        scheme_current_thread->running -= MZTHREAD_NEED_SUSPEND_CLEANUP;
+
+      if (ip->input_extras)
+        remove_extra(ip, v);
+
+      check_suspended();
 
       if (!SCHEME_CDR(v)) {
 	/* We were selected, so the commit succeeded. */
 	return SCHEME_TRUEP(SCHEME_CAR(v)) ? 1 : 0;
       }
+
+      if (ip->direct_read_waiting)
+        scheme_thread_block(0.0);
     } else {
-      /* No other thread is trying to commit. This one is hereby
-	 elected "main" if multiple threads try to commit. */
+      /* We're already the leader, or no other thread is trying to commit.
+         This one is hereby elected leader (if it isn't already), in case
+         multiple threads try to commit. */
 
       if (SAME_TYPE(t, scheme_always_evt_type)) {
 	/* Fast path: always-evt is ready */
+        if (current_leader)
+          release_input_lock_and_elect_new_leader(ip);
 	return complete_peeked_read_via_get(ip, size);
       }
 
-      /* This sema makes other threads wait before reading: */
-      sema = scheme_make_sema(0);
-      ip->input_lock = sema;
+      /* This sema makes other threads wait before reading : */
+      if (!current_leader) {
+        sema = scheme_make_sema(0);
+        ip->input_lock = sema;
+      }
       ip->slow = 1;
       
       /* This sema lets other threads try to make progress,
 	 if the current target doesn't work out */
-      sema = scheme_make_sema(0);
-      ip->input_giveup = sema;
+      if (!current_leader) {
+        sema = scheme_make_sema(0);
+        ip->input_giveup = sema;
+      }
+
+      current_leader = 1;
       
       if (ip->input_extras) {
 	/* There are other threads trying to commit, and
-	   as main thread, we'll help them out. */
+	   as leader thread, we'll help them out. */
 	n = 3;
 	for (l = ip->input_extras; l; l = SCHEME_CDR(l)) {
 	  n++;
@@ -1811,21 +1842,24 @@ int scheme_peeked_read_via_get(Scheme_Input_Port *ip,
       aa[2] = v;
 
       scheme_current_thread->running |= MZTHREAD_NEED_SUSPEND_CLEANUP;
-      BEGIN_ESCAPEABLE(release_input_lock_and_elect_new_main, ip);
+      BEGIN_ESCAPEABLE(do_release_input_lock_and_elect_new_leader, ip);
       v = scheme_sync(n, aa);
       END_ESCAPEABLE();
 
-      release_input_lock(ip);
-      
+      if (scheme_current_thread->running & MZTHREAD_NEED_SUSPEND_CLEANUP)
+        scheme_current_thread->running -= MZTHREAD_NEED_SUSPEND_CLEANUP;
+
       if (SAME_OBJ(v, target_evt)) {
 	int r;
-	elect_new_main(ip);
+        release_input_lock_and_elect_new_leader(ip);
 	r = complete_peeked_read_via_get(ip, size);
 	check_suspended();
 	return r;
-      }
-
-      if (n > 3) {
+      } else if (SAME_OBJ(v, ip->input_giveup)) {
+        /* need to reset give-up semaphore so we can be woken again */
+        sema = scheme_make_sema(0);
+        ip->input_giveup = sema;
+      } else if (n > 3) {
 	/* Check whether one of the others was selected: */
 	for (l = ip->input_extras; l; l = SCHEME_CDR(l)) {
 	  if (SAME_OBJ(v, SCHEME_CDR(SCHEME_CAR(l)))) {
@@ -1834,7 +1868,7 @@ int scheme_peeked_read_via_get(Scheme_Input_Port *ip,
 	    v = SCHEME_CAR(l);
 	    SCHEME_CDR(v) = NULL;
 	    size = SCHEME_INT_VAL(SCHEME_CAR(v));
-	    elect_new_main(ip);
+	    release_input_lock_and_elect_new_leader(ip);
 	    if (complete_peeked_read_via_get(ip, size))
 	      SCHEME_CAR(v) = scheme_true;
 	    else
@@ -1846,20 +1880,27 @@ int scheme_peeked_read_via_get(Scheme_Input_Port *ip,
       }
 
       if (scheme_current_thread->running & MZTHREAD_USER_SUSPENDED) {
-	elect_new_main(ip);
+	release_input_lock_and_elect_new_leader(ip);
 	current_leader = 0;
 	check_suspended();
       } else {
-	current_leader = 1;
-	
 	/* Technically redundant, but avoid a thread swap
 	   if we know the commit isn't going to work: */
 	if (scheme_wait_sema(unless_evt, 1)) {
-	  elect_new_main(ip);
+	  release_input_lock_and_elect_new_leader(ip);
 	  return 0;
 	}
-      
+
+        if (ip->direct_read_waiting) {
+          /* A non-commit read is waiting, so release the lock
+             to give it a chance */
+          current_leader = 0;
+          release_input_lock_and_elect_new_leader(ip);
+        }
+
 	scheme_thread_block(0.0);
+
+        ip->direct_read_waiting = 0;
       }
     }
   }
@@ -2137,7 +2178,7 @@ static intptr_t get_one_byte_slow(const char *who,
     if (ip->p.position >= 0)
       ip->p.position++;
     if (ip->p.count_lines)
-      inc_pos((Scheme_Port *)ip, 1);
+      inc_pos_for_special((Scheme_Port *)ip);
     return SCHEME_SPECIAL;
   } else {
     if (ip->pending_eof > 1) {
@@ -2161,7 +2202,7 @@ static intptr_t get_one_byte_slow(const char *who,
             if (ip->p.position >= 0)
               ip->p.position++;
             if (ip->p.count_lines)
-              inc_pos((Scheme_Port *)ip, 1);
+              inc_pos_for_special((Scheme_Port *)ip);
             return SCHEME_SPECIAL;
           } else {
             scheme_bad_time_for_special(who, port);
@@ -3551,7 +3592,7 @@ static Scheme_Object *unsafe_socket_to_semaphore(int argc, Scheme_Object *argv[]
   return unsafe_handle_to_semaphore("unsafe-socket->semaphore", argc, argv, 1);
 }
 
-Scheme_Object *scheme_file_identity(int argc, Scheme_Object *argv[])
+static intptr_t extract_port_fd_identity(const char *who, int argc, Scheme_Object *argv[])
 {
   intptr_t fd = 0;
   int fd_ok = 0;
@@ -3568,21 +3609,39 @@ Scheme_Object *scheme_file_identity(int argc, Scheme_Object *argv[])
 
       ip = scheme_input_port_record(p);
       
-      CHECK_PORT_CLOSED("port-file-identity", "input", p, ip->closed);
+      CHECK_PORT_CLOSED(who, "input", p, ip->closed);
     } else if (SCHEME_OUTPUT_PORTP(p)) {
       Scheme_Output_Port *op;
       
       op = scheme_output_port_record(p);
       
-      CHECK_PORT_CLOSED("port-file-identity", "output", p, op->closed);
+      CHECK_PORT_CLOSED(who, "output", p, op->closed);
     }
 
     /* Otherwise, it's just the wrong type: */
-    scheme_wrong_contract("port-file-identity", "file-stream-port?", 0, argc, argv);
-    return NULL;
+    scheme_wrong_contract(who, "file-stream-port?", 0, argc, argv);
+    return 0;
   }
 
-  return scheme_get_fd_identity(p, fd, NULL, 0);
+  return fd;
+}
+
+Scheme_Object *scheme_file_identity(int argc, Scheme_Object *argv[])
+{
+  intptr_t fd;
+
+  fd = extract_port_fd_identity("port-file-identity", argc, argv);
+
+  return scheme_get_fd_identity(argv[0], fd, NULL, 0);
+}
+
+Scheme_Object *scheme_file_stat(int argc, Scheme_Object *argv[])
+{
+  intptr_t fd;
+
+  fd = extract_port_fd_identity("port-file-stat", argc, argv);
+
+  return scheme_get_fd_stat(fd);
 }
 
 static int is_fd_terminal(intptr_t fd)
@@ -3788,8 +3847,8 @@ Scheme_Object *
 scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv[], int and_read, 
                            int internal)
 {
-  int e_set = 0, m_set = 0, i;
-  int open_flags = 0, try_replace = 0;
+  int e_set = 0, m_set = 0, r_set =0, i;
+  int open_flags = 0, replace_flags = 0, try_replace = 0;
   char *filename;
   char mode[4];
   int typepos;
@@ -3812,8 +3871,8 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
         && (SCHEME_INT_VAL(argv[i]) <= 65535)) {
       perms = SCHEME_INT_VAL(argv[i]);
     } else {
-      if (!SCHEME_SYMBOLP(argv[i]))
-        scheme_wrong_contract(name, "(or/c symbol? (integer-in 0 65535))", i, argc, argv);
+      if (!SCHEME_FALSEP(argv[i]) && !SCHEME_SYMBOLP(argv[i]))
+        scheme_wrong_contract(name, "(or/c symbol? (integer-in 0 65535) #f)", i, argc, argv);
 
       if (SAME_OBJ(argv[i], append_symbol)) {
         mode[0] = 'a';
@@ -3859,6 +3918,11 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
       } else if (SAME_OBJ(argv[i], binary_symbol)) {
         /* This is the default */
         m_set++;
+      } else if (SAME_OBJ(argv[i], replace_permissions_symbol)) {
+        replace_flags |= RKTIO_OPEN_REPLACE_PERMS;
+        r_set++;
+      } else if (SCHEME_FALSEP(argv[i])) {
+        /* skip */
       } else {
         char *astr;
         intptr_t alen;
@@ -3871,7 +3935,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
                          astr, alen);
       }
 
-      if (m_set > 1 || e_set > 1) {
+      if (m_set > 1 || e_set > 1 || r_set > 1) {
         char *astr;
         intptr_t alen;
 
@@ -3911,7 +3975,8 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
                                             (RKTIO_OPEN_WRITE
                                              | open_flags
                                              | (and_read ? RKTIO_OPEN_READ : 0)
-                                             | ((mode[1] == 't') ? RKTIO_OPEN_TEXT : 0)),
+                                             | ((mode[1] == 't') ? RKTIO_OPEN_TEXT : 0)
+                                             | replace_flags),
                                             perms);
     
     if (!fd
@@ -4028,6 +4093,8 @@ do_file_position(const char *who, int argc, Scheme_Object *argv[], int can_false
 
     op = scheme_output_port_record(argv[0]);
 
+    CHECK_PORT_CLOSED(who, "output", argv[0], op->closed);    
+
     if (SAME_OBJ(op->sub_type, file_output_port_type)) {
       f = ((Scheme_Output_File *)op->port_data)->f;
     } else if (SAME_OBJ(op->sub_type, fd_output_port_type)) {
@@ -4054,6 +4121,8 @@ do_file_position(const char *who, int argc, Scheme_Object *argv[], int can_false
 
     if (ip->input_lock)
       scheme_wait_input_allowed(ip, 0);
+
+    CHECK_PORT_CLOSED(who, "input", argv[0], ip->closed);
 
     if (SAME_OBJ(ip->sub_type, file_input_port_type)) {
       f = ((Scheme_Input_File *)ip->port_data)->f;
@@ -4583,7 +4652,7 @@ void scheme_filesystem_change_evt_cancel(Scheme_Object *evt, void *ignored_data)
   }
 }
 
-static int filesystem_change_evt_ready(Scheme_Object *evt, Scheme_Schedule_Info *sinfo)
+int scheme_filesystem_change_evt_ready(Scheme_Object *evt, Scheme_Schedule_Info *sinfo)
 {
   Scheme_Filesystem_Change_Evt *fc = (Scheme_Filesystem_Change_Evt *)evt;
 
@@ -7160,6 +7229,15 @@ static Scheme_Object *terminal_read_char(int argc, Scheme_Object **argv) {
 #endif
 }
 
+static Scheme_Object *terminal_pending_winch(int argc, Scheme_Object **argv) {
+#if MZ_EXPR_EDIT
+  /* This won't actually work unless */
+  return s_ee_pending_winch();
+#else
+  return scheme_false;
+#endif
+}
+
 static Scheme_Object *terminal_write_char(int argc, Scheme_Object **argv) {
   int width = 1;
 #if MZ_EXPR_EDIT
@@ -7353,6 +7431,7 @@ void scheme_init_terminal(Scheme_Startup_Env *env) {
 
   ADDTO_EE("terminal-init", terminal_init_term, 2);
   ADDTO_EE("terminal-read-char", terminal_read_char, 1);
+  ADDTO_EE("terminal-pending-winch?", terminal_pending_winch, 0);
   ADDTO_EE("terminal-write-char", terminal_write_char, 1);
   ADDTO_EE("terminal-char-width", terminal_char_width, 1);
   ADDTO_EE("terminal-set-color", terminal_set_color, 2);

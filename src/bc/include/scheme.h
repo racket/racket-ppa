@@ -731,7 +731,7 @@ typedef struct Scheme_Offset_Cptr
 #define scheme_ispunc(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x4)
 #define scheme_iscontrol(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x8)
 #define scheme_isspace(x) ((scheme_uchar_find(scheme_uchar_table, x)) & SCHEME_ISSPACE_BIT)
-/* #define scheme_isSOMETHING(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x20) - not yet used */
+#define scheme_isextpict(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x20)
 #define scheme_isdigit(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x40)
 #define scheme_isalpha(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x80)
 #define scheme_istitle(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x100)
@@ -753,6 +753,9 @@ typedef struct Scheme_Offset_Cptr
 
 #define scheme_general_category(x) ((scheme_uchar_find(scheme_uchar_cats_table, x)) & 0x1F)
 /* Note: 3 bits available in the cats table */
+
+#define scheme_grapheme_cluster_break(x) (scheme_uchar_find(scheme_uchar_graphbreaks_table, x))
+#define scheme_isextend(x) ((scheme_grapheme_cluster_break(x)) == MZ_GRAPHBREAK_EXTEND)
 
 /*========================================================================*/
 /*                          procedure values                              */
@@ -1169,9 +1172,11 @@ typedef struct Scheme_Thread {
   int running;
   Scheme_Object *suspended_box; /* contains pointer to thread when it's suspended */
   Scheme_Object *resumed_box;   /* contains pointer to thread when it's resumed */
-  Scheme_Object *dead_box;      /* contains non-zero when the thread is dead */
+  /* Scheme_Object *dead_box; */ /* in mr_hop: contains non-zero when the thread is dead */
   Scheme_Object *running_box;   /* contains pointer to thread when it's running */
   Scheme_Object *sync_box;      /* semaphore used for NACK events */
+
+  Scheme_Object *results; /* list of results, if kept */
 
   struct Scheme_Thread *gc_prep_chain;
 
@@ -1257,8 +1262,8 @@ typedef struct Scheme_Thread {
   intptr_t current_start_process_msec;
 
   struct Scheme_Thread_Custodian_Hop *mr_hop;
-  Scheme_Custodian_Reference *mref;
-  Scheme_Object *extra_mrefs; /* More owning custodians */
+  /* Scheme_Custodian_Reference *mref; */ /* In mr_hop: owning custodian */
+  /* Scheme_Object *extra_mrefs; */ /* In mr_hop: more owning custodians */
   Scheme_Object *transitive_resumes; /* A hash table of running-boxes */
 
   Scheme_Object *name;
@@ -1339,6 +1344,8 @@ enum {
   MZCONFIG_ERROR_DISPLAY_HANDLER,
   MZCONFIG_ERROR_PRINT_VALUE_HANDLER,
   MZCONFIG_ERROR_PRINT_SYNTAX_HANDLER,
+  MZCONFIG_ERROR_NAME_SYNTAX_HANDLER,
+  MZCONFIG_ERROR_PRINT_MODULE_PATH_HANDLER,
   MZCONFIG_ERROR_MESSAGE_ADJUSTER,
 
   MZCONFIG_EXIT_HANDLER,
@@ -1503,6 +1510,7 @@ struct Scheme_Input_Port
   Scheme_Object *name;
   Scheme_Object *peeked_read, *peeked_write;
   Scheme_Object *progress_evt, *input_lock, *input_giveup, *input_extras, *input_extras_ready;
+  int direct_read_waiting;
   unsigned char ungotten[24];
   int ungotten_count;
   Scheme_Object *special, *ungotten_special;
@@ -1938,12 +1946,14 @@ MZ_EXTERN void scheme_set_stdio_makers(Scheme_Stdio_Maker_Proc in,
 
 
 MZ_EXTERN void scheme_set_banner(char *s);
+MZ_EXTERN void scheme_set_build_stamp(char *s);
 MZ_EXTERN Scheme_Object *scheme_set_exec_cmd(char *s);
 MZ_EXTERN Scheme_Object *scheme_set_run_cmd(char *s);
 MZ_EXTERN void scheme_set_collects_path(Scheme_Object *p);
 MZ_EXTERN void scheme_set_config_path(Scheme_Object *p);
 MZ_EXTERN void scheme_set_host_collects_path(Scheme_Object *p);
 MZ_EXTERN void scheme_set_host_config_path(Scheme_Object *p);
+MZ_EXTERN void scheme_set_host_addon_dir(Scheme_Object *p);
 MZ_EXTERN void scheme_set_original_dir(Scheme_Object *d);
 MZ_EXTERN void scheme_set_addon_dir(Scheme_Object *p);
 MZ_EXTERN void scheme_set_command_line_arguments(Scheme_Object *vec);

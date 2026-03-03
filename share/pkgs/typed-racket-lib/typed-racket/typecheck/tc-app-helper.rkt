@@ -2,7 +2,7 @@
 
 (require "../utils/utils.rkt"
          "../utils/identifier.rkt"
-         racket/match racket/sequence racket/set racket/list
+         racket/match racket/sequence racket/set racket/list syntax/stx
          (contract-req)
          "check-below.rkt"
          "tc-subst.rkt"
@@ -42,32 +42,42 @@
 
      (when check?
        (define extra-arg-count (- (length t-a) (length dom)))
-       (cond [(and (not rst) (not (eqv? 0 extra-arg-count)))
-              (tc-error/fields "could not apply function"
-                               #:more "wrong number of arguments provided"
-                               "expected" (length dom)
-                               "given" (length t-a)
-                               #:delayed? #t)]
-             [(and rst (negative? extra-arg-count))
-              (tc-error/fields "could not apply function"
-                               #:more "wrong number of arguments provided"
-                               "expected at least" (length dom)
-                               "given" (length t-a)
-                               #:delayed? #t)]
-             [(and (Rest? rst)
-                   (positive? extra-arg-count)
-                   (not (zero? (remainder extra-arg-count (length (Rest-tys rst))))))
-              (cond
-                [(eqv? 2 (length (Rest-tys rst)))
-                 (tc-error/fields "could not apply function"
-                                  #:more "wrong number of rest arguments provided"
-                                  "expected an even number, given" extra-arg-count
-                                  #:delayed? #t)]
-                [else (tc-error/fields "could not apply function"
-                                       #:more "wrong number of rest arguments provided"
-                                       "expected a multiple of " (length (Rest-tys rst))
-                                       "given" extra-arg-count
-                                       #:delayed? #t)])])
+       (cond
+         [(and (not rst) (not (eqv? 0 extra-arg-count)))
+          (tc-error/fields "could not apply function"
+                           #:more "wrong number of arguments provided"
+                           "expected"
+                           (length dom)
+                           "given"
+                           (length t-a)
+                           #:delayed? #t)]
+         [(and rst (negative? extra-arg-count))
+          (tc-error/fields "could not apply function"
+                           #:more "wrong number of arguments provided"
+                           "expected at least"
+                           (length dom)
+                           "given"
+                           (length t-a)
+                           #:delayed? #t)]
+         [(and (Rest? rst)
+               (positive? extra-arg-count)
+               (not (zero? (remainder extra-arg-count (length (Rest-tys rst))))))
+          (cond
+            [(eqv? 2 (length (Rest-tys rst)))
+             (tc-error/fields "could not apply function"
+                              #:more "wrong number of rest arguments provided"
+                              "expected an even number, given"
+                              extra-arg-count
+                              #:delayed? #t)]
+            [else
+             (tc-error/fields "could not apply function"
+                              #:more "wrong number of rest arguments provided"
+                              "expected a multiple of "
+                              (length (Rest-tys rst))
+                              "given"
+                              extra-arg-count
+                              #:delayed? #t)])]
+         [else (void)])
        (match rst
          [(Rest: rst-ts)
           (for ([a (in-syntax args-stx)]
@@ -76,6 +86,8 @@
             (parameterize ([current-orig-stx a])
               (check-below arg-res (dom+rst-ref dom rst idx))))]
          [_
+	  (unless (= (length (stx->list args-stx)) (length arg-ress))
+	    (int-err "bad input to tc/funapp1, lengths do not match"))
           (for ([dom-t (in-list dom)]
                 [a (in-syntax args-stx)]
                 [arg-res (in-list arg-ress)])
@@ -274,7 +286,8 @@
                             (make-Arrow (car pdoms)
                                         (car rests)
                                         null
-                                        (car rngs))
+                                        (car rngs)
+                                        #f)
                             arg-tys expected)
                 return]
                [else
@@ -304,97 +317,105 @@
               . ->* . tc-results/c)])
 (define (poly-fail f-stx args-stx t argtypes #:name [name #f] #:expected [expected #f])
   (match t
-    [(or (Poly-names:
-          msg-vars
-          (Fun: (list (Arrow: msg-doms
-                              msg-rests
-                              (list (Keyword: _ _ #f) ...)
-                              msg-rngs)
-                      ...)))
+    [(or (Poly-names: msg-vars
+                      (Fun: (list (Arrow: msg-doms msg-rests (list (Keyword: _ _ #f) ...) msg-rngs)
+                                  ...)))
          (PolyDots-names:
           msg-vars
-          (Fun: (list (Arrow: msg-doms
-                              msg-rests
-                              (list (Keyword: _ _ #f) ...)
-                              msg-rngs)
-                      ...)))
-         (PolyRow-names:
-          msg-vars (Fun: (list (Arrow: msg-doms
-                              msg-rests
-                              (list (Keyword: _ _ #f) ...)
-                              msg-rngs)
-                      ...))
-          _))
-     (let ([fcn-string (name->function-str name)])
-       (if (and (andmap null? msg-doms)
-                (null? argtypes))
-           (tc-error/expr (string-append
-                           "Could not infer types for applying polymorphic "
+          (Fun: (list (Arrow: msg-doms msg-rests (list (Keyword: _ _ #f) ...) msg-rngs) ...)))
+         (PolyRow-names: msg-vars
+                         (Fun: (list (Arrow: msg-doms msg-rests (list (Keyword: _ _ #f) ...) msg-rngs)
+                                     ...))
+                         _))
+     (define fcn-string (name->function-str name))
+     (if (and (andmap null? msg-doms) (null? argtypes))
+         (tc-error/expr
+          (string-append "Could not infer types for applying polymorphic " fcn-string "\n"))
+         (domain-mismatches
+          f-stx
+          args-stx
+          t
+          msg-doms
+          msg-rests
+          msg-rngs
+          argtypes
+          #f
+          #f
+          #:expected expected
+          #:msg-thunk
+          (lambda (dom)
+            (string-append "Polymorphic "
                            fcn-string
-                           "\n"))
-           (domain-mismatches f-stx args-stx t msg-doms msg-rests
-                              msg-rngs argtypes #f #f #:expected expected
-                              #:msg-thunk (lambda (dom)
-                                            (string-append
-                                             "Polymorphic " fcn-string " could not be applied to arguments:\n"
-                                             dom
-                                             (if (not (subset? (apply set-union (seteq) (map fv/list msg-doms))
-                                                               (list->seteq msg-vars)))
-                                                 (string-append "Type Variables: " (stringify msg-vars) "\n")
-                                                 ""))))))]
-    [(Poly-names:
-      msg-vars
-      (DepFun: raw-domain _ raw-rng))
-     (with-printable-names (length raw-domain) names
-       (define domain (for/list ([d (in-list raw-domain)])
-                        (instantiate-obj d names)))
-       (define rng (instantiate-obj raw-rng names))
-       (let ([fcn-string (name->function-str name)])
-         (if (and (null? domain)
-                  (null? argtypes))
-             (tc-error/expr (string-append
-                             "Could not infer types for applying polymorphic "
-                             fcn-string
-                             "\n"))
-             (domain-mismatches f-stx args-stx t (list domain) (list #f)
-                                (list rng) argtypes #f #f #:expected expected
-                                #:msg-thunk (lambda (dom)
-                                              (string-append
-                                               "Polymorphic " fcn-string " could not be applied to arguments:\n"
-                                               dom
-                                               (if (not (subset? (fv/list domain) (list->seteq msg-vars)))
-                                                   (string-append "Type Variables: " (stringify msg-vars) "\n")
-                                                   "")))
-                                #:arg-names names))))]
-    [(or (Poly-names:
-          msg-vars
-          (Fun: (list (Arrow: msg-doms msg-rests kws msg-rngs) ...)))
-         (PolyDots-names:
-          msg-vars
-          (Fun: (list (Arrow: msg-doms msg-rests kws msg-rngs) ...)))
-         (PolyRow-names:
-          msg-vars
-          (Fun: (list (Arrow: msg-doms msg-rests kws msg-rngs) ...))
-          _))
-     (let ([fcn-string (if name
-                           (format "function with keywords ~a" (syntax->datum name))
-                           "function with keywords")])
-       (if (and (andmap null? msg-doms)
-                (null? argtypes))
-           (tc-error/expr (string-append
-                           "Could not infer types for applying polymorphic "
+                           " could not be applied to arguments:\n"
+                           dom
+                           (if (not (subset? (apply set-union (seteq) (map fv/list msg-doms))
+                                             (list->seteq msg-vars)))
+                               (string-append "Type Variables: " (stringify msg-vars) "\n")
+                               "")))))]
+    [(Poly-names: msg-vars (DepFun: raw-domain _ raw-rng))
+     (with-printable-names
+      (length raw-domain)
+      names
+      (define domain
+        (for/list ([d (in-list raw-domain)])
+          (instantiate-obj d names)))
+      (define rng (instantiate-obj raw-rng names))
+      (let ([fcn-string (name->function-str name)])
+        (if (and (null? domain) (null? argtypes))
+            (tc-error/expr
+             (string-append "Could not infer types for applying polymorphic " fcn-string "\n"))
+            (domain-mismatches
+             f-stx
+             args-stx
+             t
+             (list domain)
+             (list #f)
+             (list rng)
+             argtypes
+             #f
+             #f
+             #:expected expected
+             #:msg-thunk
+             (lambda (dom)
+               (string-append "Polymorphic "
+                              fcn-string
+                              " could not be applied to arguments:\n"
+                              dom
+                              (if (not (subset? (fv/list domain) (list->seteq msg-vars)))
+                                  (string-append "Type Variables: " (stringify msg-vars) "\n")
+                                  "")))
+             #:arg-names names))))]
+    [(or (Poly-names: msg-vars (Fun: (list (Arrow: msg-doms msg-rests kws msg-rngs) ...)))
+         (PolyDots-names: msg-vars (Fun: (list (Arrow: msg-doms msg-rests kws msg-rngs) ...)))
+         (PolyRow-names: msg-vars (Fun: (list (Arrow: msg-doms msg-rests kws msg-rngs) ...)) _))
+     (define fcn-string
+       (if name
+           (format "function with keywords ~a" (syntax->datum name))
+           "function with keywords"))
+     (if (and (andmap null? msg-doms) (null? argtypes))
+         (tc-error/expr
+          (string-append "Could not infer types for applying polymorphic " fcn-string "\n"))
+         (domain-mismatches
+          f-stx
+          args-stx
+          t
+          msg-doms
+          msg-rests
+          msg-rngs
+          argtypes
+          #f
+          #f
+          #:expected expected
+          #:msg-thunk
+          (lambda (dom)
+            (string-append "Polymorphic "
                            fcn-string
-                           "\n"))
-           (domain-mismatches f-stx args-stx t msg-doms msg-rests
-                              msg-rngs argtypes #f #f #:expected expected
-                              #:msg-thunk (lambda (dom)
-                                            (string-append
-                                             "Polymorphic " fcn-string " could not be applied to arguments:\n"
-                                             dom
-                                             (if (not (subset? (apply set-union (seteq) (map fv/list msg-doms))
-                                                               (list->seteq msg-vars)))
-                                                 (string-append "Type Variables: " (stringify msg-vars) "\n")
-                                                 ""))))))]))
+                           " could not be applied to arguments:\n"
+                           dom
+                           (if (not (subset? (apply set-union (seteq) (map fv/list msg-doms))
+                                             (list->seteq msg-vars)))
+                               (string-append "Type Variables: " (stringify msg-vars) "\n")
+                               "")))))]))
 
 ;; name->function-str : (Option Identifier) -> String
 ;; Produce a function name string for error messages

@@ -418,6 +418,7 @@
   ;; Help Desk
   (help "Aide")
   (racket-documentation "Documentation Racket")
+  (racket-documentation "Documentation ~a") ;; ~a is filled with a language family name, eg Racket, Rhombus, or HtDP
   (help-desk "Aide")
   (plt:hd:search "Chercher")
   (plt:hd:feeling-lucky "D'humeur chanceuse")
@@ -521,7 +522,7 @@
   ; ... line 2. (Anyone need more lines?)
   (browser-cmdline-expl-line-2 "et du suffixe, sans espace additionel entre eux.)")
   (install? "Installer ?")  ;; if a .plt file is found (title of dialog)
-  (you-have-selected-an-installable-package "Vous avez sélectionné un logiciel qui peut être installé.") ; package => paquetage, pas tres clair...
+  (you-have-selected-an-installable-package "Vous avez sélectionné un paquetage qui peut être installé.")
   (do-you-want-to-install-it? "Voulez-vous l'installer ?")
   (paren-file-size "(Le fichier fait ~a octets)")
   (download-and-install "Télécharger && Installer") ;; button label
@@ -530,7 +531,7 @@
   (save-downloaded-file "Sauvegarder le fichier téléchargé sous le nom")  ;; label for get-file dialog
   (downloading "Téléchargement") ;; dialog title
   (downloading-file... "Téléchargement du fichier en cours…")
-  (package-was-installed "Le logiciel à été installé.")
+  (package-was-installed "Le paquetage à été installé.")
   (download-was-saved "Le fichier téléchargé à été sauvegardé.")
 
   (install-plt-file-menu-item... "Installer un fichier .plt…")
@@ -636,19 +637,27 @@
   (basic-gray-paren-match-color "Couleur grise simple de surlignage des parenthèses") ; in prefs dialog
   (online-coloring-active "Colorier la syntaxe interactivement")
   (open-files-in-tabs "Ouvrir les fichiers dans de nouveaux onglets (pas dans de nouvelles fenêtres)")
+  (restore-open-files-from-previous-session? "Restaurer les fichiers ouverts durant la session précédente ?")
+  (startup-open-files "Fichiers ouverts au démarrage")
+  (restore-open-files-from-previous-session "Restaurer les fichiers ouverts durant la session précédente")
+  (ask-me-each-time "Demander à chauque fois")
+  (open-a-blank-window "Ouvrir une fenêtre vide")
   (show-interactions-on-execute "Automatiquement montrer la fenêtre d'interaction lors de l'exécution d'un programme")
   (switch-to-module-language-automatically
    "Automatiquement utiliser le langage « module » lors de l'ouverture d'un fichier contenant un module")
   ;; in preferences, below the checkbox one line above this one
   (interactions-beside-definitions "Mettre la fenêtre d'interaction à côté de la fenêtre de définition")
-  ;; just like the above, but capitalized for appearance in a menu item
   (show-line-numbers "Montrer les numéros de lignes")
+  ;; just like the above, but capitalized for appearance in a menu item
   (show-line-numbers/menu "Montrer les &numéros de lignes")  ;; just like the above, but capitalized for appearance in a menu item
   (hide-line-numbers/menu "Cacher les &numéros de lignes")
   (show-line-numbers-in-definitions "Numéros de ligne dans la fenêtre de définition")
   ;; the constant above shows up in the popup menu item in the bottom of
   ;; the drracket window; controls the line numbers on each line in the definitions;
   ;; used in a checkable menu item
+  ;; Capitalized for appearance in a menu item
+  (show-indent-guides/menu "Montrer les &Guides d'indentation")
+  (hide-indent-guides/menu "Cacher les &Guides d'indentation")
   (reflow-paragraph-maximum-width "Largeur maximale lors de la refusion des paragraphes")
   (maximum-char-width-guide-pref-check-box "Guide pour la largeur maximum de texte")
   (hide-column-width-guide "Cacher le guide de largeur de texte pour les fichiers avec ~a colonnes")
@@ -1229,6 +1238,12 @@
   (reindent-menu-item-label "&Réindenter")
   (reindent-all-menu-item-label "Réindenter &tout")
   (semicolon-comment-out-menu-item-label "&Commenter à l'aide de points-virgules")
+  ;; the ~a is filled with the characters that'll be used to comment out a line,
+  ;; inserted at the start of the line
+  (comment-out-with-line-start "&Commenter à l'aide de “~a”")
+  ;; the two '~a's are filled with the characters that'll be used to comment out
+  ;; the start and end of a region
+  (comment-out-with-region "&Commenter à l'aide de “~a” et de “~a”")
   (box-comment-out-menu-item-label "Commenter à l'aide d'une &boite")
   (uncomment-menu-item-label "&Décommenter")
 
@@ -1658,6 +1673,11 @@
     ;; like 'Long' but shows the phases where this file is loaded
   (module-browser-name-very-long "longs, avec phases")
   (module-browser-open-all "Ouvrir tous les fichiers montrés ici")
+  (module-browser-main-collects "Collections principales")
+  (module-browser-unknown-pkg "Paquetage inconnu")
+  (module-browser-visible-pkgs "Paquetages visibles")
+  (module-browser-visible-submodules "Sous-modules visibles")
+  (module-browser-top-level-module "Module principal") ; in the "which submodules?" filter; this is used for when there are no submodules
 
   (happy-birthday-matthias "Joyeux anniversaire, Matthias !")
   (happy-birthday-matthew "Joyeux anniversaire, Matthew !")
@@ -2000,7 +2020,7 @@
   ;; the user switches to a tab where planet hasn't been used
   (planet-no-status "PLaneT")
 
-  (bug-report-field-pkg "Information système du logiciel") ; package -> paquetage, bibliothèque ?
+  (bug-report-field-pkg "Information système du paquetage")
 
   ;; string normalization. To see this, paste some text with a ligature into DrRacket
   ;; the first three strings are in the dialog that appears. The last one is in the preferences dialog

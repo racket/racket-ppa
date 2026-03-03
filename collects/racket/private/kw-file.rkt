@@ -15,7 +15,8 @@
            call-with-input-file*
            call-with-output-file*
            (rename-out
-            [directory-list -directory-list]))
+            [directory-list -directory-list]
+            [copy-file -copy-file]))
 
   (define exists-syms
     '(error append update can-update replace truncate must-truncate truncate/replace))
@@ -30,6 +31,9 @@
     (and (exact-integer? perms) (<= 0 perms 65535)))
   (define perms-desc "(integer-in 0 65535)")
 
+  (define (raise-argument-error who what v)
+    (raise-argument-error* who 'racket/primitive what v))
+
   (define (open-input-file path #:mode [mode 'binary] #:for-module? [for-module? #f])
     (unless (path-string? path)
       (raise-argument-error 'open-input-file "path-string?" path))
@@ -39,7 +43,8 @@
 
   (define (open-output-file path #:mode [mode 'binary]
                             #:exists [exists 'error]
-                            #:permissions [perms DEFAULT-CREATE-PERMS])
+                            #:permissions [perms DEFAULT-CREATE-PERMS]
+                            #:replace-permissions? [replace-permissions? #f])
     (unless (path-string? path)
       (raise-argument-error 'open-output-file "path-string?" path))
     (unless (memq mode '(binary text))
@@ -48,11 +53,12 @@
       (raise-argument-error 'open-output-file exists-desc exists))
     (unless (permissions? perms)
       (raise-argument-error 'open-output-file perms-desc perms))
-    (k:open-output-file path mode exists perms))
+    (k:open-output-file path mode exists perms  (and replace-permissions? 'replace-permissions)))
 
   (define (open-input-output-file path #:mode [mode 'binary]
                                   #:exists [exists 'error]
-                                  #:permissions [perms DEFAULT-CREATE-PERMS])
+                                  #:permissions [perms DEFAULT-CREATE-PERMS]
+                                  #:replace-permissions? [replace-permissions? #f])
     (unless (path-string? path)
       (raise-argument-error 'open-input-output-file "path-string?" path))
     (unless (memq mode '(binary text))
@@ -61,7 +67,7 @@
       (raise-argument-error 'open-input-output-file exists-desc exists))
     (unless (permissions? perms)
       (raise-argument-error 'open-input-output-file perms-desc perms))
-    (k:open-input-output-file path mode exists perms))
+    (k:open-input-output-file path mode exists perms (and replace-permissions? 'replace-permissions)))
 
   (define (call-with-input-file path proc #:mode [mode 'binary])
     (unless (path-string? path)
@@ -76,7 +82,8 @@
   (define (call-with-output-file path proc
                                  #:mode [mode 'binary]
                                  #:exists [exists 'error]
-                                 #:permissions [perms DEFAULT-CREATE-PERMS])
+                                 #:permissions [perms DEFAULT-CREATE-PERMS]
+                                 #:replace-permissions? [replace-permissions? #f])
     (unless (path-string? path)
       (raise-argument-error 'call-with-output-file "path-string?" path))
     (unless (and (procedure? proc)
@@ -88,7 +95,7 @@
       (raise-argument-error 'call-with-output-file exists-desc exists))
     (unless (permissions? perms)
       (raise-argument-error 'call-with-output-file perms-desc perms))
-    (k:call-with-output-file path proc mode exists perms))
+    (k:call-with-output-file path proc mode exists perms (and replace-permissions? 'replace-permissions)))
 
   (define (with-input-from-file path proc #:mode [mode 'binary])
     (unless (path-string? path)
@@ -103,7 +110,8 @@
   (define (with-output-to-file path proc
                                #:mode [mode 'binary]
                                #:exists [exists 'error]
-                               #:permissions [perms DEFAULT-CREATE-PERMS])
+                               #:permissions [perms DEFAULT-CREATE-PERMS]
+                               #:replace-permissions? [replace-permissions? #f])
     (unless (path-string? path)
       (raise-argument-error 'with-output-to-file "path-string?" path))
     (unless (and (procedure? proc)
@@ -115,7 +123,7 @@
       (raise-argument-error 'with-output-to-file exists-desc exists))
     (unless (permissions? perms)
       (raise-argument-error 'with-output-to-file perms-desc perms))
-    (k:with-output-to-file path proc mode exists perms))
+    (k:with-output-to-file path proc mode exists perms (and replace-permissions? 'replace-permissions)))
 
   (define (call-with-input-file* path proc #:mode [mode 'binary])
     (unless (path-string? path)
@@ -134,7 +142,8 @@
   (define (call-with-output-file* path proc 
                                   #:mode [mode 'binary]
                                   #:exists [exists 'error]
-                                  #:permissions [perms DEFAULT-CREATE-PERMS])
+                                  #:permissions [perms DEFAULT-CREATE-PERMS]
+                                  #:replace-permissions? [replace-permissions? #f])
       (unless (path-string? path)
         (raise-argument-error 'call-with-output-file* "path-string?" path))
       (unless (and (procedure? proc)
@@ -146,15 +155,13 @@
         (raise-argument-error 'call-with-output-file* exists-desc exists))
       (unless (permissions? perms)
         (raise-argument-error 'call-with-output-file* perms-desc perms))
-      (let ([p (k:open-output-file path mode exists perms)])
+      (let ([p (k:open-output-file path mode exists perms (and replace-permissions? 'replace-permissions))])
         (dynamic-wind
             void
             (lambda () (proc p))
             (lambda () (close-output-port p)))))
 
-  ;; Using `define-values' to avoid the inlining expansion for keyword
-  ;; arguments, because that expansion confuses Typed Racket:
-  (define-values (directory-list)
+  (define directory-list
     (lambda ([dir (current-directory)] #:build? [build? #f])
       (unless (path-string? dir)
         (raise-argument-error 'directory-list "path-string?" dir))
@@ -163,6 +170,24 @@
         (if build?
             (map (lambda (i) (build-path dir i)) content)
             content))))
+
+  (define copy-file
+    (lambda (src dest [exists-ok? exists-syms]
+		 #:exists-ok? [exists-ok?/kw exists-syms]
+		 #:permissions [perms #f]
+		 #:replace-permissions? [replace-permissions? #t])
+      (unless (or (eq? exists-ok? exists-syms)
+		  (eq? exists-ok?/kw exists-syms))
+	(raise-arguments-error 'copy-file "cannot supply both non-keyword and keyword `exists-ok?` argument"
+			       "by-position argument" exists-ok?
+			       "keyword argument" exists-ok?/kw))
+      (k:copy-file src dest
+		   (if (eq? exists-ok? exists-syms)
+		       (if (eq? exists-ok?/kw exists-syms)
+			   #f
+			   exists-ok?/kw)
+		       exists-ok?)
+		   perms replace-permissions?)))
 
   (define (raise-syntax-error given-name message
                               [expr #f] [sub-expr #f]

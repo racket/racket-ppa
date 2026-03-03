@@ -3,7 +3,7 @@
          ffi/unsafe
          ffi/unsafe/collect-callback
          racket/class
-         racket/draw
+         (only-in racket/draw color% gl-config%)
          racket/draw/private/gl-context
          (except-in racket/draw/private/color
                     color% make-color)
@@ -12,6 +12,7 @@
          "utils.rkt"
          "const.rkt"
          "types.rkt"
+         "liquid-glass.rkt"
          "window.rkt"
          "frame.rkt"
          "dc.rkt"
@@ -123,7 +124,7 @@
           (tellv ctx saveGraphicsState)
           (let ([cg (tell #:type _CGContextRef ctx graphicsPort)]
                 [r (tell #:type _NSRect self bounds)])
-            (CGContextSetRGBFillColor cg 0 0 0 1.0)
+            (CGContextSetRGBFillColor cg frame-black frame-black frame-black 1.0)
             (let* ([l (NSPoint-x (NSRect-origin r))]
                    [t (NSPoint-y (NSRect-origin r))]
                    [b (+ t (NSSize-height (NSRect-size r)))]
@@ -145,16 +146,16 @@
   (tell (tell NSTextFieldCell alloc) initTextCell: #:type _NSString ""))
 (tellv bezel-cell setBezeled: #:type _BOOL #t)
 
-(define-objc-class FocusView NSView 
+(define-objc-class FocusView NSView
   [on?]
   (-a _void (setFocusState: [_BOOL is-on?])
       (set! on? is-on?))
   (-a #:async-apply (box (void))
       _void (drawRect: [_NSRect r])
       (let ([f (tell #:type _NSRect self frame)])
-        (tellv bezel-cell 
+        (tellv bezel-cell
                drawWithFrame: #:type _NSRect (make-NSRect (make-NSPoint 2 2)
-                                                          (let ([s (NSRect-size r)])
+                                                          (let ([s (NSRect-size f)])
                                                             (make-NSSize (- (NSSize-width s) 4)
                                                                          (- (NSSize-height s) 4))))
                inView: self))
@@ -417,7 +418,8 @@
         (tell (tell (cond
                      [is-combo? NSView]
                      [has-control-border? FocusView]
-                     [(memq 'border style) (if (memq 'vscroll style)
+                     [(memq 'border style) (if (and (memq 'vscroll style)
+                                                    (not liquid-glass?))
                                                CornerlessFrameView
                                                FrameView)]
                      [else NSView])
@@ -471,6 +473,10 @@
 
      (send dc start-backing-retained)
 
+     (when (and (version-14.0-or-later?)
+                (is-panel?))
+       (tellv content-cocoa setClipsToBounds: #:type _BOOL #true))
+
      (queue-paint)
 
      (define/public (is-panel?) #f)
@@ -507,7 +513,7 @@
      (define/override (set-size x y w h)
        (do-set-size x y w h))
 
-     (define tr 0)
+     (define tr #f)
 
      (define/override (show on?)
        ;; FIXME: what if we're in the middle of an on-paint?

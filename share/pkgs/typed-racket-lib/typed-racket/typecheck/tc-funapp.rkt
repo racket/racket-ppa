@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (except-in "../utils/utils.rkt" infer)
-         racket/match racket/list racket/sequence
+         racket/match racket/list racket/sequence syntax/stx
          (prefix-in c: (contract-req))
          (for-syntax syntax/parse racket/base)
          "../utils/tc-utils.rkt"
@@ -69,6 +69,9 @@
 
 
 (define (tc/funapp f-stx args-stx f-type args-res expected)
+  (unless (= (length args-res) (length (stx->list args-stx)))
+    (int-err "bad argument input to tc/funapp, lengths do not match"))
+
   (match-define (list (tc-result1: argtys (PropSet: argps+ argps-) argobjs) ...) args-res)
   (define arg-props
     (for/fold ([ps (map -or argps+ argps-)])
@@ -131,24 +134,30 @@
        (cond
          ;; find the first function where the argument types match
          [(ormap (match-lambda
-                   [(and a (Arrow: dom rst _ _))
-                    (and (subtypes/varargs argtys dom rst) a)])
+                   [(and a (Arrow: dom rst _ _)) (and (subtypes/varargs argtys dom rst) a)])
                  arrows)
-          => (λ (a)
-               ;; then typecheck here -- we call the separate function so that we get
-               ;; the appropriate props/objects
-               (tc/funapp1 f-stx args-stx a args-res expected #:check #f))]
+          =>
+          (λ (a)
+            ;; then typecheck here -- we call the separate function so that we get
+            ;; the appropriate props/objects
+            (tc/funapp1 f-stx args-stx a args-res expected #:check #f))]
          [else
           ;; if nothing matched, error
-          (match arrows
-            [(list (Arrow: doms rsts _ rngs) ...)
-             (domain-mismatches
-              f-stx args-stx f-type doms rsts rngs args-res #f #f
-              #:expected expected
-              #:msg-thunk (lambda (dom)
-                            (string-append
-                             "No function domains matched in function application:\n"
-                             dom)))])])]
+          (match-define (list (Arrow: doms rsts _ rngs) ...) arrows)
+          (domain-mismatches f-stx
+                             args-stx
+                             f-type
+                             doms
+                             rsts
+                             rngs
+                             args-res
+                             #f
+                             #f
+                             #:expected expected
+                             #:msg-thunk
+                             (lambda (dom)
+                               (string-append "No function domains matched in function application:\n"
+                                              dom)))])]
       ;; any kind of dotted polymorphic function without mandatory keyword args
       [(PolyDots: (list fixed-vars ... dotted-var)
                   (Fun: arrows))
@@ -301,15 +310,16 @@
        (match argtys
          [(list) (ret out)]
          [(list t)
-          (if (subtype t in)
-              (ret -Void -true-propset)
-              (tc-error/expr
-               #:return (ret -Void -true-propset)
-               "Wrong argument to parameter - expected ~a and got ~a"
-               in t))]
-         [_ (tc-error/expr
-             "Wrong number of arguments to parameter - expected 0 or 1, got ~a"
-             (length argtys))])]
+          #:when (subtype t in)
+          (ret -Void -true-propset)]
+         [(list t)
+          (tc-error/expr #:return (ret -Void -true-propset)
+                         "Wrong argument to parameter - expected ~a and got ~a"
+                         in
+                         t)]
+         [_
+          (tc-error/expr "Wrong number of arguments to parameter - expected 0 or 1, got ~a"
+                         (length argtys))])]
       [(Distinction: _ _ t)
        (tc/funapp f-stx args-stx t args-res expected)]
       ;; resolve names, polymorphic apps, mu, etc

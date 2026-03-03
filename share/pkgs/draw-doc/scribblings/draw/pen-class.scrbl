@@ -215,7 +215,9 @@ Returns the pen width.
 @defmethod[(is-immutable?)
            boolean?]{
 
-Returns @racket[#t] if the pen object is immutable.
+Returns @racket[#t] if the pen object is immutable or if it has been
+  locked. A pen is locked when it is selected into a @racket[dc<%>] object
+  (via @method[dc<%> set-pen]) or was obtained from a @racket[pen-list%].
 
 }
 
@@ -225,8 +227,7 @@ Returns @racket[#t] if the pen object is immutable.
 Sets the pen @tech{cap style}. See @method[pen% get-cap] for information about cap
  styles.
 
-A pen cannot be modified if it was obtained from a @racket[pen-list%]
- or while it is selected into a drawing context.
+A pen may not be modified if it @method[pen% is-immutable?].
 
 }
 
@@ -239,8 +240,7 @@ A pen cannot be modified if it was obtained from a @racket[pen-list%]
 
 Sets the pen color.
 
-A pen cannot be modified if it was obtained from a
- @racket[pen-list%] or while it is selected into a drawing context.
+A pen may not be modified if it @method[pen% is-immutable?].
 
 }
 
@@ -250,8 +250,7 @@ A pen cannot be modified if it was obtained from a
 Sets the pen @tech{join style}. See @method[pen% get-join] for information about join
  styles.
 
-A pen cannot be modified if it was obtained from a
- @racket[pen-list%] or while it is selected into a drawing context.
+A pen may not be modified if it @method[pen% is-immutable?].
 
 }
 
@@ -260,10 +259,10 @@ A pen cannot be modified if it was obtained from a
 
 Sets the pen @tech{pen stipple} bitmap, where @racket[#f] turns off the stipple bitmap.
 
+A pen may not be modified if it @method[pen% is-immutable?].
+
 If @racket[bitmap] is modified while is associated with a pen, the
- effect on the pen is unspecified. A pen cannot be modified if it was
- obtained from a @racket[pen-list%] or while it is selected into a
- drawing context.
+ effect on the pen is unspecified.
 
 }
 
@@ -273,8 +272,7 @@ If @racket[bitmap] is modified while is associated with a pen, the
 Sets the @tech{pen style}. See @racket[pen%] for information about the
  possible styles.
 
-A pen cannot be modified if it was obtained from a
- @racket[pen-list%] or while it is selected into a drawing context.
+A pen may not be modified if it @method[pen% is-immutable?].
 
 }
 
@@ -283,8 +281,7 @@ A pen cannot be modified if it was obtained from a
 
 Sets the pen width.
 
-A pen cannot be modified if it was obtained from a
- @racket[pen-list%] or while it is selected into a drawing context.
+A pen may not be modified if it @method[pen% is-immutable?].
 
 }}
 

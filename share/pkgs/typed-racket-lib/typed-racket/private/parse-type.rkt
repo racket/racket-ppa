@@ -10,6 +10,7 @@
          "../rep/free-ids.rkt"
          "../rep/rep-utils.rkt"
          "../rep/type-constr.rkt"
+         "../rep/free-variance.rkt"
          "../types/abbrev.rkt"
          "user-defined-type-constr.rkt"
          "../types/utils.rkt"
@@ -43,6 +44,7 @@
          racket/format
          racket/match
          syntax/id-table
+         syntax/id-set
          "parse-classes.rkt"
          (for-template "../base-env/base-types-extra.rkt"
                        racket/base)
@@ -63,7 +65,9 @@
                     Type?)]
  [parse-type-operator-abstraction (c:->* (identifier? (c:listof identifier?) syntax?)
                                          ((c:or/c (c:-> identifier? boolean?) #f)
-                                          (free-id-table/c identifier? boolean?))
+                                          (free-id-table/c identifier? boolean?)
+                                          #:delay-variances? boolean?
+                                          #:recursive? boolean?)
                                          TypeConstructor?)]
  [parse-for-effects (c:-> identifier? (c:cons/c (c:listof identifier?) syntax?)
                           (values (c:listof identifier?)
@@ -179,8 +183,8 @@
 ;; (Syntax -> Type) -> Syntax Any -> Syntax
 ;; See `parse-type/id`. This is a curried generalization.
 (define ((parse/id p) loc datum)
-  (let* ([stx* (datum->syntax loc datum loc loc)])
-    (p stx*)))
+  (define stx* (datum->syntax loc datum loc loc))
+  (p stx*))
 
 (define (parse-literal-alls stx)
   (syntax-parse stx
@@ -646,7 +650,10 @@
 ;; type-op-productivity-map: maps names of constructors to their productivity.
 
 (define (parse-type-operator-abstraction name arg-names stx [opt-in-same-component? #f]
-                                         [type-op-productivity-map (make-immutable-free-id-table)])
+                                         [type-op-productivity-map (make-immutable-free-id-table)]
+                                         #:delay-variances?
+                                         [delay-variances? #f]
+                                         #:recursive? [recursive? #f])
   (define syms (map syntax-e arg-names))
   (define mode (synth-mode name syms opt-in-same-component?))
   (define var-kind-level-env
@@ -664,9 +671,17 @@
                             (parse stx INIT-LEVEL
                                    var-kind-level-env
                                    #:mode mode)))
-  (make-type-constr (user-defined-type-op syms res)
+
+  (make-type-constr (user-defined-type-op syms res (if (equal? (symbol->string (syntax-e name))
+                                                               "Formula")
+                                                       #t
+                                                       recursive?))
                     (length syms)
-                    (free-id-table-ref type-op-productivity-map name #f)))
+                    (free-id-table-ref type-op-productivity-map name #f)
+                    #:variances
+                    (if delay-variances?
+                        (build-default-variances syms)
+                        (variances-in-type res syms))))
 
 (define (parse-type-or-type-constructor stx)
   (parse stx 0 (make-immutable-free-id-table) #:mode #f #:ret-type-op? #t))
@@ -816,12 +831,11 @@
          refinement-type]
         [(:Instance^ t)
          (let ([v (do-parse #'t)])
-           (if (not (or (F? v) (Mu? v) (Name? v) (Class? v) (Error? v)))
-               (begin (parse-error #:delayed? #t
-                                   "expected a class type for argument to Instance"
-                                   "given" v)
-                      (make-Instance (Un)))
-               (make-Instance v)))]
+           (cond
+             [(not (or (F? v) (Mu? v) (Name? v) (Class? v) (Error? v)))
+              (parse-error #:delayed? #t "expected a class type for argument to Instance" "given" v)
+              (make-Instance (Un))]
+             [else (make-Instance v)]))]
         [(:Unit^ (:import^ import:id ...)
                  (:export^ export:id ...)
                  (~optional (:init-depend^ init-depend:id ...)
@@ -887,15 +901,16 @@
                                      (k Err)
                                      (remove-duplicates res)))
                        ([ty (in-syntax #'(tys ...))])
-               (let ([t (do-parse ty)])
-                 (match (resolve t)
-                   [(Fun: arrows) (values (append res arrows) err?)]
-                   [_ (if (side-effect-mode? mode)
-                          (values res #t)
-                          (parse-error
-                           #:stx ty
-                           "expected a function type for component of case-> type"
-                           "given" t))]))))
+               (define t (do-parse ty))
+               (match (resolve t)
+                 [(Fun: arrows) (values (append res arrows) err?)]
+                 [_
+                  (if (side-effect-mode? mode)
+                      (values res #t)
+                      (parse-error #:stx ty
+                                   "expected a function type for component of case-> type"
+                                   "given"
+                                   t))])))
            (make-Fun arrows))]
         [(:Rec^ x:id t)
          (let* ([var (syntax-e #'x)])
@@ -935,8 +950,8 @@
         [(:Sequenceof^ t ...)
          (parse-sequence-type stx do-parse do-parse-multi)]
         ;; simple dependent functions
-        ;; e.g. (-> ([x : τ] ...+) τ)
-        [(:->^ (args:dependent-fun-arg ...+)
+        ;; e.g. (-> ([x : τ] ...) τ)
+        [(:->^ (args:dependent-fun-arg ...)
                ~!
                (~optional (~seq #:pre (pre-dep-stx:id ...) pre-stx:expr)
                           #:defaults ([pre-stx #'Top]
@@ -1289,7 +1304,8 @@
                    (add-disappeared-use (syntax-local-introduce #'id)))
               t)]
            [else
-            (parse-error #:delayed? #t (~a "type name `" v "' is unbound"))
+            (unless (side-effect-mode? mode)
+              (parse-error #:delayed? #t (~a "type name `" v "' is unbound")))
             Err])]
         [(:Opaque^ . rest)
          (parse-error "bad syntax in Opaque")]
@@ -1357,27 +1373,42 @@
                       [var (in-list (synth-mode-args mode))])
                   (check-argument rand var))))
             (match rator
-              [(? TypeConstructor?)
+              [(struct* TypeConstructor ([arity arity]))
+               (define (err expected given)
+                 (tc-error (~a "wrong number of arguments to type constructor"
+                               "\n  type: " #'id
+                               "\n  expected: " expected
+                               "\n  given: " given
+                               "\n  arguments...: " #'(args ...))))
+
                (with-handlers ([exn:fail:contract:arity:type-constructor?
                                 (lambda (e)
                                   (match-define (exn:fail:contract:arity:type-constructor _ _ expected given) e)
-                                  (tc-error (~a "wrong number of arguments to type constructor"
-                                                "\n  type: " #'id
-                                                "\n  expected: " expected
-                                                "\n  given: " given
-                                                "\n  arguments...: " #'(args ...))))])
-                 (apply rator args^))]
+                                  (err expected given))])
+                 (cond
+                   ;; in the checking mode, inline type applications of simple
+                   ;; type constructors
+                   [(and (not mode)
+                         (simple-type-constructor? #'id))
+                    (apply rator args^)]
+                   [else
+                    (define alias (lookup-type-alias #'id (lambda (x) x) (lambda () #f)))
+                    (match alias
+                      [(? Name?)
+                       (if (equal? arity (length args^))
+                           (make-App alias args^)
+                           (err arity (length args^)))]
+                      [_ (apply rator args^)])]))]
               [(? Name?)
                (resolve-app-check-error rator args^ stx)
-               (define app (make-App rator args^))
-               app]
+               (make-App rator args^)]
               [(Error:) Err]
               [_ (parse-error "bad syntax in type application: expected a type constructor"
                               "given a type"
                               rator)])]
            [else Err])]
         [(id args ...)
-         (parse-error "bad syntax in type application: only an identifiers can be used as an operator")]
+         (parse-error "bad syntax in type application: only an identifier can be used as an operator")]
         [t:atom
          ;; Integers in a "grey area", that is, integers whose runtime type is
          ;; platform-dependent, cannot be safely assigned singleton types.
@@ -1475,10 +1506,9 @@
   ;; Merge all the non-duplicate entries from the parent types
   (define (merge-clause parent-clause clause)
     (for/fold ([clause clause])
-              ([(k v) (in-dict parent-clause)])
-      (if (dict-has-key? clause k)
-          clause
-          (dict-set clause k v))))
+              ([(k v) (in-dict parent-clause)]
+               #:unless (dict-has-key? clause k))
+      (dict-set clause k v)))
 
   (define (match-parent-type parent-type)
     (define resolved (resolve parent-type))
@@ -1623,12 +1653,12 @@
             ;; of init arguments.
             (define parent-inits (get-parent-inits parent/init-type))
 
-            (define class-type
-              (make-Class row-var
-                          (append given-inits parent-inits)
-                          fields methods augments given-init-rest))
-
-            class-type]
+            (make-Class row-var
+                        (append given-inits parent-inits)
+                        fields
+                        methods
+                        augments
+                        given-init-rest)]
            [else
             ;; Conservatively assume that if there *are* #:implements
             ;; clauses, then the current type alias will be recursive

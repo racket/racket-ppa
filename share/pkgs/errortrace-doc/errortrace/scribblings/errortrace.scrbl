@@ -350,14 +350,19 @@ for use as an error display handler.}
 
 @defproc[(errortrace-annotate (stx any/c)) any/c]{
 
-Macro-expands and instruments the given top-level form. If the form is
-a module named @racketidfont{errortrace-key}, no instrumentation is
-applied. See the signature element
+Macro-expands and instruments the given top-level form. If the form
+@racket[read]s as a module whose first subexpression is
+@racket[(void '#:errortrace-dont-annotate)] or is a module whose
+name is @racketidfont{errortrace-key}, then
+no instrumentation is applied. See the signature element
 @sigelem[stacktrace/errortrace-annotate^ errortrace-annotate]
 (of @racket[stacktrace/errortrace-annotate^])
 for more detail.
 
 This annotation function is used by @racket[errortrace-compile-handler].
+
+@history[#:changed "1.5" @list{Generalized predicate for skippable modules
+           to those using @racket['#:errortrace-dont-annotate]}]
 }
 
 @defproc[(annotate-top [stx any/c][phase-level exact-integer?]) any/c]{
@@ -367,7 +372,8 @@ for @racket[stx]; @racket[(namespace-base-phase)] is typically the
 right value for the @racket[phase-level] argument.
 
 Unlike @racket[errortrace-annotate], there no special case for
-a module named @racketidfont{errortrace-key}. Also, if @racket[stx] is a module
+a module named @racketidfont{errortrace-key} or with
+@racket['#:errortrace-dont-annotate]. Also, if @racket[stx] is a module
 declaration, it is not enriched with imports to explicitly load
 Errortrace run-time support.}
 
@@ -421,6 +427,13 @@ and exports @racket[stacktrace/errortrace-annotate^].
 
 @history[#:added "1.3"]}
 
+@defthing[stacktrace/errortrace-annotate/key-module-name@ unit?]{
+
+Imports @racket[stacktrace/annotator-imports^] and @racket[key-module-name^] and exports @racket[stacktrace/errortrace-annotate^].
+
+@history[#:added "1.4"]
+}
+
 
 @defsignature[stacktrace^ ()]{
 
@@ -468,7 +481,8 @@ hardwired to return @racket[null]. }
   Adds the property @racket['errortrace:annotate] to everywhere inside
   @racket[stx], and expands it.
   If @racket[stx] is a module (but not named @racketidfont{errortrace-key}
-  module nor a @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{cross-phase persistent} module),
+  module nor a @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{cross-phase persistent} module
+  nor a module whose first subexpression is @racket[(void '#:errortrace-dont-annotate)]),
   calls @racketout[annotate-top] with the expanded code and inserts appropriate requires
   to the @racketidfont{errortrace-key} module.
 
@@ -615,6 +629,15 @@ Same as in @racket[stacktrace-imports^].}
 
 Same as @racket[stacktrace-imports^].}
 
+}
+
+@defsignature[key-module-name^ ()]{
+ @defthing[key-module-name module-path?]{
+  References to this module are inserted into each compile, such that references to
+  its exported identifiers can be inserted by @racket[with-mark]
+  (as in @racket[stacktrace-imports^] and @racket[stacktrace/annotator-imports^]).
+ }
+ @history[#:added "1.4"]
 }
 
 

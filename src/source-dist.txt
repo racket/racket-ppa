@@ -1,0 +1,2 @@
+This is a source distribution.
+(The existence of this file is a hint to build scripts.)

@@ -12,6 +12,8 @@
          "../../types/abbrev.rkt"
          "../../types/utils.rkt"
          "../../types/generalize.rkt"
+         "../../types/resolve.rkt"
+         "../../types/subtype.rkt"
          "../../types/type-table.rkt"
          "../../private/type-annotation.rkt"
          "../../private/syntax-properties.rkt"
@@ -31,7 +33,6 @@
   #:literal-sets (kernel-literals)
   ;; let loop
   (pattern ((letrec-values ([(lp) (~and lam (#%plain-lambda (args ...) . body))]) lp*:id) . actuals)
-    #:when expected
     #:when (not (andmap type-annotation (syntax->list #'(lp args ...))))
     #:when (free-identifier=? #'lp #'lp*)
     (let-loop-check #'lam #'lp #'actuals #'(args ...) #'body expected))
@@ -44,10 +45,10 @@
    (let* ([res (tc/let-values #'((x) ...) #'(args ...) #'body expected)]
           [dom-ts
            (for/list ([arg (in-list (syntax-e #'(args ...)))])
-             (match (type-of arg)
-              [(tc-result1: t) t]))]
+             (match-define (tc-result1: t) (type-of arg))
+             t)]
           [cod-t (tc-results->values res)])
-     (add-typeof-expr #'lam (ret (->* dom-ts cod-t)))
+     (add-typeof-expr #'lam (ret (->* dom-ts cod-t :T+ #t)))
      res))
   ;; inference for ((lambda with dotted rest
   (pattern ((~and lam (#%plain-lambda (x ... . rst:id) . body)) args ...)
@@ -67,12 +68,13 @@
 
 
 (define/cond-contract (let-loop-check lam lp actuals args body expected)
-  (syntax? syntax? syntax? syntax? syntax? tc-results/c . --> . full-tc-results/c)
+  (syntax? syntax? syntax? syntax? syntax? (-or/c #f tc-results/c) . --> . full-tc-results/c)
   (syntax-parse #`(#,args #,body #,actuals)
     #:literal-sets (kernel-literals lambda-literals)
     [((val acc ...)
       ((~and inner-body (if (#%plain-app (~or pair? null?) val*:id) thn els)))
       (actual actuals ...))
+     #:when expected
      #:when
      (and (free-identifier=? #'val #'val*)
           (ormap (lambda (a) (find-annotation #'inner-body a))
@@ -80,10 +82,10 @@
      (let* ([ts1 (generalize (tc-expr/t #'actual))]
             [ann-ts (for/list ([a (in-syntax #'(acc ...))]
                                [ac (in-syntax #'(actuals ...))])
-                      (let ([type (find-annotation #'inner-body a)])
-                        (if type
-                            (tc-expr/check/t ac (ret type))
-                            (generalize (tc-expr/t ac)))))]
+                      (define type (find-annotation #'inner-body a))
+                      (if type
+                          (tc-expr/check/t ac (ret type))
+                          (generalize (tc-expr/t ac))))]
             [ts (cons ts1 ann-ts)])
        ;; check that the actual arguments are ok here
        (for/list ([a (in-syntax #'(actuals ...))]
@@ -96,9 +98,12 @@
        body-results)]
     ;; special case `for/list'
     [((val acc ...)
-      ((~and inner-body (if e1 e2 e3:id)))
-      (~and (null actuals ...) (null-exp . _)))
+      ((~or (~and inner-body (if e1 e2 e3:id))
+            (~and inner-body (let-values () (if e1 e2 e3:id)))))
+      (null-exp actuals ...))
+     #:when expected
      #:when (free-identifier=? #'val #'e3)
+     #:when (subtype (tc-expr/t #'null-exp) -Null)
      (let ([ts (for/list ([ac (in-syntax #'(actuals ...))]
                           [f (in-syntax #'(acc ...))])
                  (let ([type (or (type-annotation f #:infer #t)
@@ -109,7 +114,8 @@
            [acc-ty (or
                     (type-annotation #'val #:infer #t)
                     (match expected
-                      [(tc-result1: (and t (Listof: _))) t]
+                      [(tc-result1: (and t (or (? App? (app resolve-once (Listof: _))) (Listof: _))))
+                       t]
                       [_ #f])
                     (generalize -Null))])
        ;; this check is needed because the type annotation may come

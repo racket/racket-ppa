@@ -32,11 +32,12 @@ KERNEL_TARGET_MACH = @KERNEL_TARGET_MACH@
 RACKET = @RACKET@
 
 # If `BOOTFILE_RACKET` is set, then it needs only to be a Racket that
-# is recent enough to run "../../ChezScheme/rktboot/main.rkt"; it
+# is recent enough to run "../../rktboot/main.rkt"; it
 # doesn't replace the Racket build here for other purposes
 BOOTFILE_RACKET = @BOOTFILE_RACKET@
 
-# If `SCHEME` is set, it must be compatible to the curren build;
+# If `SCHEME` is set, then it needs only to be a Scheme that
+# is recent enough to run "../../ChezScheme/s/reboot.ss";
 # if `SCHEME_DIR` is set and `SCHEME` is not, then `SCHEME_DIR` refers
 # to an existing build directory;
 # if `RACKET` is "auto", then an auto-generated Scheme is used and
@@ -92,6 +93,7 @@ CONFIGURE_RACKET_SO_COMPILE = @CONFIGURE_RACKET_SO_COMPILE@
 BOOT_COMPRESS_COMP = @BOOT_COMPRESS_COMP@
 COMPRESS_COMP = @COMPRESS_COMP@
 DISABLE_WPO = @DISABLE_WPO@
+ENABLE_EXTRA_CHECKS = @ENABLE_EXTRA_CHECKS@
 
 # Potentially a suffix like "cs" to add to the end of installed
 # executables:
@@ -120,6 +122,8 @@ FRAMEWORK_REL_INSTALL = @FRAMEWORK_REL_INSTALL@
 # Supplies the path for install, using "${libpltdir}" for relative
 # or an absolute path otherwise
 FRAMEWORK_INSTALL_DIR = @FRAMEWORK_INSTALL_DIR@
+# Whether to sign executables (ad hoc) for Mac OS ("t" or "f")
+SIGNED_EXE=@SIGNED_EXE@
 
 # This might be set to a directory that narrows installation actions
 # to just the main collects (no packages), for example; when non-empty
@@ -127,16 +131,20 @@ FRAMEWORK_INSTALL_DIR = @FRAMEWORK_INSTALL_DIR@
 # installation "etc" directory
 SELF_ROOT_CONFIG_DIR =
 
-# Typically "--no-user":
+# Flags supplied to `raco` when installing, typically "--no-user";
+# values of two variable are appended for historical reasons
 INSTALL_SETUP_FLAGS = @INSTALL_SETUP_FLAGS@
+PLT_SETUP_OPTIONS =
 
 # Flags supplied to `racket` when running `raco` to set up
 # packages and collections; the intent is to allow flags
 # like `-MRC` to compile machine-independent bytecode
 # while redirecting machine-specific bytecode to a separate
 # filesystem tree, and/or `--cross-compiler` to support
-# corss compilation
+# cross compilation; values of two variable are appended for
+# historical reasons
 SETUP_MACHINE_FLAGS = 
+INSTALL_SETUP_RACKET_FLAGS =
 
 # Shell command to run after building an executable, where the
 # just-built executable is added to the end of the command
@@ -166,7 +174,9 @@ PACKAGE = racket
 prefix = @prefix@
 exec_prefix = @exec_prefix@
 datarootdir = @datarootdir@
+datadir = @datadir@
 bindir = @bindir@
+guibindir = @guibindir@
 libdir = @libdir@
 includepltdir = @includepltdir@
 libpltdir = @libpltdir@
@@ -181,7 +191,7 @@ appsdir = @appsdir@
 mandir = @mandir@
 
 # Whether `setup/unixstyle-install.rkt copytree` is needed for
-# installation ("yes" or "no")
+# installation ("copytree" or "no")
 MAKE_COPYTREE = @MAKE_COPYTREE@
 
 # Whether copytree should preserve the source shape ("yes")
@@ -196,6 +206,18 @@ MAKE_INSTALL_PKGSCOPE = @MAKE_INSTALL_PKGSCOPE@
 # (e.g., "user")
 INSTALL_PKGSCOPE = @INSTALL_PKGSCOPE@
 
+# Extra packages to install, and where to find then if not
+# the default package catalog
+INSTALL_PKGS = @INSTALL_PKGS@
+INSTALL_PKG_CATALOG = @INSTALL_PKG_CATALOG@
+
+# Can be "yes", "no" (or ""), or "dist" to indicate whether an install
+# step should check for missing packages, especially platform-specific
+# packages like "racket-aarch64-macosx-4"; a value of "dist"
+# means "yes" if "../../source-dist.txt" exists; installation uses
+# `INSTALL_PKG_CATALOG`
+INSTALL_MISSING_PKGS = @INSTALL_MISSING_PKGS@
+
 # Whether ".zo" files should be moved to "lib" instead of "share"
 # for a Unix-style installation ("yes" or "no")
 INSTALL_LIBZO = @INSTALL_LIBZO@
@@ -204,19 +226,22 @@ INSTALL_LIBZO = @INSTALL_LIBZO@
 # ------------------------------------------------------------
 
 CC_FOR_BUILD=@CC_FOR_BUILD@
+CFLAGS_FOR_BUILD=@CFLAGS_FOR_BUILD@
 upsrcdir=@upsrcdir@
 
 ZUO=bin/zuo
 
+BUILD_VARS = MAKE="$(MAKE)"
+
 cs: $(ZUO)
-	$(ZUO) . build
+	$(ZUO) . build-and-prepare $(BUILD_VARS)
 
 install: $(ZUO)
-	$(ZUO) . install
+	$(ZUO) . install $(BUILD_VARS)
 
 plain-install: $(ZUO)
-	$(ZUO) . plain-install
+	$(ZUO) . plain-install $(BUILD_VARS)
 
 $(ZUO): $(srcdir)/../../zuo/zuo.c
 	mkdir -p bin
-	$(CC_FOR_BUILD) -DZUO_LIB_PATH='"'"$(upsrcdir)/../../zuo/lib"'"' -o $(ZUO) $(srcdir)/../../zuo/zuo.c
+	$(CC_FOR_BUILD) $(CFLAGS_FOR_BUILD) -DZUO_LIB_PATH='"'"$(upsrcdir)/../../zuo/lib"'"' -o $(ZUO) $(srcdir)/../../zuo/zuo.c

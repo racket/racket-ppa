@@ -169,14 +169,31 @@
   (define-file-x-time file-modification-time "(cs)path_mtime" "(cs)fd_mtime"))
 
 (define directory-separator
-  (lambda ()
-    (#2%directory-separator)))
+  (constant-case architecture
+    [(pb)
+     (let ([sep ((foreign-procedure "(cs)s_separatorchar" () ptr))])
+       (if (eq? sep #\;)
+           (lambda () #\\)
+           (lambda () #\/)))]
+    [else
+     (lambda ()
+       (#2%directory-separator))]))
 
 (define directory-separator?
-  (lambda (c)
-    (unless (char? c)
-      ($oops 'directory-separator? "~s is not a character" c))
-    (#3%directory-separator? c)))
+  (constant-case architecture
+    [(pb)
+     (let ([sep ((foreign-procedure "(cs)s_separatorchar" () ptr))])
+       (lambda (c)
+         (unless (char? c)
+           ($oops 'directory-separator? "~s is not a character" c))
+         (if (eqv? sep #\;)
+             (or (eqv? c #\\) (eqv? c #\/))
+             (eqv? c #\/))))]
+    [else
+     (lambda (c)
+       (unless (char? c)
+         ($oops 'directory-separator? "~s is not a character" c))
+       (#3%directory-separator? c))]))
 
 (define-who directory-list
   (let ([dl (let ()
@@ -337,7 +354,9 @@
 ;;; path procedures
 
 (let ()
-  (define windows? (if-feature windows #t #f))
+  (define windows? (constant-case architecture
+                     [(pb) (eqv? #\; ((foreign-procedure "(cs)s_separatorchar" () ptr)))]
+                     [else (if-feature windows #t #f)]))
 
   (define directory-separator-predicate
     (lambda (s)
@@ -525,12 +544,12 @@
     (lambda (dir fn)
       (unless (string? dir) ($oops who "~s is not a string" dir))
       (unless (string? fn) ($oops who "~s is not a string" fn))
-      (format
-       (if (directory-separator?
-            (string-ref dir
-                        (fx- (string-length dir) 1)))
-           "~a~a"
-           (string-append "~a" (string (directory-separator)) "~a"))
-       dir fn)))
+      (cond
+        [(string=? dir "") fn]
+        [(directory-separator?
+           (string-ref dir
+                       (fx- (string-length dir) 1)))
+         (string-append dir fn)]
+        [else (string-append dir (string (directory-separator)) fn)])))
 )
 )

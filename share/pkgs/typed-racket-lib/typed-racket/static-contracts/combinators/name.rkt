@@ -72,13 +72,13 @@
        (case typed-side
          [(both)    (car result)]
          [(typed)   (cadr result)]
-         [(untyped) (caddr result)])))
+         [(untyped) (caddr result)]
+         [else (raise-argument-error 'lookup-name-sc "side?" typed-side)])))
 
 (define (register-name-sc type typed-thunk untyped-thunk both-thunk)
-  (define-values (typed-name untyped-name both-name)
-    (values (generate-temporary)
-            (generate-temporary)
-            (generate-temporary)))
+  (define typed-name (generate-temporary))
+  (define untyped-name (generate-temporary))
+  (define both-name (generate-temporary))
   (hash-set! (name-sc-table)
              type
              (list (name-combinator null typed-name)

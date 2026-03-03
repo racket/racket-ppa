@@ -352,6 +352,8 @@ corresponding to @racket[trest], where @racket[bound]
 @deftypeconstr[(MListof t)]{Returns the type of a homogeneous @rtech{mutable list} of @racket[t].}
 @deftypeconstr[(MPairof t u)]{Returns the type of a @rtech{Mutable pair} of @racket[t] and @racket[u].}
 
+@deftypeconstr[(TreeListof t)]{Returns the type of @rtech{treelist} of @racket[t]}
+
 @deftype[MPairTop]{Is the type of a @rtech{mutable pair} with unknown
   element types and is the supertype of all mutable pair types.
   This type typically appears in programs via the combination of
@@ -513,10 +515,11 @@ type returned.  @ex[current-input-port current-directory]}
 
 @deftypeconstr[(Futureof t)]{Returns the type of @rtech{future} which produce a value of type @racket[t] when touched.}
 
-@deftypeconstr[(Sequenceof t t ...)]{Returns the type of @rtech{sequence} that produces
- @racket[(Values _t _t ...)] on each iteration. E.g., @racket[(Sequenceof String)]
-is a sequence of strings, @racket[(Sequenceof Number String)] is a sequence which
-produces two values---a number and a string---on each iteration, etc.}
+@deftypeconstr[(Sequenceof t ...)]{Returns the type of @rtech{sequence} that produces
+  @racket[(Values _t ...)] on each iteration. E.g., @racket[(Sequenceof)]
+  is a sequence which produces no values, @racket[(Sequenceof String)] is a
+  sequence of strings, @racket[(Sequenceof Number String)] is a sequence which
+  produces two values---a number and a string---on each iteration, etc.}
 
 @deftype[SequenceTop]{Is the type of a @rtech{sequence} with unknown element
   type and is the supertype of all sequences. This type typically
@@ -1029,9 +1032,11 @@ prefab types with the (implicitly quoted) prefab-key
   structure type associcated with a @racket[Struct-Property] named @racket[prop].
 }
 
+@defalias[∪ U "type constructor"]
 @defalias[Union U "type constructor"]
 @defalias[Intersection ∩ "type constructor"]
 @defalias[→ -> "type constructor"]
+@defalias[→* ->* "type constructor"]
 @defalias[case→ case-> "type constructor"]
 @defalias[∀ All "type"]
 

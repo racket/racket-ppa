@@ -278,18 +278,11 @@
                         'replace 'truncate
                         'must-truncate 'truncate/replace)])))
 
-(define record-dc%/c
-  (class/c
-    (init [width (>=/c 0)]
-          [height (>=/c 0)])
-    [get-recorded-datum (->m any/c)]
-    [get-recorded-procedure (->m ((is-a?/c dc<%>) . -> . void?))]))
-
 (define region%/c
   (class/c
     (init [dc (or/c (is-a?/c dc<%>) #f)])
     (get-bounding-box (->m (values real? real? real? real?)))
-    (get-dc (->m (is-a?/c dc<%>)))
+    (get-dc (->m (or/c (is-a?/c dc<%>) #f)))
     (in-region? (->m real? real? boolean?))
     (intersect (->m (is-a?/c region%) void?))
     (is-empty? (->m boolean?))
@@ -330,6 +323,14 @@
     (subtract (->m (is-a?/c region%) void?))
     (union (->m (is-a?/c region%) void?))
     (xor (->m (is-a?/c region%) void?))))
+
+(define record-dc%/c
+  (class/c
+    (init [width (>=/c 0)]
+          [height (>=/c 0)])
+    [get-clipping-region (->m (or/c #f (instanceof/c region%/c)))]
+    [get-recorded-datum (->m any/c)]
+    [get-recorded-procedure (->m ((is-a?/c dc<%>) . -> . void?))]))
 
 (define dc-path%/c
   (class/c

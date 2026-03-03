@@ -1,22 +1,25 @@
 #lang racket/base
 
-(require syntax/parse syntax/stx racket/sequence
-         syntax/parse/experimental/template
-         racket/match racket/syntax
+(require (for-template racket/base)
+         racket/match
          racket/promise
-         "../utils/utils.rkt"
-         (for-template racket/base)
-         "../types/numeric-tower.rkt"
-         "../types/utils.rkt"
-         "../types/type-table.rkt"
-         "../rep/type-rep.rkt"
+         racket/sequence
+         racket/syntax
+         syntax/parse
+         syntax/parse/experimental/template
+         syntax/stx
          "../env/mvar-env.rkt"
-         "utils.rkt"
-         "logging.rkt"
+         "../rep/type-rep.rkt"
+         "../types/numeric-tower.rkt"
+         "../types/type-table.rkt"
+         "../types/utils.rkt"
+         "../utils/utils.rkt"
          "float-complex.rkt"
-         "unboxed-tables.rkt")
+         "logging.rkt"
+         "unboxed-tables.rkt"
+         "utils.rkt")
 
-(provide unboxed-let-opt-expr)
+(provide unboxed-let-opt-expr escapes?)
 
 ;; possibly replace bindings of complex numbers by bindings of their 2
 ;; components useful for intermediate results used more than once and for
@@ -138,7 +141,7 @@
   #:literal-sets (kernel-literals)
   (pattern ((fun-name:constant-var) (~and fun (#%plain-lambda params body ...)))
     #:do [(define doms
-            (match (type-of #'fun)
+            (match (maybe-type-of #'fun)
               [(tc-result1: (Fun: (list (Arrow: doms
                                                 #f  ;; rest arg
                                                 '() ;; kw args
@@ -250,8 +253,12 @@
       [(#%plain-app rator:expr rands:expr ...)
        (or (direct-child-of? v #'(rands ...)) ; used as an argument, escapes
            (ormap rec (syntax->list #'(rator rands ...))))]
+      [_:ignore-table^
+       #t]
       [e:kernel-expression
-       (look-at #'(e.sub-exprs ...))]))
+       (look-at #'(e.sub-exprs ...))]
+      [_
+       (raise-argument-error 'escapes? "kernel-expression" exp)]))
 
 
   ;; if the given var is the _only_ element of the body and we're in a

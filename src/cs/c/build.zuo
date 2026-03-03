@@ -1,12 +1,14 @@
 #lang zuo
 (require "../../lib.zuo"
          "../../mac/codesign.zuo"
+         "../../worksp/mingw-ms.zuo"
          (only-in "../../ChezScheme/build.zuo"
                   [targets-at scheme-targets-at])
          (only-in "../../start/build.zuo"
                   [targets-at starter-targets-at])
          (only-in "../main.zuo"
-                  [targets-at cs-targets-at]))
+                  [targets-at cs-targets-at])
+         "scheme-version.zuo")
 
 (provide-targets targets-at)
 
@@ -22,7 +24,7 @@
   (define host-m (lookup 'MACH))
   (define m (hash-ref config 'TARGET_MACH host-m))
 
-  (define macx? (glob-match? "*osx" m)) ; maybe xonx
+  (define signed-exe? (equal? (lookup 'SIGNED_EXE) "t"))
   (define mac? (equal? (lookup 'OSX) "t"))
   (define mac-fw? (and mac?
                        (equal? (lookup 'MACLIBRKT_LINK_MODE) "fw")))
@@ -86,7 +88,11 @@
                                                            'schemify "f"
                                                            'CONFIGURE_RACKET_SO_COMPILE (lookup 'CONFIGURE_RACKET_SO_COMPILE)
                                                            'COMPRESS_COMP (lookup 'COMPRESS_COMP)
-                                                           'DISABLE_WPO (lookup 'DISABLE_WPO "f"))])
+                                                           'DISABLE_WPO (lookup 'DISABLE_WPO "f")
+                                                           'UNSAFE_COMP (or (hash-ref vars 'UNSAFE_COMP #f)
+                                                                            (if (equal? (lookup 'ENABLE_EXTRA_CHECKS "no") "yes")
+                                                                                "no"
+                                                                                "yes")))])
                                       (if (not xpatch?)
                                           vars
                                           (hash-set* vars
@@ -111,6 +117,20 @@
                'disableiconv (lookup 'DISABLE_ICONV "no")
                'exePostStep (lookup 'POST_LINKER)))
 
+  (define (add-scheme-boot-config config)
+    (if (equal? (lookup 'ENABLE_EXTRA_CHECKS "no") "yes")
+        (hash-set* config
+                   'o "2"
+                   'd "1")
+        config))
+
+  (define (add-windows-config config)
+    (hash-set* config
+               'runtimeAs "static"
+               'linkAs "exe"
+               'kernelLibName "kernel"
+               'STRIP (lookup 'STRIP_DEBUG "strip")))
+
   (define starter-targets (starter-targets-at at-dir config windows?))
   (define MzStart.exe (at-dir "MzStart.exe"))
   (define MrStart.exe (at-dir "MrStart.exe"))
@@ -121,11 +141,21 @@
   (define rktio_config.h (list-ref librktio.a+rktio_config.h 1))
 
   (define main-deps
-    (list (at-source "main.c")
-          (at-source "boot.h")
-          (at-dir "cs_config.h")
-          (at-source "../../start/config.inc")
-          (at-source "../../start/self_exe.inc")))
+    (append
+     (list (at-source "main.c")
+           (at-source "boot.h")
+           (at-dir "cs_config.h")
+           (at-source "../../start/config.inc")
+           (at-source "../../start/self_exe.inc")
+           (at-source "../../ChezScheme/c/self-exe.c")
+           (at-source "path_replace.inc"))
+     (if windows?
+         (list
+          (at-source "../../start/embedded_dll.inc")
+          (at-source "../../start/cmdl_to_argv.inc")
+          (at-source "../../start/delayed.inc")
+          (at-source "../../start/parse_cmdl.inc"))
+         '())))
 
   (define main.o (at-dir (.c->.o "main.c")))
   (define grmain.o (at-dir (.c->.o "grmain.c")))
@@ -140,6 +170,8 @@
                      (at-dir (~a "racket" i ".c"))
                      (loop (+ i 1)))))
         '()))
+  (define pbchunk-objs
+    (map .c->.o pbchunk-srcs))
 
   (define boot.o (at-dir (.c->.o "boot.c")))
   (define boot-objs
@@ -158,7 +190,7 @@
                             (at-dir CS m "lz4/lib/liblz4.a")))
                   '()))
             (list librktio.a)
-            (map .c->.o pbchunk-srcs)))
+            pbchunk-objs))
 
   (define MemoryModule.o (at-dir (.c->.o "MemoryModule.c")))
 
@@ -183,6 +215,7 @@
 
   (define libracketcsxxxxxxx.dll (at-dir "libracketcsxxxxxxx.dll"))
   (define libracketcsxxx_RAW.dll (at-dir "libracketcsxxx_RAW.dll"))
+  (define libracketcsxxx_RAW-stripped.dll (at-dir "libracketcsxxx_sRAW.dll"))
 
   (define rres.o (at-dir (~a "rres" (if msvc? ".res" ".o"))))
   (define grres.o (at-dir (~a "grres" (if msvc? ".res" ".o"))))
@@ -283,11 +316,15 @@
     (apply bootstrap-racket args))
 
   (define (strip-signature dest)
-    (when macx?
+    (when signed-exe?
       (strip-signature* cross? bootstrap-racket dest)))
   (define (restore-signature dest)
-    (when macx?
+    (when signed-exe?
       (restore-signature* cross? bootstrap-racket dest)))
+  (define entitlements
+    (if signed-exe?  ; wanted for XOX, too, so no `mac?` check
+        (list (at-source "../../mac/entitlements.plist"))
+        '()))
 
   (define (install_name_tool . args)
     (install_name_tool* cross? bootstrap-racket args))
@@ -303,6 +340,7 @@
     (strip-signature dest)
     (unless mac-fw?
       (bootstrap-racket (at-source "embed-boot.rkt")
+                        "--target" m
                         boot-compress-flags
                         ""
                         dest
@@ -329,11 +367,19 @@
     (call-with-dest-racket
      (lambda (bindir dest-racket)
        (cons dest-racket
-             (cond
-               [mac-fw? (list (build-path (shell-subst (lookup 'FRAMEWORK_INSTALL_DIR) config)
-                                          framework-dir
-                                          "Racket"))]
-               [else '()])))))
+             (append
+              (cond
+                [mac-fw? (list (build-path (shell-subst (lookup 'FRAMEWORK_INSTALL_DIR) config)
+                                           framework-dir
+                                           "Racket"))]
+                [else '()])
+              (cond
+                [xpatch? (list* (at-source "cross-serve.ss")
+                                (at-source "mk-cross-serve.ss")
+                                (at-source "../expander/env.ss")
+                                (map (lambda (name) (at-dir (~a name "." host-m)))
+                                     library-xpatch-names))]
+                [else '()]))))))
   (define install-data-to-check
     (input-data-target 'install-data
                        ;; this could be more precise, too:
@@ -351,6 +397,11 @@
         (list "--xpatch" xpatch)
         '()))
 
+  (define (setup-prepare-to-here?)
+    (and (equal? (lookup 'MAKE_COPYTREE) "copytree")
+         (not cross?)
+         (not (in-builtpkgs-distro?))))
+
   (define the-targets
     (make-targets
      `([:target build ()
@@ -359,7 +410,15 @@
                    (build/dep (find-target gracketcs the-targets) token)
                    (build/dep (find-target "starter" starter-targets) token)
                    (when (and mac? (not mac-fw?))
-                     (build/dep (find-target framework the-targets) token)))]
+                     (build/dep (find-target framework the-targets) token)))
+                :recur]
+
+       [:target build-and-prepare ()
+                ,(lambda (token)
+                   (build/dep (find-target "build" the-targets) token)
+                   (when (setup-prepare-to-here?)
+                     (raco-setup-prepare-to-here config racketcs at-dir (make-at-dir
+                                                                         (at-source "../../..")))))]
 
        [:target build-racketcs ()
                 ,(lambda (token)
@@ -388,7 +447,8 @@
                    (build/dep (find-target "scheme" the-targets) token)
                    (unless cross?
                      (build/dep (find-target racket.boot the-targets) token))
-                   (build/dep (find-target racketcs the-targets) token))]
+                   (build/dep (find-target racketcs the-targets) token))
+                :recur]
 
        ,(if windows?
             `[:target (,racketcs ,gracketcs ,libracketcsxxxxxxx.dll)
@@ -402,14 +462,23 @@
                            (for-each (lambda (v.boot)
                                        (cp v.boot (at-dir "lib" (file-name-from-path v.boot))))
                                      (list petite-v.boot scheme-v.boot racket-v.boot)))
+                         ;; currently, the resource embedder adds to the end, but nothing
+                         ;; is supposed to be after debug info, so strip any that's there:
+                         (begin
+                           (cp libracketcsxxx_RAW.dll libracketcsxxx_RAW-stripped.dll)
+                           (strip-debug config libracketcsxxx_RAW-stripped.dll))
                          (bootstrap-racket (at-source "embed-boot.rkt")
                                            "--target" m
                                            "++rewrite" "libracketcsxxx_RAW.dll" "libracketcsxxxxxxx.dll"
                                            boot-compress-flags
                                            "++exe" raw_racketcs racketcs
                                            "++exe" raw_gracketcs gracketcs
-                                           libracketcsxxx_RAW.dll libracketcsxxxxxxx.dll
+                                           libracketcsxxx_RAW-stripped.dll libracketcsxxxxxxx.dll
                                            petite-v.boot scheme-v.boot racket-v.boot)
+                         (unless cross?
+                           ;; put updated DLL in place to run `racketcs.exe`; it's
+                           ;; ok for raw_racketcs to use this DLL, too:
+                           (cp libracketcsxxxxxxx.dll (at-dir "lib" (file-name-from-path libracketcsxxxxxxx.dll))))
                          (when msvc?
                            (shell/wait "mt" "-manifest" (string->shell racket.manifest)
                                        (string->shell (~a "-outputresource:" racketcs)))
@@ -419,6 +488,7 @@
                                                      (list framework)
                                                      embed+boot-deps)
                                                ,(input-data-target 'mac-fw mac-fw?)
+                                               ,@entitlements
                                                ,link-config)
                       ,(lambda (path token)
                          (cond
@@ -449,6 +519,7 @@
                                                                   embed+boot-deps))
                                               boot-objs)
                                         ,(input-data-target 'mac-fw mac-fw?)
+                                        ,@entitlements
                                         ,@(if windows?
                                               (list MemoryModule.o res.o)
                                               '())
@@ -504,6 +575,7 @@
             `([:target ,gracketcs (,grmain.o ,@(if mac-fw?
                                                    (list framework)
                                                    boot-objs)
+                                             ,@entitlements
                                              ,gracket-app-skeleton)
                        ,(lambda (path token)
                           (c-link (~a gracketcs "_raw")
@@ -565,14 +637,14 @@
                    (vfasl scheme-chunked.boot "scheme.boot" '("petite"))
                    (vfasl racket-chunked.boot "racket.boot" '("petite" "scheme")))]
 
-       [:target ,libracketcsxxx_RAW.dll (,@boot-objs ,libres.o)
+       [:target ,libracketcsxxx_RAW.dll (,@boot-objs ,libres.o ,@mingw-to-ms-link-libraries-deps)
                 ,(lambda (path token)
                    (c-compile libracketcsxxx_RAW.dll
                               (append (map target->path boot-objs)
                                       (list libres.o (target->path librktio.a))
                                       (if msvc?
                                           windows-libs
-                                          '()))
+                                          (make-mingw-to-ms-link-libraries m (at-dir) config)))
                               (if msvc?
                                   (config-merge config
                                                 'CFLAGS
@@ -596,6 +668,9 @@
 
        [:target ,boot.o (,(at-source "boot.c")
                          ,(at-source "../../rktio/rktio.inc")
+                         ,(at-source "../../start/self_exe.inc")
+                         ,(at-source "../../ChezScheme/c/self-exe.c")
+                         ,(at-source "path_replace.inc")
                          ,(at-source "boot.h")
                          ,rktio_config.h)
                 ,(lambda (boot.o token)
@@ -630,13 +705,12 @@
                    (mkdir-p (at-dir CS m))
                    (display-to-file "" (at-dir CS m "Mf-config") :truncate)
                    (define m-targets (scheme-targets-at (make-at-dir (at-dir CS m))
-                                                        (hash-set* (add-scheme-kernel-config
-                                                                    (adjust-linking-config config))
-                                                                   'm m
-                                                                   ;; these are for Windows:
-                                                                   'runtimeAs "static"
-                                                                   'linkAs "exe"
-                                                                   'kernelLibName "kernel")))
+                                                        (add-windows-config
+                                                         (hash-set* (add-scheme-boot-config
+                                                                     (add-scheme-kernel-config
+                                                                      (adjust-linking-config config)))
+                                                                    'm m
+                                                                    'relativeBootFiles "yes"))))
                    (build (find-target (if cross? "kernel" "build") m-targets) token)
                    (unless cross?
                      (build (find-target check-bootstrap-same-stamp the-targets)
@@ -653,31 +727,47 @@
                           (mkdir-p (at-dir CS m))
                           (display-to-file "" (at-dir CS m "Mf-config") :truncate)
                           (define host-m-targets (scheme-targets-at (make-at-dir (at-dir CS m))
-                                                                    (hash-set* config
-                                                                               'm host-m)))
-                          (define args
+                                                                    (add-scheme-boot-config
+                                                                     (hash-set* config
+                                                                                'm host-m))))
+                          (define target-name+args
                             (cond
                               [(not (equal? (lookup 'SCHEME_DIR) ""))
                                ;; use existing Scheme workarea to build boot files
-                               (list "--host-workarea"
-                                     (at-dir (lookup 'SCHEME_DIR) host-m)
-                                     m)]
+                               (cons "bootquick"
+                                     (append
+                                      (if xpatch? '("--xpatch") '())
+                                      (list "--host-workarea"
+                                            (at-dir (lookup 'SCHEME_DIR) host-m)
+                                            m)))]
                               [(not (equal? (lookup 'SCHEME) ""))
-                               ;; use existing Scheme to build boot files
-                               (list "--host-scheme"
-                                     (executable->path (lookup 'SCHEME) at-dir)
-                                     m)]
+                               ;; use existing Scheme to build boot files; if it doesn't
+                               ;; report the same version as we're trying to build, use it
+                               ;; in "reboot" mode
+                               (define exe (executable->path (lookup 'SCHEME) at-dir))
+                               (define same? (same-scheme-version? exe))
+                               (when (and xpatch? (not same?))
+                                 (error "cross build needs Scheme with matching version"))
+                               (cons (if same?
+                                         "bootquick"
+                                         "reboot")
+                                     (append
+                                      (if xpatch? '("--xpatch") '())
+                                      (list "--host-scheme" exe m)))]
                               [else
                                ;; assuming auto Racket and/or Scheme is built before we get here
-                               (list "--host-workarea"
-                                     (at-dir "local/cs/c/ChezScheme" host-m)
-                                     m)]))
-                          (build (command-target->target (find-target "bootquick" host-m-targets)
-                                                         args)
+                               (cons "bootquick"
+                                     (list "--host-workarea"
+                                           (at-dir "local/cs/c/ChezScheme" host-m)
+                                           m))]))
+                          (build (command-target->target (find-target (car target-name+args) host-m-targets)
+                                                         (cdr target-name+args))
                                  token))])]
            [(or (not (equal? (lookup 'BOOTFILE_RACKET) ""))
                 (not (equal? (lookup 'RACKET) "")))
             ;; use `BOOTFILE_RACKET` or `RACKET` to build boot files
+            (when xpatch?
+              (error "cross build needs --enable-scheme=SCHEME or --enable-racket=auto"))
             `([:target bootfiles ()
                        ,(lambda (token)
                           (define bootfile-racket (let ([r (lookup 'BOOTFILE_RACKET)])
@@ -685,11 +775,11 @@
                                                         (lookup 'RACKET)
                                                         r)))
                           (define racket.exe (executable->path bootfile-racket at-dir))
-                          ;; "rktboot/main.rkt" performs it's own timestamp-based "make"
+                          ;; "rktboot/main.rkt" performs its own timestamp-based "make"
                           (process/wait racket.exe
                                         (setup-boot at-dir config (hash 'mode "--chain"
                                                                         'compiled-subdir "compiled/rktboot"))
-                                        (at-source "../../ChezScheme/rktboot/main.rkt")
+                                        (at-source "../../rktboot/main.rkt")
                                         "--scheme-src" (at-source "../../ChezScheme")
                                         "--dest" (at-dir CS)
                                         "--machine" m))])]
@@ -700,10 +790,12 @@
                           (mkdir-p (at-dir CS "pb/c"))
                           (display-to-file "" (at-dir CS "pb/Mf-config") :truncate)
                           (define pb-targets (scheme-targets-at (make-at-dir (at-dir CS "pb"))
-                                                                (hash-set* (add-scheme-kernel-config
-                                                                            (adjust-linking-config config))
-                                                                           'm "pb"
-                                                                           'defaultm m)))
+                                                                (add-windows-config
+                                                                 (hash-set* (add-scheme-boot-config
+                                                                             (add-scheme-kernel-config
+                                                                              (adjust-linking-config config)))
+                                                                            'm "pb"
+                                                                            'defaultm m))))
                           (build (find-target "reset" pb-targets) token)
                           (build (command-target->target (find-target "bootquick" pb-targets)
                                                          (list m))
@@ -794,7 +886,8 @@
        [:target install-again (,(at-dir "install-stamp"))
                 ,(lambda (token)
                    (setup))]
-       [:target (,(at-dir "install-stamp") ,@install-files-to-check) (,install-data-to-check)
+       [:target (,(at-dir "install-stamp") ,@install-files-to-check) (,@entitlements
+                                                                      ,install-data-to-check)
                 ,(lambda (path token)
                    (install token)
                    (fd-close (fd-open-output path :truncate)))]
@@ -826,6 +919,7 @@
        (define config-path (shell-subst (lookup 'CONFIG_PATH) config))
        
        (mkdir-p bindir)
+       (mkdir-p libdir)
        (mkdir-p libpltdir)
        (mkdir-p includepltdir)
        (mkdir-p configdir)
@@ -842,6 +936,8 @@
           (define (icp/strip src dest)
             (icp* src dest)
             (strip-debug config dest))
+          ;; no need to strip here (and probably can't); the DLL was
+          ;; stripped before embedding boot files as resources
           (icp* libracketcsxxxxxxx.dll (build-path libdir (file-name-from-path libracketcsxxxxxxx.dll)))
           (define .def (path-replace-extension (file-name-from-path libracketcsxxxxxxx.dll) ".def"))
           (cond
@@ -879,7 +975,8 @@
                        m (lookup 'KERNEL_TARGET_MACH m)
                        (lookup 'CROSS_COMPILE_TARGET_KIND "machine")
                        (at-source ".")
-                       (lookup 'PLT_CS_SLSP_SUFFIX))
+                       (lookup 'PLT_CS_SLSP_SUFFIX)
+                       (if mac? "macosx" "other"))
        
        (icp* (at-source "api.h") (build-path includepltdir "racketcs.h"))
        (icp* (at-source "boot.h") (build-path includepltdir "racketcsboot.h"))
@@ -901,14 +998,17 @@
          (unpack-lib (at-dir CS m "boot" m "libkernel.a"))
          (shell/wait (lookup 'AR) (lookup 'ARFLAGS) libracketcs.a
                      (filter (glob->matcher "*.o") (ls* repack-dir))
+                     (if pbchunk? pbchunk-objs '())
                      boot.o)
          (icp-lib config (in! libracketcs.a) (build-path libdir "libracketcs.a"))
          (strip-lib-debug config (build-path libdir "libracketcs.a")))
 
        (cond
          [mac?
-          (define dest-framework-dir (build-path (shell-subst (lookup 'FRAMEWORK_INSTALL_DIR) config)
-                                                 "Racket.framework"))
+          (define dest-framework-dir (at-destdir
+                                      config
+                                      (build-path (shell-subst (lookup 'FRAMEWORK_INSTALL_DIR) config)
+                                                  "Racket.framework")))
           (define fw-vers-dir (build-path dest-framework-dir "Versions" (~a version "_CS")))
           (define dest-racket (build-path bindir (cs-suffix "racket")))
           (define (get-framework-prefix gui?)
@@ -924,7 +1024,7 @@
           (when (equal? (lookup 'FRAMEWORK_REL_INSTALL) "yes")
             (install-racket (at-source "../../mac/clean-fw.rkt") dest-framework-dir))
           (mkdir-p fw-vers-dir)
-          (cp framework (build-path fw-vers-dir "Racket"))
+          (cp (in! framework) (build-path fw-vers-dir "Racket"))
           (mkdir-p (build-path fw-vers-dir "boot"))
           (map (lambda (x.boot)
                  (cp (in! (build-path (at-dir framework-dir) "boot" x.boot)) (build-path fw-vers-dir "boot" x.boot)))
@@ -951,7 +1051,11 @@
                              (~a (get-framework-prefix #t) "Racket.framework/Versions/" version "_CS/Racket")
                              dest-gracket)
           (strip-signature dest-gracket)
-          (set-collects-path dest-gracket "../../../../collects" "../../../../etc")
+          (cond
+            [(equal? (lookup 'INSTALL_ORIG_TREE) "yes")
+             (set-collects-path dest-gracket "../../../../collects" "../../../../etc")]
+            [else
+             (set-collects-path dest-gracket collects-path configdir)])
           (strip-debug config dest-gracket)
           (restore-signature dest-gracket)
 
@@ -1016,13 +1120,15 @@
   (define (setup)
     (call-with-dest-racket
      (lambda (bindir dest-racket)
-       (define copytree-racket (and cross? (config-bootstrap-racket)))
-       (maybe-copytree config dest-racket copytree-racket at-dir)
-       (run-raco-setup config dest-racket
-                       (and cross? (hash-ref (config-bootstrap-racket) 'racket))
+       (define copytree-racket (and cross? (hash-ref (config-bootstrap-racket) 'racket)))
+       (define copytree-config (if (setup-prepare-to-here?)
+                                   (hash-set config 'copytree-prepared-setup-files #t)
+                                   config))
+       (maybe-copytree copytree-config dest-racket copytree-racket at-dir)
+       (run-raco-setup config dest-racket copytree-racket
                        ;; this can be redundant if it's also supplied via `SETUP_MACHINE_FLAGS`,
                        ;; but redundant should be ok:
-                       (list "-MCR" (~a (at-dir "compiled") ":")
+                       (list "-MCR" (~a (path->complete-path (at-dir "compiled")) ":")
                              "--cross-compiler" m (at-dir ".")))
        (maybe-libzo-move config dest-racket copytree-racket at-dir)
        (maybe-destdir-fix config dest-racket copytree-racket at-dir)

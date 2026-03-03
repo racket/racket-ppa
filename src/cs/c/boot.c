@@ -21,6 +21,15 @@
 #include "boot.h"
 #include "api.h"
 
+#define SELF_EXE_WINDOWS_AS_UTF8
+#define SELF_EXE_NO_EXTRAS
+#define XFORM_SKIP_PROC /* empty */
+#ifdef WIN32
+# define DOS_FILE_SYSTEM
+#endif
+#include "../../start/self_exe.inc"
+#include "path_replace.inc"
+
 #ifdef PBCHUNK_REGISTER
 static void register_pbchunks();
 #endif
@@ -52,6 +61,14 @@ int boot_open(const char *path, int flags) {
 #else
 # define boot_open open
 #endif
+
+static void check_boot_open(int fd, const char *name, const char *path)
+{
+  if (fd == -1) {
+    fprintf(stderr, "failed opening %s boot file: %s\n", name, path);
+    exit(1);
+  }
+}
 
 static ptr Sbytevector(char *s)
 {
@@ -106,7 +123,7 @@ static void run_cross_server(char **argv)
   (void)Scall1(c, a);
 }
 
-static void init_foreign()
+static void init_foreign(void)
 {
 # include "rktio.inc"
 }
@@ -133,16 +150,20 @@ void racket_boot(racket_boot_arguments_t *ba)
   if ((ba->argc == 4) && !strcmp(ba->argv[0], "--cross-server"))
     cross_server = 1;
 
-  /* Open boot files, but reuse file descriptors when possible */
+  /* Open boot files, but reuse file descriptors when convenient */
   {
     int fd1, fd2, close_fd1 = 0, close_fd2 = 0;
 
     if ((ba->boot2_offset == 0)
+        || (ba->boot1_path == NULL)
+        || (ba->boot2_path == NULL)
         || ((ba->boot1_path != ba->boot2_path)
             && strcmp(ba->boot1_path, ba->boot2_path)))
       close_fd1 = 1;
 # ifdef RACKET_AS_BOOT
     if ((ba->boot3_offset == 0)
+        || (ba->boot2_path == NULL)
+        || (ba->boot3_path == NULL)
         || ((ba->boot2_path != ba->boot3_path)
             && strcmp(ba->boot2_path, ba->boot3_path)))
       close_fd2 = 1;
@@ -150,24 +171,43 @@ void racket_boot(racket_boot_arguments_t *ba)
     close_fd2 = 1;
 #endif
 
-    fd1 = boot_open(ba->boot1_path, O_RDONLY | BOOT_O_BINARY);
-    Sregister_boot_file_fd_region("petite", fd1, ba->boot1_offset, ba->boot1_len, close_fd1);
+    if (ba->boot1_path) {
+      fd1 = boot_open(ba->boot1_path, O_RDONLY | BOOT_O_BINARY);
+      check_boot_open(fd1, "petite", ba->boot1_path);
+      Sregister_boot_file_fd_region("petite", fd1, ba->boot1_offset, ba->boot1_len, close_fd1);
+    } else {
+      Sregister_boot_file_bytes("petite", (char *)ba->boot1_data + ba->boot1_offset, ba->boot1_len);
+      fd1 = 0;
+    }
 
-    if (!close_fd1)
-      fd2 = fd1;
-    else
-      fd2 = boot_open(ba->boot2_path, O_RDONLY | BOOT_O_BINARY);
-    Sregister_boot_file_fd_region("scheme", fd2, ba->boot2_offset, ba->boot2_len, close_fd2);
+    if (ba->boot2_path) {
+      if (!close_fd1)
+        fd2 = fd1;
+      else {
+        fd2 = boot_open(ba->boot2_path, O_RDONLY | BOOT_O_BINARY);
+        check_boot_open(fd2, "scheme", ba->boot2_path);
+      }
+      Sregister_boot_file_fd_region("scheme", fd2, ba->boot2_offset, ba->boot2_len, close_fd2);
+    } else {
+      Sregister_boot_file_bytes("scheme", (char *)ba->boot2_data + ba->boot2_offset, ba->boot2_len);
+      fd2 = 0;
+    }
 
 # ifdef RACKET_AS_BOOT
     if (!cross_server) {
-      int fd3;
+      if (ba->boot3_path) {
+        int fd3;
 
-      if (!close_fd2)
-        fd3 = fd2;
-      else
-        fd3 = boot_open(ba->boot3_path, O_RDONLY | BOOT_O_BINARY);
-      Sregister_boot_file_fd_region("racket", fd3, ba->boot3_offset, ba->boot3_len, 1);
+        if (!close_fd2)
+          fd3 = fd2;
+        else {
+          fd3 = boot_open(ba->boot3_path, O_RDONLY | BOOT_O_BINARY);
+          check_boot_open(fd2, "racket", ba->boot3_path);
+        }
+        Sregister_boot_file_fd_region("racket", fd3, ba->boot3_offset, ba->boot3_len, 1);
+      } else {
+        Sregister_boot_file_bytes("racket", (char *)ba->boot3_data + ba->boot3_offset, ba->boot3_len);
+      }
     }
 # endif
   }
@@ -419,4 +459,12 @@ iptr racket_cpointer_offset(ptr cptr) {
   }
 
   return 0;
+}
+
+char *racket_get_self_exe_path(const char *exec_file) {
+  return get_self_path(exec_file);
+}
+
+char *racket_path_replace_filename(const char *path, const char *new_filename) {
+  return path_replace_filename(path, new_filename);
 }

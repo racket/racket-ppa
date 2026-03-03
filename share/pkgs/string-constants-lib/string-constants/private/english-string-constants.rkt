@@ -99,7 +99,7 @@ please adhere to these guidelines:
 
   (interact-with-drscheme-in-language "Interact with DrRacket in English")
 
-  ;; these two should probably be the same in all languages excepet English.
+  ;; these two should probably be the same in all languages except English.
   ;; they are the button labels (under macos and windows, respectively)
   ;; that go the with the string above.
   (accept-and-quit "Accept and Quit")
@@ -233,6 +233,8 @@ please adhere to these guidelines:
   (cs-name-duplication-error
    "The new name you have chosen, ~s, conflicts with an already established name in this scope.")
   (cs-rename-anyway "Rename Anyway")
+  (cs-add-require-prefix "Add Require Prefix")
+  (cs-remove-unused-requires "Remove Unused Requires")
   (cs-status-init "Check Syntax: Initializing environment for user code")
   (cs-status-coloring-program "Check Syntax: coloring expression")
   (cs-status-eval-compile-time "Check Syntax: eval compile time")
@@ -418,6 +420,7 @@ please adhere to these guidelines:
   ;; Help Desk
   (help "Help")
   (racket-documentation "Racket Documentation")
+  (x-documentation "~a Documentation") ;; ~a is filled with a language family name, eg Racket, Rhombus, or HtDP
   (help-desk "Help Desk")
   (plt:hd:search "Search")
   (plt:hd:feeling-lucky "Feeling Lucky")
@@ -616,7 +619,7 @@ please adhere to these guidelines:
   (verify-exit "Verify exit")
   (ask-before-changing-format "Ask before changing save format")
   (wrap-words-in-editor-buffers "Wrap words in editor buffers")
-  (show-status-line "Show status-line")
+  (show-status-line "Show status line")
   (count-columns-from-one "Count column numbers from one")
   (display-line-numbers "Display line numbers in buffer; not character offsets")
   ; used for popup menu; right click on line/column box in bottom of drs window
@@ -636,6 +639,11 @@ please adhere to these guidelines:
   (basic-gray-paren-match-color "Basic gray parenthesis highlight color") ; in prefs dialog
   (online-coloring-active "Color syntax interactively")
   (open-files-in-tabs "Open files in separate tabs (not separate windows)")
+  (restore-open-files-from-previous-session? "Restore open files from previous session?")
+  (startup-open-files "Startup Open Files")
+  (restore-open-files-from-previous-session "Restore open files from previous session")
+  (ask-me-each-time "Ask me each time")
+  (open-a-blank-window "Open a blank window")
   (show-interactions-on-execute "Automatically open interactions window when running a program")
   (switch-to-module-language-automatically
    "Automatically switch to the module language when opening a module")
@@ -649,6 +657,9 @@ please adhere to these guidelines:
   ;; the constant above shows up in the popup menu item in the bottom of
   ;; the drracket window; controls the line numbers on each line in the definitions;
   ;; used in a checkable menu item
+  ;; Capitalized for appearance in a menu item
+  (show-indent-guides/menu "Show Indent &Guides")
+  (hide-indent-guides/menu "Hide Indent &Guides")
   (reflow-paragraph-maximum-width "Maximum width when reflowing paragraphs")
   (maximum-char-width-guide-pref-check-box "Maximum character width guide")
   (hide-column-width-guide "Hide Column Width Guide for Files with ~a Columns")
@@ -663,6 +674,7 @@ please adhere to these guidelines:
   ;; used in the preferences dialog to undo preference changes
   (undo-changes "Undo Changes and Close")
 
+  ;;; this next section has to do with Color Schemes and configuring them
   (color-schemes "Color Schemes") ;; the label in the preferences dialog for the color scheme panel
   (classic-color-scheme "Classic") ;; formerly called 'black on white'
   (modern-color-scheme "Modern")   ;; an attempt to be more color-blind friendly
@@ -671,6 +683,19 @@ please adhere to these guidelines:
   ; drracket additions to the color scheme dialog; two buttons
   (design-your-own-color-schemes "Design Your Own Color Schemes") ; pointer to (english-only) docs
   (style-and-color-names "Style && Color Names")
+  (dark-color-scheme "Dark Color Scheme")
+  (light-color-scheme "Light Color Scheme")
+  (revert-colors-to-color-scheme-defaults "Revert Colors to Color Scheme’s Default Colors")
+  (color-mode "Color Mode")
+  ;; on macos and linux, racket can detect the OS's dark/light mode so
+  ;; the control will have the next three strings in it.
+  (use-os-dark-mode-selection "Use the Built-in Light or Dark Mode")
+  (always-light-mode "Always Use Light Mode")
+  (always-dark-mode "Always Use Dark Mode")
+  ;; under windows, racket cannot detect the OS's dark/light mode, so
+  ;; the control will have just two options, which needs slightly different wording
+  (light-mode "Light Mode")
+  (dark-mode "Dark Mode")
 
   (add-spacing-between-lines "Add one pixel of extra space between lines")
 
@@ -1229,6 +1254,12 @@ please adhere to these guidelines:
   (reindent-menu-item-label "&Reindent")
   (reindent-all-menu-item-label "Reindent &All")
   (semicolon-comment-out-menu-item-label "&Comment Out with Semicolons")
+  ;; the ~a is filled with the characters that'll be used to comment out a line,
+  ;; inserted at the start of the line
+  (comment-out-with-line-start "&Comment Out with “~a”")
+  ;; the two '~a's are filled with the characters that'll be used to comment out
+  ;; the start and end of a region
+  (comment-out-with-region "&Comment Out with “~a” and “~a”")
   (box-comment-out-menu-item-label "Comment Out with a &Box")
   (uncomment-menu-item-label "&Uncomment")
 
@@ -1293,6 +1324,7 @@ please adhere to these guidelines:
 
   ;;; buttons
   (execute-button-label "Run")
+  (execute-button-configure-label "Configure Run")
   (save-button-label "Save")
   (break-button-label "Stop")
   (break-button-kill-label "Kill")
@@ -1658,6 +1690,11 @@ please adhere to these guidelines:
     ;; like 'Long' but shows the phases where this file is loaded
   (module-browser-name-very-long "Long, with phases")
   (module-browser-open-all "Open all files shown here")
+  (module-browser-main-collects "Main Collects")
+  (module-browser-unknown-pkg "Unknown Package")
+  (module-browser-visible-pkgs "Visible Packages")
+  (module-browser-visible-submodules "Visible Submodules")
+  (module-browser-top-level-module "Top-level module") ; in the "which submodules?" filter; this is used for when there are no submodules
 
   (happy-birthday-matthias "Happy Birthday, Matthias!")
   (happy-birthday-matthew "Happy Birthday, Matthew!")
@@ -1672,7 +1709,7 @@ please adhere to these guidelines:
   (xml-tool-switch-to-scheme "Switch to Racket box")
   (xml-tool-switch-to-scheme-splice "Switch to Racket splice box")
   (xml-tool-eliminate-whitespace-in-empty-tags
-   "Eliminiate whitespace in empty tags")
+   "Eliminate whitespace in empty tags")
   (xml-tool-leave-whitespace-alone
    "Leave whitespace alone")
 
@@ -1867,6 +1904,14 @@ please adhere to these guidelines:
 
   ; The ~F is special marker for the offending values, which may be
   ; printed specially in DrRacket.
+  (test-engine-check-range-encountered-error
+   "check-range encountered the following error instead of a value in [~F, ~F]. ~n   :: ~a")
+  (test-engine-check-member-of-encountered-error
+   "check-member-of encountered the following error instead of a value in ~L.~n   :: ~a")
+  ; obsolete version of this
+  (test-engine-check-*-encountered-error
+   "~a encountered the following error instead of the expected value, ~F. ~n   :: ~a")
+  ; deprecated:
   (test-engine-check-encountered-error
    "check-expect encountered the following error instead of the expected value, ~F. ~n   :: ~a")
   (test-engine-check-error-cause
@@ -2080,11 +2125,13 @@ please adhere to these guidelines:
   (install-pkg-install "Install")
   (install-pkg-update "Update")
   (install-pkg-setup "Setup") ; for button
+  (install-pkg-update+setup "Update and Setup") ; for button
   (install-pkg-setup-long "Setup Current Installation") ; for menu
   (install-pkg-remove "Remove")
   (install-pkg-do-not-remove "Don't Remove")
   (install-pkg-action-inferred-to-be-update "Action inferred to be Update")
   (install-pkg-action-inferred-to-be-install "Action inferred to be Install")
+  (install-pkg-action-inferred-to-be-update+setup "Action inferred to be Update and Setup")
   (install-pkg-default "Default")
   (install-pkg-scope-label "Package Scope")
   (install-pkg-default-scope-label "Default Package Scope") ; for picking the scope to be default
@@ -2124,6 +2171,7 @@ please adhere to these guidelines:
   (install-pkg-abort-migrate "Abort Migrate")
   (install-pkg-abort-setup "Abort Setup")
   (install-pkg-abort-generic-action "Abort Action")
+  (install-pkg-continue-generic-action "Continue Action")
   (install-pkg-close-terminal-output "Close Output")
   (install-pkg-show-all-options "Show All Options")
   (install-pkg-migrate-available-installations "Available Installations")
@@ -2172,6 +2220,9 @@ please adhere to these guidelines:
 
   (install-pkg-not-rentrant "Installation and updating cannot happen simultaneously;"
                             " either abort the current one or wait for it to finish.")
+  (install-pkg-generic-action-in-progress "A package-management action is still in progress."
+                                          " Are you sure you want to close the window and abort the action,"
+                                          " which may leave your installation in an inconsistent state?")
 
   ;; open a file via a collection path (new "Open" menu item in DrRacket)
   (open-require-path "Open Require Path…")
@@ -2212,4 +2263,72 @@ please adhere to these guidelines:
    " add\n\n  ~a\n\n"
    " to it.")
   (add-racket/bin-to-path "Configure Command Line for Racket…") ;; menu item label
+  
+  ;; quickscript messages
+  (qs-my-first-script "My First Script")
+  (qs-script-library "Script library")
+  (qs-directories "Directories")
+  (qs-add "&Add")
+  (qs-remove "&Remove")
+  (qs-scripts "Scripts")
+  (qs-disable "Disa&ble")
+  (qs-enable "Ena&ble")
+  (qs-shadow "S&hadow")
+  (qs-recompiling  "Recompiling quickscripts…")
+  (qs-recompiling-wait "Recompiling quickscripts, please wait…")
+  (qs-scripts "&Scripts")
+  (qs-manage "&Manage")
+  (qs-compilation-error "Quickscript: Error during compilation")
+  (qs-caught-exception  "Quickscript caught an exception")
+  (qs-recompiling-library "Recompiling library")
+  (qs-my-script "My amazing script")
+  (qs-script-help "The help-string of the script.")
+  (qs-compiling-scripts "Compiling scripts")
+  ;; ~a is a script file including its path
+  (qs-compiling "Compiling ~a")
+  ;; ~a is a script file including its path
+  (qs-file-not-found "File not found: ~a")
+  (qs-invalid-hook "Invalid hook name.\n Valid names:\n")
+  ;; the  three `qs-error-detail-*` string constants are put into the same message
+  (qs-error-detail-overview "~a error(s) have been caught.") ; the ~a is number of errors
+  (qs-error-detail-summary "Summary:")
+  (qs-error-detail-details "Details:")
+  (qs-script-name "Script name")
+  (qs-script-name-enter "Enter the name of the new script:")
+  (qs-open-script "Open a script")
+  ;; ~a is the name of a script file
+  (qs-error-run "Run: Error in script file ~s:\n" )
+  (qs-output "Output") ;; not repl-out-color where it means color of the output
+  (qs-load-script-menu "Loading Scripts menu")
+  (qs-loading-file "Loading file ")
+  ;; ~a is the name of a script file
+  (qs-script-file "Script file ~s:")
+  (qs-build-menu "Building script menu")
+  ;; ~a is number of rebuilds
+  (qs-menu-rebuild "Script menu rebuild #~a...")
+  (qs-delete-menu "Deleting menu items")
+  ;; ~a is a a script entry in menu
+  (qs-delete-menu-item "Deleting menu item ~a... ")
+  (qs-new-script "&New script…")
+  (qs-open-script "&Open script…")
+  (qs-disable-scripts "&Disable scripts…")
+  (qs-library "&Library…")
+  (qs-reload-menu "&Reload menu")
+  (qs-compile-scripts "&Compile scripts")
+  (qs-stop-scripts "&Stop persistent scripts")
+  (qs-report-issue "Report an &issue")
+  (qs-error-load "Quickscript: Errors while loading script properties")
+
+  ;; macro stepper
+  ; used in the button label and menu item and title for some dialog boxes
+  (macro-stepper "Macro Stepper")
+
+  ; these next three are in the same dialog; first a message and then two button labels
+  (macro-stepper-warning-message
+   "Macro expansion has taken a suspiciously large number of steps.\n\nClick"
+   " Stop to stop macro expansion and see the steps taken"
+   " so far, or click Continue to let it run a bit longer.")
+  (macro-stepper-continue "Continue")
+  (macro-stepper-stop "Stop")
+
   )

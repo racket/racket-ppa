@@ -5,7 +5,8 @@
                      drracket/find-module-path-completions
                      framework
                      setup/path-to-relative
-                     racket))
+                     racket
+                     racket/phase+space))
 @(define syncheck-example-eval (make-base-eval))
 @(begin 
    (syncheck-example-eval
@@ -139,9 +140,13 @@ in order to make the results be platform independent.
     annotations are those in the original file and this is a syntax object
     introduced by a macro and thus has a source location from some other file).
     
-    Otherwise, it should return some (non-@racket[#f])
-    value that will then be passed to one of the other methods below as 
-    a @racket[_source-obj] argument.
+  Otherwise, it should return some (non-@racket[#f]) value
+  that will then be passed to one of the other methods below
+  as a @racket[_source-obj] argument. Also, the result of this
+  method is used as a key in an @racket[equal?]-based
+  @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{hash},
+  so two source objects should refer to the same original source
+  if and only if they are @racket[equal?].
   }
   
  @defmethod[(syncheck:add-text-type [source-obj (not/c #f)]
@@ -162,6 +167,9 @@ in order to make the results be platform independent.
    @racket['drracket:syncheck:unused-identifier] and @racket['drracket:syncheck:document-identifier]
    in color scheme specifications, respectively.
    See @secref["color-scheme" #:doc '(lib "scribblings/drracket/drracket.scrbl")].
+
+   See @method[syncheck-annotations<%> syncheck:add-require-open-menu] for information
+   about the @racket[start] and @racket[end] arguments.
 
    @history[#:added "1.8"]
  }
@@ -384,13 +392,32 @@ in order to make the results be platform independent.
                                              [submods (listof symbol?)])
             void?]{
 
+  This function is not called directly anymore by Check Syntax. Instead
+  @method[syncheck-annotations<%> syncheck:add-jump-to-definition/phase-level+space] is.
+
+  The default implementation of @method[syncheck-annotations<%> syncheck:add-jump-to-definition/phase-level+space]
+  discards the @racket[_phase-level] argument and calls this method.
+}
+
+ @defmethod[(syncheck:add-jump-to-definition/phase-level+space [source-obj (not/c #f)]
+                                                               [start exact-nonnegative-integer?]
+                                                               [end exact-nonnegative-integer?]
+                                                               [id any/c]
+                                                               [filename path-string?]
+                                                               [submods (listof symbol?)]
+                                                               [phase-level+space phase+space-shift?])
+            void?]{
+
    Called to indicate that there is some identifier at the given location (named @racket[id]) that
    is defined in the @racket[submods] of the file @racket[filename] (where an empty list in
-   @racket[submods] means that the identifier is defined at the top-level module).
+   @racket[submods] means that the identifier is defined at the top-level module), at the
+  @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{phase level} @racket[phase-level].
 
-  See @method[syncheck-annotations<%> syncheck:add-require-open-menu] for information
-  about the coordinates @racket[start] and @racket[end].
- }
+   See @method[syncheck-annotations<%> syncheck:add-require-open-menu] for information
+   about the coordinates @racket[start] and @racket[end].
+
+  @history[#:added "1.2"]
+}
                   
  @defmethod[(syncheck:add-definition-target [source-obj (not/c #f)]
                                             [start exact-nonnegative-integer?]
@@ -398,25 +425,50 @@ in order to make the results be platform independent.
                                             [id symbol?]
                                             [mods (listof symbol?)])
             void?]{
+  This function is not called directly anymore by Check Syntax. Instead
+  @method[syncheck-annotations<%> syncheck:add-definition-target/phase-level+space] is.
+
+  The default implementation of @method[syncheck-annotations<%> syncheck:add-definition-target/phase-level+space]
+  discards the @racket[_phase-level] argument and calls this method.
+
+ }
+ @defmethod[(syncheck:add-definition-target/phase-level+space [source-obj (not/c #f)]
+                                                              [start exact-nonnegative-integer?]
+                                                              [finish exact-nonnegative-integer?]
+                                                              [id symbol?]
+                                                              [mods (listof symbol?)]
+                                                              [phase-level phase+space-shift?])
+            void?]{
   Called to indicate a top-level definition at the location spanned by @racket[start]
   and @racket[finish]. The @racket[id] argument is the name of the defined variable
   and the @racket[mods] are the submodules enclosing the definition, which will be empty
-  if the definition is in the top-level module.
+  if the definition is in the top-level module. The @racket[phase-level] argument indicates the
+  @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{phase level}.
 
   See @method[syncheck-annotations<%> syncheck:add-require-open-menu] for information
   about the coordinates @racket[start] and @racket[end].
+
+  @history[#:added "1.2"]
   }
-                                                      
+
+ @defmethod[(syncheck:unused-binder [source-obj (not/c #f)]
+                                    [left exact-nonnegative-integer?]
+                                    [right exact-nonnegative-integer?])
+            void?]{
+  Called to indicate that there is a binder with no
+  references in @racket[source-obj] at the location spanned by
+  @racket[left] and @racket[right].
+
+  @history[#:added "1.4"]
+}
+
  @defmethod[(syncheck:color-range [source-obj (not/c #f)]
                                   [start exact-nonnegative-integer?]
                                   [end exact-nonnegative-integer?]
-                                  [style-name any/c]
-                                  [mode any/c])
+                                  [style-name any/c])
             void?]{
    Called to indicate that the given location should be colored according to the
-   style @racket[style-name] when in @racket[mode]. The mode either indicates regular
-   check syntax or is used indicate blame for potential contract violations 
-   (and still experimental).
+   style @racket[style-name].
 
   See @method[syncheck-annotations<%> syncheck:add-require-open-menu] for information
   about the coordinates @racket[start] and @racket[end].
@@ -514,6 +566,10 @@ in order to make the results be platform independent.
                     syncheck:add-tail-arrow
                     syncheck:add-mouse-over-status
                     syncheck:add-jump-to-definition
+                    syncheck:add-jump-to-definition/phase-level+space
+                    syncheck:add-definition-target
+                    syncheck:add-definition-target/phase-level+space
+                    syncheck:unused-binder
                     syncheck:add-id-set 
                     syncheck:color-range
                     syncheck:add-prefixed-require-reference

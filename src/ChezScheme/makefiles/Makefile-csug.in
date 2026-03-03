@@ -3,7 +3,7 @@ installdir=oops-missing-installdir
 m=oops-missing-m
 STEXLIB=oops-missing-stexlib
 # Zuo overrides the above variables when running `make`
-Scheme=../bin/$m/scheme -b ../boot/$m/petite.boot -b ../boot/$m/scheme.boot
+Scheme=../$m/bin/$m/scheme -b ../$m/boot/$m/petite.boot -b ../$m/boot/$m/scheme.boot
 INSTALL=$(srcdir)/../makefiles/installsh
 
 x = csug
@@ -20,7 +20,7 @@ target: canned logcheck1 logcheck2 checklibs $(x).html $(x).pdf
 install: target
 	$(INSTALL) -m 2755 -d $(installdir)
 	$(INSTALL) -m 0644 --ifdiff *.html *.css $(installdir)
-	$(INSTALL) -m 0644 --ifdiff csug.pdf $(installdir)/csug9_5.pdf
+	$(INSTALL) -m 0644 --ifdiff csug.pdf $(installdir)/csug.pdf
 	$(INSTALL) -m 2755 -d $(installdir)/canned
 	$(INSTALL) -m 0644 --ifdiff canned/* $(installdir)/canned
 	$(INSTALL) -m 2755 -d $(installdir)/gifs

@@ -98,7 +98,13 @@ Bold-italic text. Returns @racket[(text str (list* 'bold 'italic
 @defproc[(tt [str string?]) pict?]{
 
 The normal way to make monospaced text. Returns @racket[(text str
-`(bold . modern) (current-font-size))].}
+(current-tt-font) (or (current-tt-font-size) (current-font-size)))].
+
+@history[#:changed "1.9" @list{
+ Generalized to use @racket[current-tt-font]
+ and @racket[current-tt-font-size]
+ }]
+}
 
 @defproc[(rt [str string?]) pict?]{
 
@@ -115,7 +121,7 @@ Creates title text. Returns @racket[((current-titlet) str)].}
                [#:fill? fill? any/c #t]
                [#:decode? decode? any/c #t]
                [element (flat-rec-contract elem/c
-                          (or/c string? pict? (listof elem/c)))] ...)
+                          (or/c string? pict-convertible? (listof elem/c)))] ...)
          pict?]{
 
 Generates a paragraph pict that is no wider than @racket[width] units,
@@ -161,7 +167,7 @@ See the spacing between lines is determined by the
                [#:fill? fill? any/c #t]
                [#:decode? decode? any/c #t]
                [element (flat-rec-contract elem/c
-                          (or/c string? pict? (listof elem/c)))] ...)
+                          (or/c string? pict-convertible? (listof elem/c)))] ...)
          pict?]{
 
 Like @racket[para], but with @racket[blt] followed by @racket[(/
@@ -181,7 +187,7 @@ paragraph.
                   [#:fill? fill? any/c #t]
                   [#:decode? decode? any/c #t]
                   [element (flat-rec-contract elem/c
-                             (or/c string? pict? (listof elem/c)))] ...)
+                             (or/c string? pict-convertible? (listof elem/c)))] ...)
          pict?]{
 
 Like @racket[item], but an additional @racket[(* 2 sep-gap-size)] is
@@ -531,11 +537,25 @@ Parameter that determines the font size used by @racket[t],
 
 @defparam[current-main-font style text-style/c]{
 
-Parameter that determines the font size used by @racket[t],
+Parameter that determines the font used by @racket[t],
 @racket[para], etc.  The default is platform-specific; possible
 initial values include @racket['swiss], @racket["Verdana"], and
 @racket["Gill Sans"].}
 
+@defparam[current-tt-font style text-style/c]{
+ Parameter that determines the font used by @racket[tt].
+ The default is @racket['(bold . modern)].
+
+ @history[#:added "1.9"]
+}
+
+@defparam[current-tt-font-size size (or/c #f exact-nonnegative-integer?)]{
+ Parameter that determines the font size used by @racket[tt].
+ The default is @racket[#f], which causes @racket[tt] to use
+ @racket[current-font-size].
+
+ @history[#:added "1.9"]
+}
 
 @defparam[current-line-sep n exact-nonnegative-integer?]{
 
@@ -728,15 +748,22 @@ of whether the name of the last @racket[id] name ends in @litchar{~}).
                               [width real?]
                               [height real?]
                               [condense? any/c]
-                              [stop-after (or/c #f exact-nonnegative-integer?) #f])
+                              [stop-after (or/c #f exact-nonnegative-integer?) #f]
+                              [#:aspect aspect (or/c 'fullscreen 'widescreen) _inferred-aspect])
          (listof pict?)]{
 
 Executes the Slideshow program indicated by @racket[path] in a fresh
 namespace, and returns a list of picts for the slides. Each pict has
 the given @racket[width] and @racket[height], and @racket[condense?]
-determines whether the Slideshow program is executed in condense
-mode.
+determines whether the Slideshow program is executed in condense mode.
+
+The @racket[aspect] argument indicates which kinds of slides should
+full the @racket[width] be @racket[height] area, and slides in the
+other aspect are scaled to fit; the default for @racket[aspect] is
+inferred from @racket[width] and @racket[height]. The @racket[aspect]
+argument also sets the default aspect while loading @racket[path].
 
 If @racket[stop-after] is not @racket[#f], then the list is truncated
-after @racket[stop-after] slides are converted to picts.}
+after @racket[stop-after] slides are converted to picts.
 
+@history[#:changed "1.8" @elem{Added @racket[#:aspect].}]}

@@ -5,6 +5,7 @@
 #include "schuchar.inc"
 READ_ONLY Scheme_Object **scheme_char_constants;
 READ_ONLY static Scheme_Object *general_category_symbols[NUM_GENERAL_CATEGORIES];
+READ_ONLY static Scheme_Object *grapheme_break_property_symbols[NUM_GRAPHEME_BREAK_PROPERTIES];
 
 READ_ONLY Scheme_Object *scheme_char_p_proc;
 READ_ONLY Scheme_Object *scheme_interned_char_p_proc;
@@ -15,6 +16,8 @@ READ_ONLY Scheme_Object *scheme_unsafe_char_gt_proc;
 READ_ONLY Scheme_Object *scheme_unsafe_char_lt_eq_proc;
 READ_ONLY Scheme_Object *scheme_unsafe_char_gt_eq_proc;
 READ_ONLY Scheme_Object *scheme_unsafe_char_to_integer_proc;
+
+THREAD_LOCAL_DECL(static Scheme_Hash_Table *interned_char_table);
 
 /* locals */
 static Scheme_Object *char_p (int argc, Scheme_Object *argv[]);
@@ -46,6 +49,8 @@ static Scheme_Object *char_punctuation (int argc, Scheme_Object *argv[]);
 static Scheme_Object *char_upper_case (int argc, Scheme_Object *argv[]);
 static Scheme_Object *char_lower_case (int argc, Scheme_Object *argv[]);
 static Scheme_Object *char_title_case (int argc, Scheme_Object *argv[]);
+static Scheme_Object *char_grapheme_break_property (int argc, Scheme_Object *argv[]);
+static Scheme_Object *char_ext_pict (int argc, Scheme_Object *argv[]);
 static Scheme_Object *char_upcase (int argc, Scheme_Object *argv[]);
 static Scheme_Object *char_downcase (int argc, Scheme_Object *argv[]);
 static Scheme_Object *char_titlecase (int argc, Scheme_Object *argv[]);
@@ -66,6 +71,7 @@ void scheme_init_char_constants(void)
 
   REGISTER_SO(scheme_char_constants);
   REGISTER_SO(general_category_symbols);
+  REGISTER_SO(grapheme_break_property_symbols);
 
   scheme_char_constants = 
     (Scheme_Object **)scheme_malloc_eternal(256 * sizeof(Scheme_Object*));
@@ -84,6 +90,12 @@ void scheme_init_char_constants(void)
     s = scheme_intern_symbol(general_category_names[i]);
     general_category_symbols[i] = s;
   }
+
+  for (i = 0; i < NUM_GRAPHEME_BREAK_PROPERTIES; i++) {
+    Scheme_Object *s;
+    s = scheme_intern_symbol(grapheme_break_propoerty_names[i]);
+    grapheme_break_property_symbols[i] = s;    
+  }
 }
 
 void scheme_init_char (Scheme_Startup_Env *env)
@@ -99,7 +111,7 @@ void scheme_init_char (Scheme_Startup_Env *env)
   scheme_addto_prim_instance("char?", p, env);
 
   REGISTER_SO(scheme_interned_char_p_proc);
-  p = scheme_make_folding_prim(interned_char_p, "interned-char?", 1, 1, 1);
+  p = scheme_make_folding_prim(char_p, "interned-char?", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE
                                                             | SCHEME_PRIM_PRODUCES_BOOL);
@@ -157,6 +169,8 @@ void scheme_init_char (Scheme_Startup_Env *env)
   ADD_FOLDING_PRIM("char-upper-case?",      char_upper_case,       1, 1, 1, env);
   ADD_FOLDING_PRIM("char-lower-case?",      char_lower_case,       1, 1, 1, env);
   ADD_FOLDING_PRIM("char-title-case?",      char_title_case,       1, 1, 1, env);
+  ADD_FOLDING_PRIM("char-grapheme-break-property", char_grapheme_break_property, 1, 1, 1, env);
+  ADD_FOLDING_PRIM("char-extended-pictographic?", char_ext_pict,   1, 1, 1, env);
 
   p = scheme_make_folding_prim(scheme_checked_char_to_integer, "char->integer", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
@@ -182,7 +196,6 @@ void scheme_init_unsafe_char(Scheme_Startup_Env *env)
   REGISTER_SO(scheme_unsafe_char_eq_proc);
   p = scheme_make_folding_prim(unsafe_char_eq, "unsafe-char=?", 1, -1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
-                                                            | SCHEME_PRIM_IS_NARY_INLINED
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_addto_prim_instance("unsafe-char=?", p, env);
   scheme_unsafe_char_eq_proc = p;
@@ -190,7 +203,6 @@ void scheme_init_unsafe_char(Scheme_Startup_Env *env)
   REGISTER_SO(scheme_unsafe_char_lt_proc);
   p = scheme_make_folding_prim(unsafe_char_lt, "unsafe-char<?", 1, -1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
-                                                            | SCHEME_PRIM_IS_NARY_INLINED
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_addto_prim_instance("unsafe-char<?", p, env);
   scheme_unsafe_char_lt_proc = p;
@@ -198,7 +210,6 @@ void scheme_init_unsafe_char(Scheme_Startup_Env *env)
   REGISTER_SO(scheme_unsafe_char_gt_proc);
   p = scheme_make_folding_prim(unsafe_char_gt, "unsafe-char>?", 1, -1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
-                                                            | SCHEME_PRIM_IS_NARY_INLINED
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_addto_prim_instance("unsafe-char>?", p, env);
   scheme_unsafe_char_gt_proc = p;
@@ -206,7 +217,6 @@ void scheme_init_unsafe_char(Scheme_Startup_Env *env)
   REGISTER_SO(scheme_unsafe_char_lt_eq_proc);
   p = scheme_make_folding_prim(unsafe_char_lt_eq, "unsafe-char<=?", 1, -1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
-                                                            | SCHEME_PRIM_IS_NARY_INLINED
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_addto_prim_instance("unsafe-char<=?", p, env);
   scheme_unsafe_char_lt_eq_proc = p;
@@ -214,7 +224,6 @@ void scheme_init_unsafe_char(Scheme_Startup_Env *env)
   REGISTER_SO(scheme_unsafe_char_gt_eq_proc);
   p = scheme_make_folding_prim(unsafe_char_gt_eq, "unsafe-char>=?", 1, -1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
-                                                            | SCHEME_PRIM_IS_NARY_INLINED
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_addto_prim_instance("unsafe-char>=?", p, env);
   scheme_unsafe_char_gt_eq_proc = p;
@@ -226,13 +235,38 @@ void scheme_init_unsafe_char(Scheme_Startup_Env *env)
   scheme_unsafe_char_to_integer_proc = p;
 }
 
+void scheme_init_char_places(void)
+{
+  REGISTER_SO(interned_char_table);
+  interned_char_table = scheme_make_hash_table(SCHEME_hash_ptr);
+}
+
 Scheme_Object *scheme_make_char(mzchar ch)
 {
   Scheme_Object *o;
 
   if (ch < 256)
     return scheme_char_constants[ch];
-  
+
+  o = scheme_eq_hash_get(interned_char_table, scheme_make_integer(ch));
+  if (!o) {
+    o = scheme_malloc_small_atomic_tagged(sizeof(Scheme_Small_Object));
+    CLEAR_KEY_FIELD(o);
+    o->type = scheme_char_type;
+    SCHEME_CHAR_VAL(o) = ch;
+    scheme_hash_set(interned_char_table, scheme_make_integer(ch), o);
+  }
+
+  return o;
+}
+
+Scheme_Object *scheme_make_uninterned_char(mzchar ch)
+{
+  Scheme_Object *o;
+
+  if (ch < 256)
+    return scheme_char_constants[ch];
+
   o = scheme_malloc_small_atomic_tagged(sizeof(Scheme_Small_Object));
   CLEAR_KEY_FIELD(o);
   o->type = scheme_char_type;
@@ -256,12 +290,6 @@ static Scheme_Object *
 char_p (int argc, Scheme_Object *argv[])
 {
   return (SCHEME_CHARP(argv[0]) ? scheme_true : scheme_false);
-}
-
-static Scheme_Object *
-interned_char_p (int argc, Scheme_Object *argv[])
-{
-  return (SCHEME_CHARP(argv[0]) && SCHEME_CHAR_VAL(argv[0]) < 256) ? scheme_true : scheme_false;
 }
 
 #define charSTD_FOLDCASE(nl) nl;
@@ -337,6 +365,23 @@ GEN_CHAR_TEST(char_graphic, "char-graphic?", scheme_isgraphic)
 GEN_CHAR_TEST(char_upper_case, "char-upper-case?", scheme_isupper)
 GEN_CHAR_TEST(char_lower_case, "char-lower-case?", scheme_islower)
 GEN_CHAR_TEST(char_title_case, "char-title-case?", scheme_istitle)
+GEN_CHAR_TEST(char_ext_pict, "char-extended-pictographic?", scheme_isextpict)
+
+static Scheme_Object *
+char_grapheme_break_property (int argc, Scheme_Object *argv[])
+{
+  mzchar c;
+  
+  if (!SCHEME_CHARP(argv[0]))
+    scheme_wrong_contract("char-grapheme-break-property", "char?", 0, argc, argv);
+
+  c = SCHEME_CHAR_VAL(argv[0]);
+
+  return grapheme_break_property_symbols[scheme_grapheme_cluster_break(c)];
+}
+
+
+GEN_CHAR_TEST(char_extend, "char-extend?", scheme_isextend)
 
 Scheme_Object *
 scheme_checked_char_to_integer (int argc, Scheme_Object *argv[])

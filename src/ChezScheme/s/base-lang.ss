@@ -21,7 +21,7 @@
          preinfo-call-can-inline? preinfo-call-no-return? preinfo-call-single-valued?
          prelex? make-prelex prelex-name prelex-name-set! prelex-flags prelex-flags-set!
          prelex-source prelex-operand prelex-operand-set! prelex-uname make-prelex*
-         target-fixnum? target-bignum?)
+         target-fixnum? target-fixnum-power-of-two target-bignum?)
 
   (module (lookup-primref primref? primref-name primref-flags primref-arity primref-level)
     (include "primref.ss")
@@ -122,33 +122,7 @@
     (lambda (x)
       (and (integer? x) (exact? x))))
 
-  (meta-cond
-    [(or (eq? (constant fixnum-bits) (fixnum-width))
-         ;; make sure this case is selected for cross-compilation (as opposed
-         ;; to compilation of a patch file in preparation for cross compilation):
-         (eq? (constant machine-type-name) ($target-machine)))
-     (define target-fixnum? fixnum?)
-     (define target-bignum? bignum?)]
-    [(< (constant fixnum-bits) (fixnum-width))
-     (define target-fixnum?
-       (lambda (x)
-         (and (fixnum? x)
-              (fx<= (constant most-negative-fixnum) x (constant most-positive-fixnum)))))
-     (define target-bignum?
-       (lambda (x)
-         (or (bignum? x)
-             (and (fixnum? x)
-                  (not (fx<= (constant most-negative-fixnum) x (constant most-positive-fixnum)))))))]
-    [else
-     (define target-fixnum?
-       (lambda (x)
-         (or (fixnum? x)
-             (and (bignum? x)
-                  (<= (constant most-negative-fixnum) x (constant most-positive-fixnum))))))
-     (define target-bignum?
-       (lambda (x)
-         (and (bignum? x)
-              (not (<= (constant most-negative-fixnum) x (constant most-positive-fixnum))))))])
+  (include "target-fixnum.ss")
 
   (define $prelex?
     (lambda (x)
@@ -216,10 +190,11 @@
 
   ; language of foreign types
   (define-language Ltype 
-    (nongenerative-id #{Ltype czp82kxwe75y4e18-1})
+    (nongenerative-id #{Ltype czp82kxwe75y4e77-1})
     (terminals
       (exact-integer (bits))
-      ($ftd (ftd)))
+      ($ftd (ftd))
+      ($fptd (fptd)))
     (Type (t)
       (fp-integer bits)
       (fp-unsigned bits)
@@ -231,8 +206,8 @@
       (fp-fixnum)
       (fp-double-float)
       (fp-single-float)
-      (fp-ftd ftd)
-      (fp-ftd& ftd)))
+      (fp-fptd fptd)       ; `fptd` is rtd for a pointer record
+      (fp-ftd& ftd fptd))) ; `ftd` describes passed value; `fptd` is rtd for a pointer record
 
   (define arity?
     (lambda (x)
@@ -243,7 +218,7 @@
 
   ; source language used by the passes leading up to the compiler or interpreter
   (define-language Lsrc
-    (nongenerative-id #{Lsrc czsa1fcfzdeh493n-3})
+    (nongenerative-id #{Lsrc e9hk42fhc9m126ci6byqksp4h-5})
     (terminals
       (preinfo (preinfo))
       ($prelex (x))
@@ -277,6 +252,7 @@
       (record-type rtd e)
       (record-cd rcd rtd-expr e)
       (immutable-list (e* ...) e)
+      (immutable-vector (e* ...) e)
       (record rtd rtd-expr e* ...)
       (record-ref rtd type index e)
       (record-set! rtd type index e1 e2)

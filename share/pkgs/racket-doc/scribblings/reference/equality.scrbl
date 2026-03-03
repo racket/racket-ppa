@@ -1,6 +1,7 @@
 #lang scribble/manual
-@(require (only-in scribblings/style/shared compare)
-          "mz.rkt")
+@(require (only-in scribblings/style/shared compare0)
+          "mz.rkt"
+          (for-label racket/hash-code))
 
 
 @title{Equality}
@@ -39,9 +40,11 @@ preferred for most uses.
 @defproc[(equal-always? [v1 any/c] [v2 any/c]) boolean?]{
 
  Indicates whether @racket[v1] and @racket[v2] are equal and will always stay
- equal independent of @emph{mutations}. Generally, for to values to be equal-always, corresponding
+ equal independent of @emph{mutations}. Generally, for two values to be equal-always, corresponding
  immutable values within @racket[v1] and @racket[v2] must be @racket[equal?],
  while corresponding mutable values within them must be @racket[eq?].
+ @margin-note*{Precedents for this operator in other languages include
+ @tt{egal} @cite["Baker93"].}
 
  Two values @racket[v1] and @racket[v2] are @racket[equal-always?] if and only
  if there exists a third value @racket[_v3] such that @racket[v1] and
@@ -80,14 +83,13 @@ preferred for most uses.
  Two values are @racket[eqv?] if and only if they are @racket[eq?],
  unless otherwise specified for a particular datatype.
 
- The @tech{number} and @tech{character} datatypes are the only ones for which
+ The @tech{number} datatypes are the only ones for which
  @racket[eqv?] differs from @racket[eq?]. Two numbers are @racket[eqv?] when
  they have the same exactness, precision, and are both equal and non-zero, both
  @racketvalfont{+0.0}, both @racketvalfont{+0.0f0}, both @racketvalfont{-0.0},
  both @racketvalfont{-0.0f0}, both @racketvalfont{+nan.0}, or both
  @racketvalfont{+nan.f}---considering real and imaginary components separately
- in the case of @tech{complex numbers}. Two characters are @racket[eqv?] when
- their @racket[char->integer] results are equal.
+ in the case of @tech{complex numbers}.
 
  Generally, @racket[eqv?] is identical to @racket[equal?] except that the former
  cannot recursively compare the contents of compound data types (such as lists
@@ -104,7 +106,11 @@ preferred for most uses.
    (eqv? (mcons 1 2) (mcons 1 2))
    (eqv? (integer->char 955) (integer->char 955))
    (eqv? (make-string 3 #\z) (make-string 3 #\z))
-   (eqv? #t #t))}
+   (eqv? #t #t))
+
+@history[#:changed "9.0.0.10" @elem{For characters,
+                                    @racket[equal?] implies @racket[eq?],
+                                    not just @racket[eqv?].}]}
 
 
 @defproc[(eq? [v1 any/c] [v2 any/c]) boolean?]{
@@ -128,7 +134,7 @@ preferred for most uses.
 
 
 @defproc[
- (equal?/recur [v1 any/c] [v2 any/c] [recur-proc (any/c any/c -> any/c)])
+ (equal?/recur [v1 any/c] [v2 any/c] [recur-proc (any/c any/c . -> . any/c)])
  boolean?]{
 
  Like @racket[equal?], but using @racket[recur-proc] for recursive
@@ -145,7 +151,7 @@ preferred for most uses.
 
 
 @defproc[
- (equal-always?/recur [v1 any/c] [v2 any/c] [recur-proc (any/c any/c -> any/c)])
+ (equal-always?/recur [v1 any/c] [v2 any/c] [recur-proc (any/c any/c . -> . any/c)])
  boolean?]{
 
  Like @racket[equal-always?], but using @racket[recur-proc] for recursive
@@ -216,6 +222,23 @@ indexing and comparison operations, especially in the implementation of
  #:changed "6.4.0.12"
  @elem{Strengthened guarantee for @racket[read]able values.}]}
 
+@defproc[(equal-hash-code/recur [v any/c] [recur-proc (-> any/c exact-integer?)])
+         fixnum?]{
+ Like @racket[equal-hash-code], but using @racket[recur-proc] for recursive
+ hashing within @racket[v].
+
+ @examples[
+   (define (rational-hash x)
+     (cond
+       [(rational? x) (equal-hash-code (inexact->exact x))]
+       [else (equal-hash-code/recur x rational-hash)]))
+   (= (rational-hash 0.0) (rational-hash -0.0))
+   (= (rational-hash 1.0) (rational-hash -1.0))
+   (= (rational-hash (list (list (list 4.0 0.0) 9.0) 6.0))
+      (rational-hash (list (list (list 4 0) 9) 6)))
+ ]
+
+ @history[#:added "8.8.0.9"]}
 
 @defproc[(equal-secondary-hash-code [v any/c]) fixnum?]{
 
@@ -232,6 +255,14 @@ indexing and comparison operations, especially in the implementation of
  values within @racket[v] are hashed with @racket[equal-hash-code],
  while mutable values within @racket[v] are hashed with @racket[eq-hash-code].}
 
+
+@defproc[(equal-always-hash-code/recur [v any/c]
+                                       [recur-proc (-> any/c exact-integer?)])
+         fixnum?]{
+ Like @racket[equal-always-hash-code], but using @racket[recur-proc] for
+ recursive hashing within @racket[v].
+
+ @history[#:added "8.8.0.9"]}
 
 @defproc[(equal-always-secondary-hash-code [v any/c]) fixnum?]{
 
@@ -387,7 +418,74 @@ indexing and comparison operations, especially in the implementation of
 
    (equal? eastern-farm western-farm)
    (equal? eastern-farm northern-farm)
-   (equal? western-farm southern-farm))}
+   (equal? western-farm southern-farm))
+
+ @history[#:changed "8.7.0.5"
+          @elem{Added a check so that omitting any of
+                @racket[_equal-proc], @racket[_hash-proc], and @racket[_hash2-proc]
+                is now a syntax error.}]}
+
+
+@defthing[gen:equal-mode+hash any/c]{
+ A @tech{generic interface} (see @secref["struct-generics"]) for types that
+ may specify differences between @racket[equal?] and @racket[equal-always?].
+ The following methods must be implemented:
+
+ @itemlist[
+
+ @item{@racket[_equal-mode-proc :
+               (any/c any/c (any/c any/c . -> . boolean?) boolean? . -> . any/c)] ---
+   the first two arguments are the values to compare, the third argument is an
+   equality function to use for recursive comparisons, and the last argument is
+   the mode: @racket[#t] for an @racket[equal?] or @racket[impersonator-of?]
+   comparison or @racket[#f] for an @racket[equal-always?] or
+   @racket[chaperone-of?] comparison.}
+
+ @item{@racket[_hash-mode-proc :
+               (any/c (any/c . -> . exact-integer?) boolean? . -> . exact-integer?)] ---
+   the first argument is the value to compute a hash code for, the second
+   argument is a hashing function to use for recursive hashing, and the last
+   argument is the mode: @racket[#t] for @racket[equal?] hashing or @racket[#f]
+   for @racket[equal-always?] hashing.}]
+
+ The @racket[_hash-mode-proc] implementation is used both for a
+ primary hash code and secondary hash code.
+
+ When implementing these methods, follow the guidelines in
+ @secref["Honest_Custom_Equality"]. In particular, these
+ methods should only access mutable data if the ``mode'' argument
+ is true to indicate @racket[equal?] or @racket[impersonator-of?].
+
+ Implementing @racket[gen:equal-mode+hash] is most useful for types that
+ specify differences between @racket[equal?] and @racket[equal-always?], such
+ as a structure type that wraps mutable data with getter and setter procedures:
+ @(examples
+   (define (get gs) ((getset-getter gs)))
+   (define (set gs new) ((getset-setter gs) new))
+   (struct getset (getter setter)
+      #:methods gen:equal-mode+hash
+      [(define (equal-mode-proc self other rec mode)
+         (and mode (rec (get self) (get other))))
+       (define (hash-mode-proc self rec mode)
+         (if mode (rec (get self)) (eq-hash-code self)))])
+
+   (define x 1)
+   (define y 2)
+   (define gsx (getset (lambda () x) (lambda (new) (set! x new))))
+   (define gsy (getset (lambda () y) (lambda (new) (set! y new))))
+   (eval:check (equal? gsx gsy) #f)
+   (eval:check (equal-always? gsx gsy) #f)
+   (set gsx 3)
+   (set gsy 3)
+   (eval:check (equal? gsx gsy) #t)
+   (eval:check (equal-always? gsx gsy) #f)
+   (eval:check (equal-always? gsx gsx) #t))
+
+@history[#:added "8.5.0.3"
+         #:changed "8.7.0.5"
+         @elem{Added a check so that omitting either
+               @racket[_equal-mode-proc] or @racket[_hash-mode-proc]
+               is now a syntax error.}]}
 
 
 @defthing[gen:equal-mode+hash any/c]{
@@ -507,36 +605,58 @@ argument to ``recur'' on the pieces, which allows
 operations behave in their own distinct ways on the pieces,
 and enables some cycle detection.
 
-@compare[
-@filebox[@tt{good}]{
+@compare0[
 @racketblock0[
   (define (equal-proc self other rec)
     (rec (fish-size self) (fish-size other)))
-]}
+]
 
-@filebox[@tt{bad}]{
 @racketblock0[
   (define (equal-proc self other rec)
     (equal? (fish-size self) (fish-size other)))
-]}
+]
+]
+
+Don't use the third argument to ``recur'' on counts of
+elements.
+When a data structure cares about discrete numbers, it can
+use @racket[=] on those, not @racket[equal?] or ``recur''.
+Using ``recur'' on counts is bad when a ``recur'' argument
+from @racket[equal?/recur] is too tolerant on numbers within
+some range of each other.
+
+@compare0[
+@racketblock0[
+  (define (equal-proc self other rec)
+    (and (= (tuple-length self) (tuple-length other))
+         (for/and ([i (in-range (tuple-length self))])
+           (rec ((tuple-getter self) i)
+                ((tuple-getter other) i)))))
+]
+
+@racketblock0[
+  (define (equal-proc self other rec)
+    (and (rec (tuple-length self) (tuple-length other))
+         (for/and ([i (in-range (tuple-length self))])
+           (rec ((tuple-getter self) i)
+                ((tuple-getter other) i)))))
+]
 ]
 
 The operations @racket[equal?] and @racket[equal-always?]
 should be symmetric, so @racket[_equal-proc] instances
 should not change their answer when the arguments swap:
 
-@compare[
-@filebox[@tt{good}]{
+@compare0[
 @racketblock0[
   (define (equal-proc self other rec)
     (rec (fish-size self) (fish-size other)))
-]}
+]
 
-@filebox[@tt{bad}]{
 @racketblock0[
   (define (equal-proc self other rec)
     (<= (fish-size self) (fish-size other)))
-]}
+]
 ]
 
 However, the operations @racket[chaperone-of?] and
@@ -544,31 +664,47 @@ However, the operations @racket[chaperone-of?] and
 calling the third argument to ``recur'' on pieces, pass the
 pieces in the same order they came in:
 
-@compare[
-@filebox[@tt{good}]{
+@compare0[
 @racketblock0[
   (define (equal-proc self other rec)
     (rec (fish-size self) (fish-size other)))
-]}
+]
 
-@filebox[@tt{bad}]{
 @racketblock0[
   (define (equal-proc self other rec)
     (rec (fish-size other) (fish-size self)))
-]}
+]
 ]
 
-Mutable structs will only use the custom equality for
-@racket[equal?] and @racket[impersonator-of?], so that
-@racket[equal-always?] and @racket[chaperone-of?] don't
-change on mutation. Structs that represent mutable data
-should either be declared mutable, or use
-@racket[_equal-mode-proc] from @racket[gen:equal-mode+hash]
-instead of @racket[_equal-proc] from @racket[gen:equal+hash],
-and only access mutable data when the mode is true:
+The operations @racket[equal-always?] and
+@racket[chaperone-of?] shouldn't change on mutation, so
+@racket[_equal-proc] instances should not access
+potentially-mutable data.
+This includes avoiding @racket[string=?], since strings can
+be mutable.
+Type-specific equality functions for immutable types, such
+as @racket[symbol=?], are fine.
 
-@compare[
-@filebox[@tt{good}]{
+@compare0[#:left "fine" #:right "bad"
+@racketblock0[
+  (define (equal-proc self other rec)
+    (code:comment "symbols are immutable: no problem")
+    (symbol=? (thing-name self) (thing-name other)))
+]
+
+@racketblock0[
+  (define (equal-proc self other rec)
+    (code:comment "strings can be mutable: accesses mutable data")
+    (string=? (thing-name self) (thing-name other)))
+]
+]
+
+Declaring a struct as mutable makes @racket[equal-always?]
+and @racket[chaperone-of?] avoid using @racket[_equal-proc],
+so @racket[_equal-proc] instances are free to access mutable
+data if the struct is declared mutable:
+
+@compare0[
 @racketblock0[
   (struct mcell (value) #:mutable
     #:methods gen:equal+hash
@@ -581,9 +717,8 @@ and only access mutable data when the mode is true:
      (define (hash2-proc self rec)
        (+ (eq-hash-code struct:mcell)
           (rec (mcell-value self))))])
-]}
+]
 
-@filebox[@tt{bad}]{
 @racketblock0[
   (struct mcell (box)
     (code:comment "not declared mutable,")
@@ -598,11 +733,17 @@ and only access mutable data when the mode is true:
      (define (hash2-proc self rec)
        (+ (eq-hash-code struct:mcell)
           (rec (unbox (mcell-value self)))))])
-]}
+]
 ]
 
-@compare[
-@filebox[@tt{also good}]{
+Another way for a struct to control access to mutable data
+is by implementing @racket[gen:equal-mode+hash] instead of
+@racket[gen:equal+hash].
+When the mode is true, @racket[_equal-mode-proc] instances
+are free to access mutable data, and when the mode is false,
+they shouldn't:
+
+@compare0[#:left "also good" #:right "still bad"
 @racketblock0[
   (struct mcell (value) #:mutable
     (code:comment "only accesses mutable data when mode is true")
@@ -616,9 +757,8 @@ and only access mutable data when the mode is true:
            (+ (eq-hash-code struct:mcell)
               (rec (mcell-value self)))
            (eq-hash-code self)))])
-]}
+]
 
-@filebox[@tt{still bad}]{
 @racketblock0[
   (struct mcell (value) #:mutable
     (code:comment "accesses mutable data ignoring mode")
@@ -629,5 +769,184 @@ and only access mutable data when the mode is true:
      (define (hash-mode-proc self rec mode)
        (+ (eq-hash-code struct:mcell)
           (rec (mcell-value self))))])
-]}
 ]
+]
+
+@section{Combining Hash Codes}
+
+@note-lib-only[racket/hash-code]
+
+@history[#:added "8.8.0.5"]
+
+@defproc[(hash-code-combine [hc exact-integer?] ...) fixnum?]{
+  Combines the @racket[hc]s into a @tech{hash code} that
+  depends on the order of the inputs.
+  Useful for combining the hash codes of different fields in
+  a structure.
+
+  @examples[
+    (require racket/hash-code)
+    (struct ordered-triple (fst snd thd)
+      #:methods gen:equal+hash
+      [(define (equal-proc self other rec)
+         (and (rec (ordered-triple-fst self) (ordered-triple-fst other))
+              (rec (ordered-triple-snd self) (ordered-triple-snd other))
+              (rec (ordered-triple-thd self) (ordered-triple-thd other))))
+       (define (hash-proc self rec)
+         (hash-code-combine (eq-hash-code struct:ordered-triple)
+                            (rec (ordered-triple-fst self))
+                            (rec (ordered-triple-snd self))
+                            (rec (ordered-triple-thd self))))
+       (define (hash2-proc self rec)
+         (hash-code-combine (eq-hash-code struct:ordered-triple)
+                            (rec (ordered-triple-fst self))
+                            (rec (ordered-triple-snd self))
+                            (rec (ordered-triple-thd self))))])
+    (equal? (ordered-triple 'A 'B 'C) (ordered-triple 'A 'B 'C))
+    (= (equal-hash-code (ordered-triple 'A 'B 'C))
+       (equal-hash-code (ordered-triple 'A 'B 'C)))
+    (equal? (ordered-triple 'A 'B 'C) (ordered-triple 'C 'B 'A))
+    (= (equal-hash-code (ordered-triple 'A 'B 'C))
+       (equal-hash-code (ordered-triple 'C 'B 'A)))
+    (equal? (ordered-triple 'A 'B 'C) (ordered-triple 'C 'A 'B))
+    (= (equal-hash-code (ordered-triple 'A 'B 'C))
+       (equal-hash-code (ordered-triple 'C 'A 'B)))
+  ]
+
+  With one argument, @racket[(hash-code-combine hc)] mixes
+  the hash code so that it isn't just @racket[hc].
+
+  @examples[
+    (require racket/hash-code)
+    (struct wrap (value)
+      #:methods gen:equal+hash
+      [(define (equal-proc self other rec)
+         (rec (wrap-value self) (wrap-value other)))
+       (define (hash-proc self rec)
+         (code:comment "demonstrates `hash-code-combine` with only one argument")
+         (code:comment "but it's good to combine `(eq-hash-code struct:wrap)` too")
+         (hash-code-combine (rec (wrap-value self))))
+       (define (hash2-proc self rec)
+         (hash-code-combine (rec (wrap-value self))))])
+    (equal? (wrap 'A) (wrap 'A))
+    (= (equal-hash-code (wrap 'A))
+       (equal-hash-code (wrap 'A)))
+    (equal? (wrap 'A) 'A)
+    (= (equal-hash-code (wrap 'A))
+       (equal-hash-code 'A))
+  ]
+}
+
+@defproc[(hash-code-combine-unordered [hc exact-integer?] ...) fixnum?]{
+  Combines the @racket[hc]s into a @tech{hash code} that
+  @emph{does not} depend on the order of the inputs.
+  Useful for combining the hash codes of elements of an
+  unordered set.
+
+  @examples[
+    (require racket/hash-code)
+    (struct flip-triple (left mid right)
+      #:methods gen:equal+hash
+      [(define (equal-proc self other rec)
+         (and (rec (flip-triple-mid self) (flip-triple-mid other))
+              (or
+               (and (rec (flip-triple-left self) (flip-triple-left other))
+                    (rec (flip-triple-right self) (flip-triple-right other)))
+               (and (rec (flip-triple-left self) (flip-triple-right other))
+                    (rec (flip-triple-right self) (flip-triple-left other))))))
+       (define (hash-proc self rec)
+         (hash-code-combine (eq-hash-code struct:flip-triple)
+                            (rec (flip-triple-mid self))
+                            (hash-code-combine-unordered
+                             (rec (flip-triple-left self))
+                             (rec (flip-triple-right self)))))
+       (define (hash2-proc self rec)
+         (hash-code-combine (eq-hash-code struct:flip-triple)
+                            (rec (flip-triple-mid self))
+                            (hash-code-combine-unordered
+                             (rec (flip-triple-left self))
+                             (rec (flip-triple-right self)))))])
+    (equal? (flip-triple 'A 'B 'C) (flip-triple 'A 'B 'C))
+    (= (equal-hash-code (flip-triple 'A 'B 'C))
+       (equal-hash-code (flip-triple 'A 'B 'C)))
+    (equal? (flip-triple 'A 'B 'C) (flip-triple 'C 'B 'A))
+    (= (equal-hash-code (flip-triple 'A 'B 'C))
+       (equal-hash-code (flip-triple 'C 'B 'A)))
+    (equal? (flip-triple 'A 'B 'C) (flip-triple 'C 'A 'B))
+    (= (equal-hash-code (flip-triple 'A 'B 'C))
+       (equal-hash-code (flip-triple 'C 'A 'B)))
+    (struct rotate-triple (rock paper scissors)
+      #:methods gen:equal+hash
+      [(define (equal-proc self other rec)
+         (or
+          (and (rec (rotate-triple-rock self) (rotate-triple-rock other))
+               (rec (rotate-triple-paper self) (rotate-triple-paper other))
+               (rec (rotate-triple-scissors self) (rotate-triple-scissors other)))
+          (and (rec (rotate-triple-rock self) (rotate-triple-paper other))
+               (rec (rotate-triple-paper self) (rotate-triple-scissors other))
+               (rec (rotate-triple-scissors self) (rotate-triple-rock other)))
+          (and (rec (rotate-triple-rock self) (rotate-triple-scissors other))
+               (rec (rotate-triple-paper self) (rotate-triple-rock other))
+               (rec (rotate-triple-scissors self) (rotate-triple-paper other)))))
+       (define (hash-proc self rec)
+         (define r (rec (rotate-triple-rock self)))
+         (define p (rec (rotate-triple-paper self)))
+         (define s (rec (rotate-triple-scissors self)))
+         (hash-code-combine
+          (eq-hash-code struct:rotate-triple)
+          (hash-code-combine-unordered
+           (hash-code-combine r p)
+           (hash-code-combine p s)
+           (hash-code-combine s r))))
+       (define (hash2-proc self rec)
+         (define r (rec (rotate-triple-rock self)))
+         (define p (rec (rotate-triple-paper self)))
+         (define s (rec (rotate-triple-scissors self)))
+         (hash-code-combine
+          (eq-hash-code struct:rotate-triple)
+          (hash-code-combine-unordered
+           (hash-code-combine r p)
+           (hash-code-combine p s)
+           (hash-code-combine s r))))])
+    (equal? (rotate-triple 'A 'B 'C) (rotate-triple 'A 'B 'C))
+    (= (equal-hash-code (rotate-triple 'A 'B 'C))
+       (equal-hash-code (rotate-triple 'A 'B 'C)))
+    (equal? (rotate-triple 'A 'B 'C) (rotate-triple 'C 'B 'A))
+    (= (equal-hash-code (rotate-triple 'A 'B 'C))
+       (equal-hash-code (rotate-triple 'C 'B 'A)))
+    (equal? (rotate-triple 'A 'B 'C) (rotate-triple 'C 'A 'B))
+    (= (equal-hash-code (rotate-triple 'A 'B 'C))
+       (equal-hash-code (rotate-triple 'C 'A 'B)))
+  ]
+}
+
+@defproc[(hash-code-combine* [hc exact-integer?] ...
+                             [hcs (listof exact-integer?)])
+         fixnum?]{
+  @; Note: this is exactly the same description as append* and string-append*
+
+  Like @racket[hash-code-combine], but the last argument is
+  used as a list of arguments for @racket[hash-code-combine],
+  so @racket[(hash-code-combine* hc ... hcs)] is the same as
+  @racket[(apply hash-code-combine hc ... hcs)].
+  In other words, the relationship between
+  @racket[hash-code-combine] and @racket[hash-code-combine*]
+  is similar to the one between @racket[list] and
+  @racket[list*].
+}
+
+@defproc[(hash-code-combine-unordered* [hc exact-integer?] ...
+                                       [hcs (listof exact-integer?)])
+         fixnum?]{
+  @; Note: this is exactly the same description as append* and string-append*
+
+  Like @racket[hash-code-combine-unordered], but the last
+  argument is used as a list of arguments for
+  @racket[hash-code-combine-unordered], so
+  @racket[(hash-code-combine-unordered* hc ... hcs)] is the same
+  as @racket[(apply hash-code-combine-unordered hc ... hcs)].
+  In other words, the relationship between
+  @racket[hash-code-combine-unordered] and
+  @racket[hash-code-combine-unordered*] is similar to the
+  one between @racket[list] and @racket[list*].
+}

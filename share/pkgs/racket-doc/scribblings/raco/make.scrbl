@@ -187,7 +187,7 @@ implements the compilation and dependency management used by
 @defproc[(make-compilation-manager-load/use-compiled-handler 
           [delete-zos-when-rkt-file-does-not-exist? any/c #f]
           [#:security-guard security-guard (or/c security-guard? #f) #f])
-         (path? (or/c symbol? false/c) . -> . any)]{
+         (path? (or/c symbol? #f) . -> . any)]{
 
 Returns a procedure suitable as a value for the
 @racket[current-load/use-compiled] parameter. The returned procedure
@@ -674,7 +674,7 @@ Racket processes. The callback, @racket[handler], is called with the symbol
 @racket['done] as the @racket[_handler-type] argument for each successfully compiled file, 
 @racket['output] when a
 successful compilation produces stdout/stderr output, @racket['error] when a
-compilation error has occurred, or @racket['fatal-error] when a unrecoverable
+compilation error has occurred, or @racket['fatal-error] when an unrecoverable
 error occurs. The other arguments give more information for each status update.
 The return value is @racket[(void)] if it was successful, or @racket[#f] if there was an error.
  
@@ -871,7 +871,7 @@ path.
 The @DFlag{no-deps} mode for @exec{raco make} is an improverished
 form of the compilation, because it does not track import
 dependencies. It does, however, support compilation of non-module
-source in a namespace that initially imports @racketmodname[scheme].
+source in a namespace that initially imports @racketmodname[scheme #:indirect].
 
 Outside of a module, top-level @racket[define-syntaxes],
 @racket[module], @racket[#%require],
@@ -909,7 +909,7 @@ reader, such as @racket[(read-case-sensitive #t)]. The @Flag{p} or
 compiling the source files specified on the command line.
 
 By default, the namespace for compilation is initialized by a
-@racket[require] of @racketmodname[scheme]. If the @DFlag{no-prim}
+@racket[require] of @racketmodname[scheme #:indirect]. If the @DFlag{no-prim}
 flag is specified, the namespace is instead initialized with
 @racket[namespace-require/copy], which allows mutation and
 redefinition of all initial bindings (other than syntactic forms, in

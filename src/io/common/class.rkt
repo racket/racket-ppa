@@ -33,7 +33,7 @@
 ;;
 ;; A `public` method is one that can be overridden with `override` or
 ;; called via `send`. A `private` or `static` method cannot be
-;; overridden, and a `private` method cannot be called via `send`. Bot
+;; overridden, and a `private` method cannot be called via `send`. Both
 ;; `private` and `static` methods can be called directly like
 ;; functions within another method (but `public` methods cannot be
 ;; called that way, and that restriction is intended to discourange
@@ -61,7 +61,7 @@
 ;; method overridden in `new` can only access `field`s.
 ;;
 ;; Use
-;;   (with-object <class-id> <object-expr)
+;;   (with-object <class-id> <object-expr>
 ;;      <body> ...+)
 ;; to directly reference `field`s and `static`s in the <body>s.
 

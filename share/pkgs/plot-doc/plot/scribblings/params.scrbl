@@ -108,6 +108,36 @@ Amount of ambient light, and whether 3D plots are rendered with diffuse and spec
   @racket[lines], is controlled by the @racket[line-width] parameter.
 }
 
+@defparam[plot-line-cap cap plot-pen-cap/c #:value 'round]{
+  
+  The cap of the lines used to draw plot axes and other non-renderer elements.
+  See also @racket[line-cap].
+
+  @history[#:added "8.10"]
+
+}
+
+@defparam[plot-inset inset (or/c (>=/c 0) (list (>=/c 0) (>=/c 0) (>=/c 0) (>=/c 0))) #:value 0]{
+
+  The amount of space around the plot to leave unused, when calculating plot
+  layouts for ticks and axis labels.  The parameter can be specified as a
+  single value, which applies to all sides of the plot image, or as a list of
+  four separate values for the left, right, top, and bottom margins of the
+  plot image.
+
+  One example use for this parameter is to avoid clipping tick marks when
+  lines for plot elements are very thick, see @racket[plot-line-width] and
+  @racket[line-width]. In such a case, the end of axis ticks can be drawn
+  beyond the end point of the line, and might be clipped at the edge of the
+  drawing region.  A non-zero @racket[plot-inset] value can be used to avoid
+  this clipping.
+
+  See also @racket[plot-legend-padding] for an equivalent setting for the plot
+  legend.
+
+  @history[#:added "8.11"]
+}
+
 @deftogether[((defparam plot-foreground color plot-color/c #:value 0)
               (defparam plot-background color plot-color/c #:value 0))]{
 The plot foreground and background color.
@@ -151,6 +181,26 @@ For example, the value @racket['(columns 1 equal-size)] will place the legend en
 
 @history[#:added "7.9"]
 }
+
+@defparam[plot-legend-padding padding (or/c (>=/c 0) (list (>=/c 0) (>=/c 0) (>=/c 0) (>=/c 0))) #:value 0]{
+
+  The amount of space to add between the legend entries and the border drawn
+  around the legend.  The parameter can be specified as a single value, which
+  applies to all sides, or as a list of four separate values for the left,
+  right, top, and bottom sides of the legend.
+
+  One example use for this parameter is to avoid clipping thick lines used in
+  legend entries, see @racket[plot-line-width] and @racket[line-width]. In
+  such a case, the end of the lines can be drawn outside the border of the
+  legend, a non-zero @racket[plot-legend-padding] value can be used to avoid
+  this situation.
+
+  See also @racket[plot-inset] for a similar setting for the entire plot
+  image.
+
+  @history[#:added "8.11"]
+}
+
 
 @defparam[plot-tick-size size (>=/c 0) #:value 10]{
 The length of tick lines, in drawing units.
@@ -254,11 +304,21 @@ Used as a default keyword argument in @racket[function], @racket[inverse], @rack
 @deftogether[((defparam line-color color plot-color/c #:value 1)
               (defparam line-width width (>=/c 0) #:value 1)
               (defparam line-style style plot-pen-style/c #:value 'solid)
+              (defparam line-cap cap plot-pen-cap/c #:value 'round)
               (defparam line-alpha alpha (real-in 0 1) #:value 1))]{
-The pen color, pen width, pen style and opacity of lines in plots.
-Used as default keyword arguments of @racket[function], @racket[inverse], @racket[lines],
-@racket[parametric], @racket[polar], @racket[density], @racket[isoline], @racket[lines3d],
-@racket[parametric3d] and @racket[isoline3d].
+  
+  The pen color, pen width, pen style, pen cap and opacity of lines in plots.
+
+  Except for @racket[line-cap], all other parameters are used as default
+  keyword arguments of @racket[function], @racket[inverse], @racket[lines],
+  @racket[parametric], @racket[polar], @racket[density], @racket[isoline],
+  @racket[lines3d], @racket[parametric3d] and @racket[isoline3d].
+
+  The @racket[line-cap] parameter applies to lines drawn by renderers in a
+  plot.  See also @racket[plot-line-cap].
+
+  @history[#:added "8.10"]
+
 }
 
 @section{Intervals}

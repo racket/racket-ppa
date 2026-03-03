@@ -143,6 +143,17 @@
       (raise-argument-error name "symbol?" what))
     what)
 
+  (define (check-property-alist name what)
+    (unless (and (list? what)
+                 (andmap (lambda (elem)
+                           (and (pair? elem)
+                                (struct-type-property? (car elem))))
+                         what))
+      (raise-argument-error name
+                            "(listof (cons struct-type-property? any/c))"
+                            what))
+    what)
+
   (define-syntax (define-struct* stx)
     (syntax-case stx ()
       [(_ . rest)
@@ -260,6 +271,7 @@
                            (#:inspector . #f)
                            (#:auto-value . #f)
                            (#:props . ())
+                           (#:proplists . ())
                            (#:mutable . #f)
                            (#:guard . #f)
                            (#:constructor-name . #f)
@@ -312,6 +324,17 @@
                                (cons (cons (cadr p) (caddr p))
                                      (lookup config '#:props)))
                 nongen?)]
+         [(eq? '#:properties (syntax-e (car p)))
+          (check-exprs 1 p #f)
+          (when nongen?
+            ;; no error, since `#:properties null` should be allowed for prefab
+            (void))
+          (loop (cddr p)
+                (extend-config config
+                               '#:proplists
+                               (cons #`(check-property-alist '#,fm #,(cadr p))
+                                     (lookup config '#:proplists)))
+                nongen?)]
          [(eq? '#:methods (syntax-e (car p)))
           ;; #:methods gen:foo [(define (meth1 x ...) e ...) ...]
           (check-exprs 2 p "argument")
@@ -326,6 +349,11 @@
                  (car p)
                  " is not a name for a generic interface"
                  (cadr p)))
+          (unless (list? (syntax-e gen-defs))
+            (bad "the second argument to the"
+                 (car p)
+                 " is not a parenthesized sequence of method definitions"
+                 gen-defs))
           (loop (list* #'#:property
                        (quasisyntax/loc gen-id
                          (generic-property #,gen-id))
@@ -494,7 +522,7 @@
                          (car field-stxes))]
                        [else
                         (loop (cdr fields) (cdr field-stxes) #f)]))])
-               (let*-values ([(inspector super-expr props auto-val guard ctor-name ctor-only? 
+               (let*-values ([(inspector super-expr props proplists auto-val guard ctor-name ctor-only?
                                          reflect-name-expr mutable?
                                          omit-define-values? omit-define-syntaxes?
                                          info-name name-only?)
@@ -512,6 +540,7 @@
                                                 (cons (cons #'prop:sealed #'#t)
                                                       l)
                                                 l)))
+                                        (lookup config '#:proplists)
                                         (lookup config '#:auto-value)
                                         (lookup config '#:guard)
                                         (lookup config '#:constructor-name)
@@ -672,11 +701,18 @@
                                                                   #,(- (length fields) auto-count)
                                                                   #,auto-count
                                                                   #,auto-val
-                                                                  #,(if (null? props)
-                                                                        #'null
-                                                                        #`(list #,@(map (lambda (p)
-                                                                                          #`(cons #,(car p) #,(cdr p)))
-                                                                                        props)))
+                                                                  #,(cond
+                                                                     [(and (null? props) (null? proplists))
+                                                                      #'null]
+                                                                     [(null? proplists)
+                                                                      #`(list #,@(map (lambda (p)
+                                                                                        #`(cons #,(car p) #,(cdr p)))
+                                                                                      props))]
+                                                                     [else
+                                                                      #`(list* #,@(map (lambda (p)
+                                                                                         #`(cons #,(car p) #,(cdr p)))
+                                                                                       props)
+                                                                               (append #,@proplists))])
                                                                   #,(or inspector
                                                                         #`(current-inspector))
                                                                   #f
@@ -965,6 +1001,9 @@
                  (struct-field-info-list compile-time-info))))
 
   (define-for-syntax (struct-copy-core stx)
+    (syntax-case stx ()
+      [(_ _ _ . _) (void)]
+      [_ (raise-syntax-error #f "bad syntax" stx)])
     (with-syntax ([(form-name info struct-expr field+val ...) stx])
       (define ans (syntax->list #'(field+val ...)))
       ;; Check syntax:
@@ -1028,22 +1067,35 @@
                  [(field expr)
                   (list (find-accessor the-struct-info maybe-field-info #'field stx)
                         #'expr
-                        (car (generate-temporaries (list #'field))))]
+                        (car (generate-temporaries (list #'field)))
+                        #'field)]
                  [(field #:parent id expr)
                   (begin
                     (ensure-really-parent #'id)
                     (let-values ([(the-struct-info maybe-field-info) (id->struct-info #'id stx)])
                       (list (find-accessor the-struct-info maybe-field-info #'field stx)
                             #'expr
-                            (car (generate-temporaries (list #'field))))))]))
+                            (car (generate-temporaries (list #'field)))
+                            #'field)))]))
              ans))
 
       ;; new-binding-for : syntax[field-name] -> (union syntax[expression] #f)
       (define (new-binding-for f)
         (ormap (lambda (new-field)
                  (and (free-identifier=? (car new-field) f)
-                      (caddr new-field)))
+                      (syntax-property (caddr new-field)
+                                       'disappeared-use
+                                       (syntax-local-introduce
+                                        (syntax-property
+                                         (datum->syntax (list-ref new-field 3)
+                                                        (syntax-e (car new-field))
+                                                        (list-ref new-field 3)
+                                                        (list-ref new-field 3))
+                                         'sub-range-binding
+                                         (vector field-subrange-start
+                                                 (string-length (symbol->string (syntax-e (list-ref new-field 3))))))))))
                new-fields))
+      (define field-subrange-start (+ (string-length (symbol->string (syntax-e #'info))) 1))
 
       (unless construct
         (raise-syntax-error #f
@@ -1073,6 +1125,7 @@
 
       ;; the actual result
       #`(let ([the-struct struct-expr])
+          #,(syntax-property #'(void) 'disappeared-use (syntax-local-introduce #'info))
           (if (#,pred the-struct)
               (let #,(map (lambda (new-field)
                             #`[#,(caddr new-field) #,(cadr new-field)])

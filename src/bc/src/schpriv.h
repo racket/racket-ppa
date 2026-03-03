@@ -172,12 +172,8 @@ XFORM_NONGCING int scheme_intern_prim_opt_flags(int);
 #define MALLOC_N_STUBBORN(x, n) _MALLOC_N(x, n, scheme_malloc_stubborn)
 
 #ifdef MZ_PRECISE_GC
-# define WEAKIFY(x) scheme_make_weak_box(x)
-# define WEAKIFIED(x) SCHEME_WEAK_BOX_VAL(x)
 # define HT_EXTRACT_WEAK(x) SCHEME_WEAK_BOX_VAL(x)
 #else
-# define WEAKIFY(x) x
-# define WEAKIFIED(x) x
 # define HT_EXTRACT_WEAK(x) (*(char **)(x))
 #endif
 
@@ -348,6 +344,7 @@ void scheme_init_proc(Scheme_Startup_Env *env);
 void scheme_init_vector(Scheme_Startup_Env *env);
 void scheme_init_unsafe_vector(Scheme_Startup_Env *env);
 void scheme_init_string(Scheme_Startup_Env *env);
+void scheme_init_internal_string(Scheme_Startup_Env *env);
 void scheme_init_number(Scheme_Startup_Env *env);
 void scheme_init_flfxnum_number(Scheme_Startup_Env *env);
 void scheme_init_extfl_number(Scheme_Startup_Env *env);
@@ -429,6 +426,7 @@ void scheme_init_port_places(void);
 void scheme_init_regexp_places(void);
 void scheme_init_stx_places(int initial_main_os_thread);
 void scheme_init_fun_places(void);
+void scheme_init_char_places(void);
 void scheme_init_sema_places(void);
 void scheme_init_gmp_places(void);
 void scheme_init_variable_references_constants(void);
@@ -469,6 +467,7 @@ Scheme_Object *scheme_read_linklet(Scheme_Object *obj, int unsafe_ok);
 extern Scheme_Equal_Proc *scheme_type_equals;
 extern Scheme_Primary_Hash_Proc *scheme_type_hash1s;
 extern Scheme_Secondary_Hash_Proc *scheme_type_hash2s;
+extern Scheme_Object *scheme_hash_kind_key;
 
 void scheme_init_port_config(void);
 void scheme_init_port_fun_config(void);
@@ -592,6 +591,7 @@ extern Scheme_Object *scheme_make_struct_type_proc;
 extern Scheme_Object *scheme_make_struct_field_accessor_proc;
 extern Scheme_Object *scheme_make_struct_field_mutator_proc;
 extern Scheme_Object *scheme_make_struct_type_property_proc;
+extern Scheme_Object *scheme_unsafe_make_struct_type_property_proc;
 extern Scheme_Object *scheme_struct_to_vector_proc;
 extern Scheme_Object *scheme_struct_type_p_proc;
 extern Scheme_Object *scheme_current_inspector_proc;
@@ -605,6 +605,10 @@ extern Scheme_Object *scheme_unsafe_fxxor_proc;
 extern Scheme_Object *scheme_unsafe_fxrshift_proc;
 extern Scheme_Object *scheme_unsafe_fx_to_fl_proc;
 extern Scheme_Object *scheme_unsafe_pure_proc;
+
+extern Scheme_Object *scheme_zero_length_char_string;
+extern Scheme_Object *scheme_zero_length_char_immutable_string;
+extern Scheme_Object *scheme_zero_length_byte_string;
 
 extern Scheme_Object *scheme_string_p_proc;
 extern Scheme_Object *scheme_unsafe_string_length_proc;
@@ -658,6 +662,7 @@ extern Scheme_Object *scheme_boolean_p_proc;
 extern Scheme_Object *scheme_eq_proc;
 extern Scheme_Object *scheme_eqv_proc;
 extern Scheme_Object *scheme_equal_proc;
+extern Scheme_Object *scheme_equal_always_proc;
 
 extern Scheme_Object *scheme_def_exit_proc;
 extern Scheme_Object *scheme_system_type_proc;
@@ -772,7 +777,8 @@ THREAD_LOCAL_DECL(extern volatile int scheme_fuel_counter);
 
 THREAD_LOCAL_DECL(extern Scheme_Thread *scheme_main_thread);
 
-#if defined(MZ_USE_PLACES) || defined(MZ_USE_FUTURES) || defined(USE_PTHREAD_THREAD_TIMER) || defined(WINDOWS_FILE_HANDLES)
+#if defined(MZ_USE_PLACES) || defined(MZ_USE_FUTURES) || defined(USE_PTHREAD_THREAD_TIMER) \
+    || defined(WINDOWS_FILE_HANDLES) || defined(MZ_ALWAYS_USE_MZRT)
 # define MZ_USE_MZRT
 #endif
 
@@ -909,6 +915,14 @@ Scheme_Custodian *scheme_get_current_custodian(void);
 void scheme_run_atexit_closers_on_all(Scheme_Exit_Closer_Func alt);
 void scheme_run_atexit_closers(Scheme_Object *o, Scheme_Close_Custodian_Client *f, void *data);
 
+typedef struct Scheme_Thread_Custodian_Hop {
+  Scheme_Object so;
+  Scheme_Object *p; /* weak box containing a Scheme_Thread* */
+  Scheme_Custodian_Reference *mref;
+  Scheme_Object *extra_mrefs; /* More owning custodians */
+  Scheme_Object *dead_box;
+} Scheme_Thread_Custodian_Hop;
+
 typedef struct Scheme_Security_Guard {
   Scheme_Object so;
   struct Scheme_Security_Guard *parent;
@@ -928,13 +942,13 @@ typedef struct {
   Scheme_Object *replace_chain; /* turns non-tail replace_evt recursion into a loop */
 } Scheme_Schedule_Info;
 
-typedef Scheme_Object *(*Scheme_Accept_Sync)(Scheme_Object *wrap);
+typedef Scheme_Object *(*Scheme_Conclude_Sync)(Scheme_Object *wrap, int accept);
 
 void scheme_set_sync_target(Scheme_Schedule_Info *sinfo, Scheme_Object *target,
 			    Scheme_Object *wrap, Scheme_Object *nack,
-			    int repost, int retry, Scheme_Accept_Sync accept);
+			    int repost, int retry, Scheme_Conclude_Sync conclude);
 struct Syncing;
-void scheme_accept_sync(struct Syncing *syncing, int i);
+void scheme_conclude_sync(struct Syncing *syncing, int i);
 
 struct Syncing *scheme_make_syncing(int argc, Scheme_Object **argv);
 int scheme_syncing_ready(struct Syncing *s, Scheme_Schedule_Info *sinfo, int can_suspend);
@@ -1320,7 +1334,7 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
                                       Scheme_Object *auto_val, int checks);
 
 Scheme_Object *scheme_parse_chaperone_props(const char *who, int start_at, int argc, Scheme_Object **argv);
-Scheme_Object *scheme_chaperone_props_get(Scheme_Object *props, Scheme_Object *prop);
+XFORM_NONGCING Scheme_Object *scheme_chaperone_props_get(Scheme_Object *props, Scheme_Object *prop);
 Scheme_Object *scheme_chaperone_props_remove(Scheme_Object *props, Scheme_Object *prop);
 
 Scheme_Object *scheme_chaperone_hash_get(Scheme_Object *table, Scheme_Object *key);
@@ -1892,6 +1906,7 @@ typedef struct Scheme_Stack_State {
 typedef struct Scheme_Dynamic_Wind {
   MZTAG_IF_REQUIRED
   int depth;
+  int actual_len; /* not counting fake D-W records for prompts */
   void *id; /* generated as needed */
   void *data;
   Scheme_Object *prompt_tag; /* If not NULL, indicates a fake D-W record for prompt boundary */
@@ -1953,6 +1968,7 @@ typedef struct Scheme_Cont {
   char empty_to_next_mc;
   struct Scheme_Cont *use_next_cont; /* more meta-continuation return */
   int common_dw_depth; /* id for common dw record */
+  int skip_winds; /* number of non-common dw records to skip exit and re-entry */
   Scheme_Dynamic_Wind *common_dw; /* shared part with source cont */
   int common_next_meta; /* for common_dw */
   Scheme_Object *extra_marks; /* vector of extra keys and marks to add to meta-cont */
@@ -2148,7 +2164,7 @@ typedef struct Syncing {
   Scheme_Object **wrapss;
   Scheme_Object **nackss;
   char *reposts;
-  Scheme_Accept_Sync *accepts;
+  Scheme_Conclude_Sync *concludes;
 
   Scheme_Thread *disable_break; /* when result is set */
   Scheme_Thread *thread; /* set when syncing to allow in flight place message cleanup */
@@ -2703,6 +2719,7 @@ Scheme_Object *scheme_named_map_1(char *,
 XFORM_NONGCING int scheme_strncmp(const char *a, const char *b, int len);
 
 #define _scheme_make_char(ch) scheme_make_character(ch)
+Scheme_Object *scheme_make_uninterned_char(mzchar ch);
 
 Scheme_Object *scheme_default_print_handler(int, Scheme_Object *[]);
 Scheme_Object *scheme_default_prompt_read_handler(int, Scheme_Object *[]);
@@ -3137,6 +3154,7 @@ int scheme_omittable_expr(Scheme_Object *o, int vals, int fuel, int flags,
 #define OMITTABLE_KEEP_MUTABLE_VARS 0x4
 #define OMITTABLE_IGNORE_APPN_OMIT  0x8
 #define OMITTABLE_IGNORE_MAKE_STRUCT_TYPE 0x10
+#define OMITTABLE_REALLY_NO_MARKS   0x20
 
 int scheme_might_invoke_call_cc(Scheme_Object *value);
 int scheme_is_liftable(Scheme_Object *o, Scheme_Hash_Tree *exclude_vars, int fuel, int as_rator, int or_escape);
@@ -3178,6 +3196,10 @@ int scheme_is_simple_make_struct_type_property(Scheme_Object *app, int vals, int
 #define CHECK_STRUCT_TYPE_RESOLVED         0x1
 #define CHECK_STRUCT_TYPE_ALWAYS_SUCCEED   0x2
 #define CHECK_STRUCT_TYPE_DELAY_AUTO_CHECK 0x4
+#define CHECK_STRUCT_TYPE_NONCALLING_PROP  0x8
+#define CHECK_STRUCT_TYPE_NO_MARKS         0x10
+
+int scheme_known_noncalling_guard_struct_type_property(Scheme_Object *v);
 
 Scheme_Object *scheme_intern_struct_proc_shape(int shape);
 intptr_t scheme_get_struct_proc_shape(int k, Simple_Struct_Type_Info *sinfo);
@@ -3625,6 +3647,7 @@ char *scheme_get_exec_path(void);
 Scheme_Object *scheme_get_run_cmd(void);
 
 Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, intptr_t fd, char *path, int noerr);
+Scheme_Object *scheme_get_fd_stat(intptr_t fd);
 
 Scheme_Object *scheme_extract_relative_to(Scheme_Object *obj, Scheme_Object *dir, Scheme_Hash_Table *cache);
 
@@ -3690,6 +3713,7 @@ Scheme_Object *scheme_file_position_star(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_file_truncate(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_file_buffer(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_file_identity(int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_file_stat(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_file_try_lock(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_file_unlock(int argc, Scheme_Object **argv);
 
@@ -3759,6 +3783,7 @@ intptr_t scheme_redirect_get_or_peek_bytes(Scheme_Input_Port *orig_port,
 
 Scheme_Object *scheme_filesystem_change_evt(Scheme_Object *path, int flags, int report_errs);
 void scheme_filesystem_change_evt_cancel(Scheme_Object *evt, void *ignored_data);
+int scheme_filesystem_change_evt_ready(Scheme_Object *evt, Scheme_Schedule_Info *sinfo);
 
 void scheme_init_fd_semaphores(void);
 void scheme_release_fd_semaphores(void);
@@ -3865,7 +3890,7 @@ typedef Scheme_Object *(*Hash_Table_Element_Filter_Proc)(Scheme_Object *);
 Scheme_Object *scheme_chaperone_hash_table_filtered_copy(Scheme_Object *obj,
                                                          Hash_Table_Element_Filter_Proc filter);
 
-void scheme_bad_vec_index(char *name, Scheme_Object *i, 
+void scheme_bad_vec_index(const char *name, Scheme_Object *i, 
                           const char *what, Scheme_Object *vec, 
                           intptr_t bottom, intptr_t len);
 
@@ -3906,6 +3931,8 @@ Scheme_Object *scheme_symbol_append(Scheme_Object *s1, Scheme_Object *s2);
 Scheme_Object *scheme_copy_list(Scheme_Object *l);
 
 Scheme_Object *scheme_append_strings(Scheme_Object *s1, Scheme_Object *s2);
+XFORM_NONGCING int scheme_grapheme_cluster_step(mzchar c, int *_state);
+intptr_t scheme_grapheme_cluster_span(const mzchar *str, intptr_t start, intptr_t finish);
 
 Scheme_Object *scheme_unsafe_make_location(void);
 Scheme_Object *scheme_unsafe_make_srcloc(int argc, Scheme_Object **argv);
@@ -4104,6 +4131,8 @@ void scheme_place_check_for_interruption();
 void scheme_place_set_memory_use(intptr_t amt);
 void scheme_place_check_memory_use();
 void scheme_clear_place_ifs_stack();
+
+Scheme_Object *scheme_thread_parallel(int argc, Scheme_Object *argv[]);
 
 Scheme_Object **scheme_extract_sorted_keys(Scheme_Object *ht);
 void scheme_sort_resolve_ir_local_array(Scheme_IR_Local **a, intptr_t count);

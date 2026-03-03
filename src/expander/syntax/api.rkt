@@ -2,6 +2,7 @@
 (require "../common/phase.rkt"
          "../common/phase+space.rkt"
          "../common/module-path.rkt"
+         "../common/set.rkt"
          (rename-in "syntax.rkt"
                     [syntax-srcloc raw:syntax-srcloc]
                     [syntax->datum raw:syntax->datum]
@@ -37,7 +38,8 @@
                   namespace-module-get-portal-syntax-lookup)
          (only-in "../namespace/namespace.rkt"
                   current-namespace)
-         "../expand/log.rkt")
+         "../expand/log.rkt"
+         "mapped-name.rkt")
 
 ;; Provides public versions of syntax functions (with contract checks,
 ;; for example); see also "taint-api.rkt"
@@ -74,7 +76,10 @@
          identifier-prune-lexical-context
          syntax-shift-phase-level
          syntax-track-origin
-         syntax-debug-info)
+         syntax-debug-info
+         syntax-bound-symbols
+         syntax-bound-phases
+         syntax-bound-interned-scope-symbols)
 
 (define/who (syntax-e s)
   (check who syntax? s)
@@ -191,10 +196,10 @@
   (check who identifier? b)
   (raw:free-identifier=? a b #f #f))
 
-(define/who (identifier-binding id [phase (syntax-local-phase-level)] [top-level-symbol? #f])
+(define/who (identifier-binding id [phase (syntax-local-phase-level)] [top-level-symbol? #f] [exactly? #f])
   (check who identifier? id)
   (check who phase? #:contract phase?-string phase)
-  (raw:identifier-binding id phase top-level-symbol?))
+  (raw:identifier-binding id phase top-level-symbol? #:exactly? exactly?))
 
 (define/who (identifier-transformer-binding id [phase  (syntax-local-phase-level)])
   (check who identifier? id)
@@ -213,11 +218,11 @@
   (check who phase? #:contract phase?-string phase)
   (raw:identifier-binding-symbol id phase))
 
-(define/who (identifier-distinct-binding id other-id [phase (syntax-local-phase-level)])
+(define/who (identifier-distinct-binding id other-id [phase (syntax-local-phase-level)] [top-level-symbol? #f])
   (check who identifier? id)
   (check who identifier? other-id)
   (check who phase? #:contract phase?-string phase)
-  (raw:identifier-distinct-binding id other-id phase))
+  (raw:identifier-distinct-binding id other-id phase top-level-symbol?))
 
 (define/who (identifier-binding-portal-syntax id [phase (syntax-local-phase-level)])
   (check who identifier? id)
@@ -226,7 +231,15 @@
   (cond
     [(module-binding? b)
      (define ctx (get-current-expand-context #:fail-ok? #t))
-     (define phase-shift (phase- phase (module-binding-phase b)))
+     (define phase-shift (if (module-binding-phase b)
+                             (phase- phase (module-binding-phase b))
+                             ;; If the portal is bound at the label phase, then
+                             ;; the relevant instantion of its enclosing module is
+                             ;; ambiguous. We don't want to shift to the label phase
+                             ;; and lose information, so we instead phase 0, which
+                             ;; seems roughly in line with the way that shifting
+                             ;; to a label phase pulls only from phase 0
+                             0))
      (define portal-syntax-lookup
        (namespace-module-get-portal-syntax-lookup (if ctx
                                                       (expand-context-namespace ctx)
@@ -262,3 +275,15 @@
   (define ctx (get-current-expand-context #:fail-ok? #t))
   (when ctx (log-expand ctx 'track-syntax 'track-origin new-stx s))
   s)
+
+(define/who (syntax-bound-symbols stx [phase (syntax-local-phase-level)] [exactly? #f])
+  (check who syntax? stx)
+  (set->list (syntax-mapped-names stx phase #:only-interned? #t #:exactly? exactly?)))
+
+(define/who (syntax-bound-phases stx)
+  (check who syntax? stx)
+  (set->list (syntax-mapped-phases stx)))
+
+(define/who (syntax-bound-interned-scope-symbols stx [phase (syntax-local-phase-level)] [exactly? #f])
+  (check who syntax? stx)
+  (set->list (syntax-mapped-interned-scope-symbols stx phase #:exactly? exactly?)))

@@ -22,7 +22,7 @@
          (only-in deinprogramm/signature/signature
                   exn:fail:contract:signature?
                   exn:fail:contract:signature-obj exn:fail:contract:signature-signature
-                  exn:fail:contract:signature-blame)
+                  exn:fail:contract:signature-blame-srcloc)
          test-engine/srcloc
          test-engine/test-markup
          (only-in syntax/macro-testing convert-compile-time-error))
@@ -37,7 +37,20 @@
                          (syntax-column stx)
                          (syntax-position stx)
                          (syntax-span stx)))))
-  (define test-expr-checked-for-syntax-error #`(convert-compile-time-error #,test-expr))
+
+  ;; -----------------------------------------------------------------------------
+  ;; We want to delay compile-time errors in the check position of
+  #;   (check-expect check expect)
+  ;; to the run-time phase so that students are encourgaed to run
+  ;; partial programs and get feedback on some of the tests. The
+  ;; "exemplar" package (Shriram, Daniel Patterson, Ben Lerner and
+  ;; Northwestern?) relies on this property in that it requests that
+  ;; students formulate tests WITHOUT even formulating a function header. 
+
+  (define test-expr-checked-for-syntax-error
+  #`(convert-compile-time-error #,test-expr))
+  ;; -----------------------------------------------------------------------------
+
   (if (eq? 'module (syntax-local-context))
       #`(define #,bogus-name
           #,(stepper-syntax-property
@@ -47,11 +60,14 @@
                       (['stepper-hint hint-tag]
                        ['stepper-hide-reduction #t]
                        ['stepper-use-val-as-final #t])
-                      (quasisyntax/loc stx
-                        (#,checker-proc-stx
-                         (lambda () #,test-expr-checked-for-syntax-error)
-                         #,@embedded-stxes
-                         #,src-info)))))
+                      (syntax-property
+                       (quasisyntax/loc stx
+                         (#,checker-proc-stx
+                          (lambda () #,test-expr-checked-for-syntax-error)
+                          #,@embedded-stxes
+                          #,src-info))
+                       'errortrace:annotate
+                       #t))))
              'stepper-skipto
              (append skipto/cdr
                      skipto/second ;; outer lambda
@@ -69,7 +85,7 @@
                   #,@embedded-stxes
                   #,src-info)))))))
 
-; this wrapper is necessary because add-test! has a contract which confuses the stepper
+; without this wrapper the stepper annotations break
 (define (add-check-expect-test! thunk)
   (add-test! thunk))
 
@@ -81,7 +97,7 @@
                                      (violated-signature src
                                                          (exn:fail:contract:signature-obj e)
                                                          (exn:fail:contract:signature-signature e)
-                                                         (exn:fail:contract:signature-blame e))
+                                                         (exn:fail:contract:signature-blame-srcloc e))
                                      e))]
                                  [exn:fail?
                                   (lambda (e)
@@ -94,12 +110,12 @@
         #t)))
 
 
-(define (report-signature-violation! obj signature message blame)
+(define (report-signature-violation! obj signature message blame-srcloc)
   (let* ([srcloc (continuation-marks-srcloc (current-continuation-marks))]
          [message
           (or message
               (signature-got obj))])
-    (add-signature-violation! (signature-violation obj signature message srcloc blame))))
+    (add-signature-violation! (signature-violation obj signature message srcloc blame-srcloc))))
 
 ; typed/test-engine/typen-env-ext knows what this expands into
 (define-syntax (test stx) 

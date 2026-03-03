@@ -10,10 +10,11 @@
          racket/future
          racket/file
          racket/string
+         racket/serialize
          compiler/find-exe
          raco/command-name
          racket/system
-         rackunit/log
+         raco/testing
          pkg/lib
          pkg/path
          setup/collects
@@ -29,6 +30,7 @@
 (define configure-runtime 'default)
 (define first-avail? #f)
 (define run-anyways? #t)
+(define load-errortrace? #f)
 (define quiet? #f)
 (define quiet-program? #f)
 (define check-stderr? #f)
@@ -57,21 +59,31 @@
                            (* 4 60 60))) ; default: wait at most 4 hours
 
 (define test-exe-name (string->symbol (short-program+command-name)))
+;; The *absolute* module path of errortrace
+;; Note: must be a value that can be passed to other places,
+;; i.e. must satisfy the predicate `place-message-allowed?`.
+(define errortrace-module-path 'errortrace/main)
 
 ;; Stub for running a test in a process:
 (module process racket/base
-  (require rackunit/log
+  (require raco/testing
            racket/file
+           racket/serialize
            compiler/private/cm-minimal)
-  ;; Arguments are a temp file to hold test results, the module
-  ;; path to run, and the `dynamic-require` second argument:
+  ;; Arguments include a temp file to hold test results, the module path to run,
+  ;; and the `dynamic-require` second argument. See the 'process case of
+  ;; dynamic-require-elsewhere.
   (define argv (current-command-line-arguments))
   (define result-file (vector-ref argv 0))
-  (define test-module (read (open-input-string (vector-ref argv 1))))
-  (define rt-module (read (open-input-string (vector-ref argv 2))))
+  (define test-module (deserialize (read (open-input-string (vector-ref argv 1)))))
+  (define rt-module (deserialize (read (open-input-string (vector-ref argv 2)))))
   (define d (read (open-input-string (vector-ref argv 3))))
   (define make? (read (open-input-string (vector-ref argv 4))))
-  (define args (list-tail (vector->list argv) 5))
+  (define errortrace-path-or-false (read (open-input-string (vector-ref argv 5))))
+  (define test-invocation-path (deserialize (read (open-input-string (vector-ref argv 6)))))
+  (define args (list-tail (vector->list argv) 7))
+
+  (current-test-invocation-directory test-invocation-path)
 
   ;; In case PLTUSERHOME is set, make sure relevant
   ;; directories exist:
@@ -81,7 +93,8 @@
 
   (when make?
     (current-load/use-compiled (make-compilation-manager-load/use-compiled-handler)))
-  
+  (when errortrace-path-or-false
+    (dynamic-require errortrace-path-or-false 0))
   (parameterize ([current-command-line-arguments (list->vector args)])
     (when rt-module (dynamic-require rt-module d))
     (dynamic-require test-module d)
@@ -91,30 +104,35 @@
    result-file
    #:exists 'truncate
    (lambda (o)
-     (write (test-log #:display? #f #:exit? #f) o)))
+     (write (test-report #:display? #f #:exit? #f) o)))
   (exit 0))
 
 ;; Driver for running a test in a place:
 (module place racket/base
   (require racket/place
-           rackunit/log
+           raco/testing
            compiler/private/cm-minimal)
   (provide go)
   (define (go pch)
     (define l (place-channel-get pch))
     (define make? (list-ref l 3))
-    (define args (list-ref l 5))
+    (define errortrace-path-or-false (list-ref l 4))
+    (define test-invocation-path (list-ref l 6))
+    (define args (list-ref l 7))
+    (current-test-invocation-directory test-invocation-path)
     (when make?
       (current-load/use-compiled (make-compilation-manager-load/use-compiled-handler)))
+    (when errortrace-path-or-false
+      (dynamic-require errortrace-path-or-false 0))
     ;; Run the test:
     (parameterize ([current-command-line-arguments (list->vector args)]
-                   [current-directory (list-ref l 4)])
+                   [current-directory (list-ref l 5)])
       (when (cadr l) (dynamic-require (cadr l) (caddr l)))
       (dynamic-require (car l) (caddr l))
       ((executable-yield-handler) 0))
     ;; If the tests use `rackunit`, collect result stats:
     (define test-results 
-      (test-log #:display? #f #:exit? #f))
+      (test-report #:display? #f #:exit? #f))
 
     ;; Return test results. If we don't get this far, the result
     ;; code of the place determines whether it the test counts as
@@ -180,7 +198,7 @@
       (define-values (result-code test-results)
         (case mode
           [(direct)
-           (define pre (test-log #:display? #f #:exit? #f))
+           (define pre (test-report #:display? #f #:exit? #f))
            (define done? #f)
            (define t
              (parameterize ([current-output-port stdout]
@@ -198,7 +216,7 @@
              (error test-exe-name "timeout after ~a seconds" timeout))
            (unless done?
              (error test-exe-name "test raised an exception"))
-           (define post (test-log #:display? #f #:exit? #f))
+           (define post (test-report #:display? #f #:exit? #f))
            (values 0
                    (cons (- (car post) (car pre))
                          (- (cdr post) (cdr pre))))]
@@ -213,7 +231,13 @@
                                #:err stderr)))
            
            ;; Send the module path to test:
-           (place-channel-put pl (list p rt-p d make? (current-directory) args))
+           (place-channel-put pl
+                              (list p rt-p d
+                                    make?
+                                    (and load-errortrace? errortrace-module-path)
+                                    (current-directory)
+                                    (current-test-invocation-directory)
+                                    args))
 
            ;; Wait for the place to finish:
            (unless (sync/timeout timeout (place-dead-evt pl))
@@ -254,13 +278,15 @@
                       "-e"
                       "(dynamic-require '(submod compiler/commands/test process) #f)"
                       tmp-file
-                      (format "~s" (normalize-module-path p))
-                      (format "~s" (normalize-module-path rt-p))
+                      (format "~s" (serialize p))
+                      (format "~s" (serialize rt-p))
                       (format "~s" d)
                       (format "~s" make?)
+                      (format "~s" (and load-errortrace? errortrace-module-path))
+                      (format "~s" (serialize (current-test-invocation-directory)))
                       args)))
            (define proc (list-ref ps 4))
-           
+
            (unless (sync/timeout timeout (thread (lambda () (proc 'wait))))
              (set! timeout? #t)
              (error test-exe-name "timeout after ~a seconds" timeout))
@@ -284,14 +310,20 @@
 
       ;; Check results:
       (when check-stderr?
-        (unless (let ([s (get-output-bytes e)])
-                  (or (equal? #"" s)
-                      (ormap (lambda (p) (regexp-match? p s))
-                             ignore-stderr-patterns)
-                      (and ignore-stderr
-                           (regexp-match? ignore-stderr s))))
-          (parameterize ([error-print-width 16384])
-            (error test-exe-name "non-empty stderr: ~e" (get-output-bytes e)))))
+        (define s (get-output-bytes e))
+        (unless (or (equal? #"" s)
+                    (ormap (lambda (p) (regexp-match? p s))
+                           ignore-stderr-patterns)
+                    (and ignore-stderr
+                         (regexp-match? ignore-stderr s)))
+          (parameterize ([error-print-width #x4000])
+            (define tag #"non-empty stderr")
+            (define n
+              (let ([s (~.a s)] [tag (~a #"\n" tag)])
+                (if (string-contains? s tag)
+                    (for/first ([i (in-naturals)] #:unless (string-contains? s (~a tag i))) i)
+                    #"")))
+            (error test-exe-name "#<<~a~a\n~.a\n~a~a" tag n s tag n))))
       (unless (zero? result-code)
         (error test-exe-name "non-zero exit: ~e" result-code))
       (cond
@@ -334,15 +366,16 @@
      (close-output-port p2))))
 
 (define (extract-file-name p)
-  (cond
-   [(and (pair? p) (eq? 'submod (car p)))
-    (cadr p)]
-   [else p]))
+  (match p
+    [`(submod (file ,m) . ,_) m]
+    [`(submod ,m . ,_) m]
+    [`(file ,p) p]
+    [_ p]))
 
-(define (add-submod mod sm)
-  (if (and (pair? mod) (eq? 'submod (car mod)))
-      (append mod '(config))
-      (error test-exe-name "cannot add test-config submodule to path: ~s" mod)))
+(define (add-config mod)
+  (match mod
+    [`(submod ,m ,@e*) `(submod ,m ,@e* config)]
+    [_ (error test-exe-name "cannot add test-config submodule to path: ~s" mod)]))
 
 (define (dynamic-require* p rt-p d
                           #:id id
@@ -356,8 +389,8 @@
   (define lookup
     (or (cond
          [(not try-config?) #f]
-         [(module-declared? (add-submod p 'config) #t)
-          (define submod (add-submod p 'config))
+         [(module-declared? (add-config p) #t)
+          (define submod (add-config p))
           (dynamic-require submod
                            '#%info-lookup
                            (lambda ()
@@ -477,7 +510,7 @@
         (sync c-sema)
         (task t b)))
     (semaphore-post continue-sema)
-    (map sync (map task-th ts))
+    (for-each sync (map task-th ts))
     (for/list ([t (in-list ts)])
       (define v (unbox (task-result-box t)))
       (if (exn? v)
@@ -485,11 +518,10 @@
           v))]))
 
 (define (normalize-module-path p)
-  (cond
-   [(path? p) (path->string p)]
-   [(and (pair? p) (eq? 'submod (car p)))
-    (list* 'submod (normalize-module-path (cadr p)) (cddr p))]
-   [else p]))
+  (match p
+    [(? path?) `(file ,(path->string p))]
+    [`(submod ,m . ,e*) `(submod ,(normalize-module-path m) . ,e*)]
+    [_ p]))
 
 (define ids '(1))
 (define ids-lock (make-semaphore 1))
@@ -527,9 +559,9 @@
                         ""
                         (format "~a " id))
                     (let ([m (normalize-module-path p)])
-                      (if (and (pair? mod) (eq? 'submod (car mod)))
-                          (list* 'submod m (cddr mod))
-                          m))
+                      (match mod
+                        [`(submod ,_ . ,e*) `(submod ,m . ,e*)]
+                        [_ m]))
                     (apply string-append
                            (for/list ([a (in-list args)])
                              (format " ~s" (format "~a" a)))))
@@ -549,9 +581,9 @@
                                          ""
                                          (format "~a " id))
                                      (let ([m (normalize-module-path p)])
-                                       (if (and (pair? mod) (eq? 'submod (car mod)))
-                                           (list* 'submod m (cddr mod))
-                                           m)))))
+                                       (match mod
+                                         [`(submod ,_ . ,e*) `(submod ,m . ,e*)]
+                                         [_ m])))))
                           (loop)))))))
      (begin0
       (dynamic-require* mod rt-mod 0
@@ -1102,6 +1134,10 @@
  [("--deps")
   "If treating arguments as packages, also test dependencies"
   (set! check-pkg-deps? #t)]
+ #:once-any
+ [("--errortrace")
+  "Load errortrace before testing"
+  (set! load-errortrace? #t)]
  [("--make" "-y")
   "Enable automatic update of compiled files"
   (set! make? #t)]
@@ -1125,6 +1161,7 @@
   "Save stdout and stderr to file, overwrite if it exists."
   (set! default-output-file file)]
  #:args file-or-directory-or-collects-or-pkgs
+ (current-test-invocation-directory (current-directory))
  (define (test)
    (define file-or-directory
      (maybe-expand-package-deps file-or-directory-or-collects-or-pkgs))
@@ -1138,6 +1175,28 @@
    (when (and make?
               (eq? 'direct (or default-mode (and single-file? 'direct))))
      (current-load/use-compiled (make-compilation-manager-load/use-compiled-handler)))
+   ;; Note 1: Must load errortrace before the test target is loaded.
+   ;; Moreover, checking module-declared? in test-files actually loads the module!
+   ;;
+   ;; Note 2: errortrace and bytecode compilation usually don't work together,
+   ;; so we disallow combining them in the options. If errortrace is loaded
+   ;; after make? sets current-load/use-compiled, the compilation won't
+   ;; take place; if errortrace (and racket/base) is loaded before make? sets
+   ;; current-load/use-compiled, raco test will end up compiling everything
+   ;; which is unlikely to be what the user wants.
+   (when load-errortrace?
+     (with-handlers ([exn:fail:filesystem:missing-module?
+                      (λ (e)
+                        (raise-user-error
+                         'raco
+                         (string-append
+                          "The flag --errortrace depends on errortrace,"
+                          " but errortrace-lib is not installed")))])
+       (module-declared? errortrace-module-path #t))
+     ;; If running the tests in the current namespace, install errortrace.
+     ;; Otherwise, the other places/processes will load errortrace.
+     (when (eq? 'direct (or default-mode (and single-file? 'direct)))
+       (dynamic-require errortrace-module-path 0)))
    (define sum
      ;; The #:sema argument everywhre makes tests start
      ;; in a deterministic order:
@@ -1151,15 +1210,15 @@
      (display-summary sum))
    (unless (or (eq? default-mode 'direct)
                (and (not default-mode) single-file?))
-     ;; Re-log failures and successes, and then report using `test-log`.
-     ;; (This is awkward; is it better to not try to use `test-log`?)
+     ;; Re-log failures and successes, and then report using `test-report`.
+     ;; (This is awkward; is it better to not try to use `test-report`?)
      (for ([s (in-list sum)])
        (for ([i (in-range (summary-failed s))])
          (test-log! #f))
        (for ([i (in-range (- (summary-total s)
                              (summary-failed s)))])
          (test-log! #t))))
-   (test-log #:display? #t #:exit? #f)
+   (test-report #:display? #t #:exit? #f)
    (define sum1 (call-with-summary #f (lambda () sum)))
    (exit (cond
            [(positive? (summary-timeout sum1)) 2]

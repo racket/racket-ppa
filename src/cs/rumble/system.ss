@@ -4,10 +4,10 @@
    [(getenv "PLT_CS_MAKE_UNIX_STYLE_MACOS") #t]
    [else #f]))
 
-(define unix-link-shared?
+(define unix-link
   (meta-cond
-   [(getenv "PLT_CS_MAKE_LINK_SHARED") #t]
-   [else #f]))
+   [(getenv "PLT_CS_MAKE_LINK_SHARED") 'shared]
+   [else 'static]))
 
 (define cross-mode 'infer)
 (define (set-cross-mode! m) (set! cross-mode m))
@@ -29,13 +29,16 @@
 
 (define os-symbol
   (case (reflect-machine-type)
-    [(a6osx ta6osx i3osx ti3osx arm64osx tarm64osx ppc32osx tppc32osx)
+    [(a6ios ta6ios arm64ios tarm64ios
+            a6osx ta6osx i3osx ti3osx arm64osx tarm64osx ppc32osx tppc32osx)
      (if unix-style-macos? 'unix 'macosx)]
     [(a6nt ta6nt i3nt ti3nt arm64nt tarm64nt) 'windows]
     [else 'unix]))
 
 (define os*-symbol
   (case (reflect-machine-type)
+    [(a6ios ta6ios arm64ios tarm64ios)
+     'ios]
     [(a6osx ta6osx
             i3osx ti3osx
             arm64osx tarm64osx
@@ -46,8 +49,12 @@
     [(a6nt ta6nt i3nt ti3nt arm64nt tarm64nt) 'windows]
     [(a6le ta6le i3le ti3le
            arm32le tarm32le arm64le tarm64le
-           ppc32le tppc32le)
+           ppc32le tppc32le
+           rv64le trv64le
+	   la64le tla64le)
      'linux]
+    [(i3gnu ti3gnu)
+     'gnu-hurd]
     [(a6fb ta6fb i3fb ti3fb
            arm32fb tarm32fb arm64fb tarm64fb
            ppc32fb tppc32fb)
@@ -71,6 +78,7 @@
 (define arch-symbol
   (case (reflect-machine-type)
     [(a6osx ta6osx
+            a6ios ta6ios
             a6nt ta6nt
             a6le ta6le
             a6ob ta6ob
@@ -85,6 +93,7 @@
             i3nb ti3nb
             i3fb ti3fb
             i3s2 ti3s2
+            i3gnu ti3gnu
             i3qnx)
      'i386]
     [(arm32le tarm32le
@@ -94,6 +103,7 @@
      'arm]
     [(arm64le tarm64le
               arm64osx tarm64osx
+              arm64ios tarm64ios
               arm64fb tarm64fb
               arm64ob tarm64ob
               arm64nb tarm64nb
@@ -105,28 +115,54 @@
               ppc32ob tppc32ob
               ppc32nb tppc32nb)
      'ppc]
+    [(rv64le trv64le)
+     'riscv64]
+    [(la64le tla64le)
+     'loongarch64]
     [(pb tpb
          pb64l tpb64l pb64b tpb64b
          pb32l tpb32l pb32b tpb32b)
      'unknown]
     [else (error 'system-type "internal error: unknown architecture")]))
 
+(define so-find-symbol
+  (let-syntax ([suffix-sym
+                (lambda (stx)
+                  (let ([s (or (getenv "PLT_CS_SLSP_SUFFIX")
+                               "")])
+                    (if (string=? s "")
+                        #'#f
+                        (datum->syntax
+                         #'here
+                        `(quote ,(string->symbol (#%substring s 1 (string-length s))))))))])
+    (or (suffix-sym)
+          (case (reflect-machine-type)
+            [(a6ios ta6ios arm64ios tarm64ios
+                    a6osx ta6osx i3osx ti3osx arm64osx tarm64osx
+                    a6nt ta6nt i3nt ti3nt arm64nt tarm64nt)
+             'natipkg]
+            [else
+             'system]))))
+
 (define link-symbol
   (case (reflect-machine-type)
-    [(a6osx ta6osx i3osx ti3osx arm64osx tarm64osx)
+    [(a6ios ta6ios arm64ios tarm64ios
+            a6osx ta6osx i3osx ti3osx arm64osx tarm64osx)
      (if unix-style-macos?
-         'static
+         unix-link
          'framework)]
     [(a6nt ta6nt i3nt ti3nt arm64nt tarm64nt) 'dll]
-    [else (if unix-link-shared?
-              'shared
-              'static)]))
+    [else unix-link]))
 
 (define so-suffix-bytes
   (case (reflect-machine-type)
-    [(a6osx ta6osx i3osx ti3osx arm64osx tarm64osx ppc32osx tppc32osx) (string->utf8 ".dylib")]
-    [(a6nt ta6nt i3nt ti3nt arm64nt tarm64nt) (string->utf8 ".dll")]
-    [else (string->utf8 ".so")]))
+    [(a6ios ta6ios arm64ios tarm64ios
+            a6osx ta6osx i3osx ti3osx arm64osx tarm64osx ppc32osx tppc32osx)
+     (string->utf8 ".dylib")]
+    [(a6nt ta6nt i3nt ti3nt arm64nt tarm64nt)
+     (string->utf8 ".dll")]
+    [else
+     (string->utf8 ".so")]))
 
 (define so-mode
   (case (reflect-machine-type)
@@ -160,6 +196,8 @@
        [(os*) os*-symbol]
        [(arch) arch-symbol]
        [(word) (if (> (fixnum-width) 32) 64 32)]
+       [(so-find) so-find-symbol]
+       [(platform) system-library-subpath-string]
        [(gc) 'cs]
        [(link) link-symbol]
        [(machine) (get-machine-info)]
@@ -170,7 +208,8 @@
        [(cross) cross-mode]
        [else (raise-argument-error 'system-type
                                    (string-append
-                                    "(or/c 'os 'os* 'arch 'word 'vm 'gc 'link 'machine 'target-machine\n"
+                                    "(or/c 'os 'os* 'arch 'word 'so-find 'platform
+                                           'vm 'gc 'link 'machine 'target-machine\n"
                                     "      'so-suffix 'so-mode 'fs-change 'cross)")
                                    mode)])])))
 
@@ -180,19 +219,20 @@
     [else 'unix]))
 
 (define system-library-subpath-string
-  (string-append
-   (case (reflect-machine-type)
-     [(a6nt ta6nt) "win32\\x86_64"]
-     [(i3nt ti3nt) "win32\\i386"]
-     [(arm64nt tarm64nt) "win32\\arm64"]
-     [else (string-append (symbol->string arch-symbol)
-                          "-"
-                          (symbol->string os*-symbol))])
-   (let-syntax ([suffix
-                 (lambda (stx)
-                   (or (getenv "PLT_CS_SLSP_SUFFIX")
-                       ""))])
-     (suffix))))
+  (string->immutable-string
+   (string-append
+    (case (reflect-machine-type)
+      [(a6nt ta6nt) "win32\\x86_64"]
+      [(i3nt ti3nt) "win32\\i386"]
+      [(arm64nt tarm64nt) "win32\\arm64"]
+      [else (string-append (symbol->string arch-symbol)
+                           "-"
+                           (symbol->string os*-symbol))])
+    (let-syntax ([suffix
+                  (lambda (stx)
+                    (or (getenv "PLT_CS_SLSP_SUFFIX")
+                        ""))])
+      (suffix)))))
 
 (define get-machine-info (lambda () "localhost info..."))
 (define (set-get-machine-info! proc)

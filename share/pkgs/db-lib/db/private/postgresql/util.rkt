@@ -1,6 +1,8 @@
 #lang racket/base
 (require racket/serialize
          racket/string
+         racket/contract/base
+         racket/class
          db/private/generic/interfaces
          db/util/private/geometry)
 (provide (all-defined-out))
@@ -106,4 +108,14 @@
     #px"^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$")
   (and (string? x) (regexp-match? uuid-rx x)))
 
-(struct pg-custom-type (typeid typename basetype recv-convert send-convert))
+(struct pg-custom-type (typeid typename basetype recv-convert send-convert array-typeid))
+
+(define postgresql-connection<%>
+  (interface ()
+    [add-custom-types
+     (->m (listof pg-custom-type?) void?)]
+    [async-message-evt
+     (->m evt?)]
+    [cancel
+     (->m void?)]
+    ))

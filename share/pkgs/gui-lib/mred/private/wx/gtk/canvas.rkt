@@ -3,7 +3,7 @@
          ffi/unsafe/define
          ffi/unsafe/collect-callback
          racket/class
-         racket/draw
+         (only-in racket/draw color%)
          ffi/unsafe/alloc
          (except-in racket/draw/private/color
                     color% make-color)
@@ -25,6 +25,7 @@
          "gl-context.rkt"
          "combo.rkt"
          "gcwin.rkt"
+         "frame.rkt"
          "panel.rkt")
 
 (provide 
@@ -36,9 +37,11 @@
 (define-gobj g_object_freeze_notify (_fun _GtkWidget -> _void))
 (define-gobj g_object_thaw_notify (_fun _GtkWidget -> _void))
 
-(define-gobj g_object_set_double (_fun _GtkWidget _string _double* (_pointer = #f) -> _void)
+(define-gobj g_object_set_double (_fun #:varargs-after 2
+                                       _GtkWidget _string _double* (_pointer = #f) -> _void)
   #:c-id g_object_set)
-(define-gobj g_object_get_double (_fun _GtkWidget _string (r : (_ptr o _double)) (_pointer = #f) 
+(define-gobj g_object_get_double (_fun #:varargs-after 2
+                                       _GtkWidget _string (r : (_ptr o _double)) (_pointer = #f)
 				       -> _void -> r)
   #:c-id g_object_get)
 
@@ -76,6 +79,7 @@
 (define-gtk gtk_vscrollbar_new (_fun _pointer -> _GtkWidget))
 
 (define-gtk gtk_widget_set_double_buffered (_fun _GtkWidget _gboolean -> _void))
+(define-gtk gtk_widget_set_app_paintable (_fun _GtkWidget _gboolean -> _void))
 
 (define _GtkAdjustment _GtkWidget) ; no, actually a GtkObject
 (define-gtk gtk_adjustment_new (_fun _double* _double* _double* _double* _double* _double* -> _GtkAdjustment))
@@ -123,7 +127,8 @@
 (define-gtk gtk_container_remove (_fun _GtkWidget _GtkWidget -> _void))
 (define-gtk gtk_bin_get_child (_fun _GtkWidget -> _GtkWidget))
 
-(define-gobj g_object_set_bool (_fun _GtkWidget _string _gboolean [_pointer = #f] -> _void)
+(define-gobj g_object_set_bool (_fun #:varargs-after 2
+                                     _GtkWidget _string _gboolean [_pointer = #f] -> _void)
   #:c-id g_object_set)
 
 (define _GtkIMContext (_cpointer 'GtkIMContext))
@@ -255,7 +260,7 @@
   (lambda (gtk)
     (let ([wx (gtk->wx gtk)])
       (when wx
-        (send wx unrealize)))))
+        (send wx unmap)))))
 
 (define (do-value-changed gtk dir)
   (let ([wx (gtk->wx gtk)])
@@ -445,7 +450,11 @@
        (when (and (is-auto-scroll?)
                   (not (is-panel?)))
          (reset-auto-scroll))
+       (when dc (send dc update-canvas-size x y w h))
        (on-size))
+
+     (define/public (reset-gl-context mapped?)
+       (when dc (send dc reset-gl-context mapped?)))
      
      (set! dc (new dc% [canvas this] [transparentish? transparentish?]))
 
@@ -615,11 +624,22 @@
 		  flush-win-box)))))
      (define/public (unrealize)
        (unrealize-win-box flush-win-box))
+     (define/public (unmap)
+       (reset-gl-context #f)
+       (unrealize))
      (define/override (reset-child-freezes)
        ;; A transparent canvas can't have a native window, so we
        ;; need to release any freezes befre the window implementation
        ;; might change.
        (when (or transparentish? wayland?) (unrealize)))
+
+     (define/override (notify-children-top-realize)
+       (reset-gl-context #t))
+
+     (define/override (save-size x y w h)
+       (super save-size x y w h)
+       (when (and dc for-gl?)
+	 (send dc update-canvas-size x y w h)))
 
      (define/public (begin-refresh-sequence)
        (send dc suspend-flush))

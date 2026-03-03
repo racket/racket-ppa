@@ -46,18 +46,17 @@
      (if (#%procedure? proc)
          (#2%apply proc args)
          (#2%apply (extract-procedure proc (and (#%list? args) (length args))) args))]
-    [(proc)
-     (raise-arity-error 'apply (|#%app| arity-at-least 2) proc)]
-    [(proc . argss)
-     (if (#%procedure? proc)
-         (#2%apply #2%apply proc argss)
-         (let ([len (let loop ([argss argss] [accum 0])
-                      (cond
-                       [(null? (cdr argss)) (let ([l (car argss)])
-                                              (and (#%list? l)
-                                                   (+ accum (length l))))]
-                       [else (loop (cdr argss) (fx+ 1 accum))]))])
-           (#2%apply #2%apply (extract-procedure proc len) argss)))]))
+    [(proc arg . argss)
+     (let ([argss (cons arg argss)])
+       (if (#%procedure? proc)
+           (#2%apply #2%apply proc argss)
+           (let ([len (let loop ([argss argss] [accum 0])
+                        (cond
+                          [(null? (cdr argss)) (let ([l (car argss)])
+                                                 (and (#%list? l)
+                                                      (+ accum (length l))))]
+                          [else (loop (cdr argss) (fx+ 1 accum))]))])
+             (#2%apply #2%apply (extract-procedure proc len) argss))))]))
 
 (define-syntax (|#%app| stx)
   (syntax-case stx ()
@@ -342,9 +341,10 @@
     #f]))
 
 (define (not-a-procedure f)
-  (raise-arguments-error 'application
-                         "not a procedure;\n expected a procedure that can be applied to arguments"
-                         "given" f))
+  (lambda args
+    (raise-arguments-error 'application
+                           "not a procedure;\n expected a procedure that can be applied to arguments"
+                           "given" f)))
 
 (define (wrong-arity-wrapper f)
   (lambda args
@@ -403,7 +403,7 @@
 ;;  - (vector <symbol-or-#f> <realm-or-#f> <proc>) => not a method, and name is either
 ;;                                                    <symbol-or-#f> or name of <proc>
 ;;  - (vector <symbol-or-#f> <realm-or-#f> <proc> 'method) => is a method
-;;  - (box <symbol>) => JIT function generated, name is <symbol>, not a method
+;;  - (box <data>) => JIT function generated, recur with <data>
 ;;  - <parameter-data> => parameter
 ;;  - <symbol> => JITted with <symbol> name and default realm
 ;;  - (cons <symbol-or-#f> <symbol>) => <symbol-or-#f> name and <symbol> realm
@@ -428,8 +428,9 @@
     ;; preserve primitiveness of the procedure
     (let ([v (and (wrapper-procedure? proc)
                   (let ([v (wrapper-procedure-data proc)])
-                    (and (#%vector? v)
-                         v)))])
+                    (let ([v (if (#%box? v) (#%unbox v) v)])
+                      (and (#%vector? v)
+                           v))))])
       (if v
           (make-arity-wrapper-procedure (#%vector-ref v 2)
                                         (procedure-arity-mask proc)
@@ -448,8 +449,9 @@
    [(#%procedure? f)
     (if (wrapper-procedure? f)
         (let ([name (wrapper-procedure-data f)])
-          (and (#%vector? name)
-               (method-wrapper-vector? name)))
+          (let ([name (if (#%box? name) (#%unbox name) name)])
+            (and (#%vector? name)
+                 (method-wrapper-vector? name))))
         (procedure-is-method-by-name? f))]
    [(record? f)
     (or (method-arity-error? f)
@@ -570,8 +572,12 @@
 (define (do-procedure-reduce-arity-mask proc mask name realm)
   (cond
    [(and (wrapper-procedure? proc)
-         (#%vector? (wrapper-procedure-data proc)))
-    (let ([v (wrapper-procedure-data proc)])
+         (let ([v (wrapper-procedure-data proc)])
+           (let ([v (if (#%box? v) (#%unbox v) v)])
+             (and (#%vector? v)
+                  v))))
+    =>
+    (lambda (v)
       (make-arity-wrapper-procedure (#%vector-ref v 2)
                                     mask
                                     (cond
@@ -638,22 +644,29 @@
 
 ;; ----------------------------------------
 
+;; box for `name` implies a method
 (define (make-jit-procedure force mask name realm)
-  (letrec ([p (make-wrapper-procedure
-               (lambda args
-                 (let ([f (force)])
-                   (with-interrupts-disabled
-                    ;; atomic with respect to Racket threads,
-                    (let ([name (wrapper-procedure-data p)])
-                      (unless (#%box? name)
-                        (set-wrapper-procedure! p f)
-                        (set-wrapper-procedure-data! p (box name)))))
-                   (apply p args)))
-               mask
-               (if realm
-                   (vector name realm)
-                   name))])
-    p))
+  (let ([data (cond
+                [(#%box? name)
+                 (vector (#%unbox name) realm #f 'method)]
+                [realm
+                 (vector name realm #f)]
+                [else name])])
+    (letrec ([p (make-wrapper-procedure
+                 (lambda args
+                   (let ([f (force)])
+                     (with-interrupts-disabled
+                      ;; atomic with respect to Racket threads
+                      (let ([name (wrapper-procedure-data p)])
+                        (unless (#%box? name)
+                          (set-wrapper-procedure-procedure! p f)
+                          (set-wrapper-procedure-data! p (box name)))))
+                     (apply p args)))
+                 mask
+                 data)])
+      (when (#%vector? data)
+        (vector-set! data 2 (wrapper-procedure-procedure p)))
+      p)))
 
 ;; A boxed `name` means a method
 (define (make-interp-procedure proc mask name+realm)
@@ -667,9 +680,9 @@
        (vector (name-part name+realm) (realm-part name+realm) proc))))
 
 (define (extract-wrapper-procedure-name p)
-  (let ([name (wrapper-procedure-data p)])
+  (let loop ([name (wrapper-procedure-data p)])
     (cond
-     [(#%box? name) (#%unbox name)]
+     [(#%box? name) (loop (#%unbox name))]
      [(#%vector? name) (or (#%vector-ref name 0)
                            (object-name (#%vector-ref name 2)))]
      [(parameter-data? name) (parameter-data-name name)]
@@ -678,9 +691,9 @@
      [else (object-name (wrapper-procedure-procedure p))])))
 
 (define (extract-wrapper-procedure-realm p)
-  (let ([name (wrapper-procedure-data p)])
+  (let loop ([name (wrapper-procedure-data p)])
     (cond
-     [(#%box? name) (#%unbox name)]
+     [(#%box? name) (loop (#%unbox name))]
      [(#%vector? name) (or (#%vector-ref name 1)
                            (procedure-realm (#%vector-ref name 2)))]
      [(parameter-data? name) (parameter-data-realm name)]
@@ -944,9 +957,9 @@
      ": arity mismatch;\n"
      " expected number of results not received from wrapper on the original\n"
      " procedure's arguments\n"
-     "  original: " (error-value->string proc)
+     "  original: " (reindent/newline (error-value->string proc))
      "\n"
-     "  wrapper: " (error-value->string wrapper)
+     "  wrapper: " (reindent/newline (error-value->string wrapper))
      "\n"
      "  expected: " (number->string expected-n) " or more\n"
      "  received: " (number->string got-n))

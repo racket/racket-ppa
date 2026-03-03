@@ -298,7 +298,7 @@ are not supported and @racket[read-single-flonum] is set to
 would otherwise be produced. Special infinity and not-a-number flonums
 and single-flonums are distinct; specials with the @litchar{.0}
 suffix, like @racket[+nan.0], are double-precision flonums, while
-specials with the @litchar{.f} suffix, like @racketvalfont{+nan.0}, 
+specials with the @litchar{.f} suffix, like @racketvalfont{+nan.f}, 
 are single-flonums if enabled though @racket[read-single-flonum].
 
 A @litchar{#} in an @nunterm{inexact} number is the same as
@@ -320,7 +320,7 @@ letter stands for both itself and its uppercase form.
                                        @BNF-seq[@nunterm{unsigned-integer} @litchar{/} @nunterm{unsigned-integer}])
      (list @nunterm{exact-integer} @BNF-seq[@optional{@nonterm{sign}} @nunterm{unsigned-integer}])
      (list @nunterm{unsigned-integer} @kleeneplus{@nunterm{digit}})
-     (list @nunterm{exact-complex} @BNF-seq[@nunterm{exact-rational} @nonterm{sign} @nunterm{unsigned-rational} @litchar{i}])
+     (list @nunterm{exact-complex} @BNF-seq[@optional{@nunterm{exact-rational}} @nonterm{sign} @optional[@nunterm{unsigned-rational}] @litchar{i}])
      (list @nunterm{inexact} @BNF-alt[@nunterm{inexact-real}
                                       @nunterm{inexact-complex}])
      (list @nunterm{inexact-real} @BNF-seq[@optional{@nonterm{sign}} @nunterm{inexact-normal}]
@@ -333,7 +333,7 @@ letter stands for both itself and its uppercase form.
                                     @BNF-seq[@nunterm{digits#} @litchar{/} @nunterm{digits#}])
      (list @nunterm{inexact-special} @BNF-alt[@litchar{inf.0} @litchar{nan.0} @litchar{inf.f} @litchar{nan.f}])
      (list @nunterm{digits#} @BNF-seq[@kleeneplus{@nunterm{digit}} @kleenestar{@litchar{#}}])
-     (list @nunterm{inexact-complex} @BNF-seq[@optional{@nunterm{inexact-real}} @nonterm{sign} @nunterm{inexact-unsigned} @litchar{i}]
+     (list @nunterm{inexact-complex} @BNF-seq[@optional{@nunterm{inexact-real}} @nonterm{sign} @optional{@nunterm{inexact-unsigned}} @litchar{i}]
                                      @BNF-seq[@nunterm{inexact-real} @litchar["@"] @nunterm{inexact-real}])
 
 
@@ -663,17 +663,18 @@ file.
 
 @section[#:tag "parse-vector"]{Reading Vectors}
 
-When the reader encounters a @litchar{#(}, @litchar{#[}, or
-@litchar["#{"], it starts parsing a @tech{vector}; see @secref["vectors"] for
-information on vectors. A @litchar{#fl} in place of @litchar{#}
-starts an @tech{flvector}, but is not allowed in @racket[read-syntax] mode; 
-see @secref["flvectors"] for information on flvectors.
-A @litchar{#fx} in place of @litchar{#}
-starts an @tech{fxvector}, but is not allowed in @racket[read-syntax] mode; 
-see @secref["fxvectors"] for information on fxvectors.
-The @litchar{#[}, @litchar["#{"], @litchar{#fl[}, @litchar["#fl{"], 
-@litchar{#fx[}, and @litchar["#fx{"] forms can be disabled through 
-the @racket[read-square-bracket-as-paren] and
+When the reader encounters a @as-index{@litchar{#(}},
+@as-index{@litchar{#[}}, or @as-index{@litchar["#{"]}, it starts
+parsing a @tech{vector}; see @secref["vectors"] for information on
+vectors. A @as-index{@litchar{#fl}} in place of @litchar{#} starts an
+@tech{flvector}, but is not allowed in @racket[read-syntax] mode; see
+@secref["flvectors"] for information on flvectors.  A
+@as-index{@litchar{#fx}} in place of @litchar{#} starts an
+@tech{fxvector}, but is not allowed in @racket[read-syntax] mode; see
+@secref["fxvectors"] for information on fxvectors.  The @litchar{#[},
+@litchar["#{"], @litchar{#fl[}, @litchar["#fl{"], @litchar{#fx[}, and
+@litchar["#fx{"] forms can be disabled through the
+@racket[read-square-bracket-as-paren] and
 @racket[read-curly-brace-as-paren] @tech{parameters}.
 
 The elements of the vector are recursively read until a matching
@@ -707,11 +708,12 @@ immutable.
 
 @section[#:tag "parse-structure"]{Reading Structures}
 
-When the reader encounters a @litchar{#s(}, @litchar{#s[}, or
-@litchar["#s{"], it starts parsing an instance of a @tech{prefab}
-@tech{structure type}; see @secref["structures"] for information on
-@tech{structure types}.  The @litchar{#s[} and @litchar["#s{"] forms
-can be disabled through the @racket[read-square-bracket-as-paren] and
+When the reader encounters a @as-index{@litchar{#s(}},
+@as-index{@litchar{#s[}}, or @as-index{@litchar["#s{"]}, it starts
+parsing an instance of a @tech{prefab} @tech{structure type}; see
+@secref["structures"] for information on @tech{structure types}.  The
+@litchar{#s[} and @litchar["#s{"] forms can be disabled through the
+@racket[read-square-bracket-as-paren] and
 @racket[read-curly-brace-as-paren] @tech{parameters}.
 
 The elements of the structure are recursively read until a matching

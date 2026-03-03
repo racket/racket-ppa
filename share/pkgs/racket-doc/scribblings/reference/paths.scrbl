@@ -23,7 +23,7 @@ sensitive to the kind of path that is supplied. Unless otherwise
 specified, a procedure that requires a path accepts only paths for the
 current platform.
 
-Two @tech{path} values are @racket[equal?] when they are use the same
+Two @tech{path} values are @racket[equal?] when they use the same
 convention type and when their byte-string representations are
 @racket[equal?]. A path string (or byte string) cannot be empty, and
 it cannot contain a nul character or byte. When an empty string or a
@@ -559,7 +559,7 @@ then the result is always a list of paths, and the first element of
 the list is a root.
 
 The @racket[explode-path] function computes its result in time
-proportional to the length of @racket[path] (unlike a loop in that
+proportional to the length of @racket[path] (unlike a loop that
 uses @racket[split-path], which must allocate intermediate paths).}
 
 
@@ -696,7 +696,7 @@ extension.
 
 @defproc[(path-has-extension? [path (or/c path-string? path-for-some-system?)]
                               [ext (or/c bytes? string?)])
-         (or/c bytes? #f)]{
+         boolean?]{
 
 Determines whether the last element of @racket[path] ends with
 @racket[ext] but is not exactly the same as @racket[ext].
@@ -747,8 +747,8 @@ If @racket[more-than-root?] is true, if @racket[base] and
 
 If @racket[path] is the same as @racket[base], then
 @racket[(build-path 'same)] is returned only if
-@racket[more-than-same?] is true. Otherwise, @racket[path] is
-returned when @racket[path] is the same as @racket[base].
+@racket[more-than-same?] is @racket[#f]. Otherwise, and by default,
+@racket[path] is returned when @racket[path] is the same as @racket[base].
 
 If @racket[normalize-case?] is true (the default), then pairs of path
 elements to be compared are first converted via

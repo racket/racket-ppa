@@ -43,13 +43,15 @@
        ...))))
 
 (define-syntax quote-core
-  (syntax-rules (protect)
+  (syntax-rules (protect rename)
     [(_ (protect id)) 'id]
+    [(_ (rename int-id ext-id)) 'ext-id]
     [(_ id) 'id]))
 
 (define-syntax add-a-core-primitive!
-  (syntax-rules (protect)
+  (syntax-rules (protect rename)
     [(_ (protect id)) (add-core-primitive! 'id id #:protected? #t)]
+    [(_ (rename int-id ext-id)) (add-core-primitive! 'ext-id int-id)]
     [(_ id) (add-core-primitive! 'id id)]))
 
 (add-core-primitives! #:table primitive-ids
@@ -77,6 +79,9 @@
                       syntax-shift-phase-level
                       syntax-source-module
                       identifier-prune-to-source-module
+                      syntax-bound-symbols
+                      syntax-bound-phases
+                      syntax-bound-interned-scope-symbols
 
                       syntax-srcloc
                       syntax-source
@@ -136,6 +141,7 @@
                       syntax-transforming-with-lifts?
                       syntax-transforming-module-expression?
                       syntax-local-transforming-module-provides?
+                      syntax-local-compiling-module?
                       
                       syntax-local-context
                       syntax-local-introduce
@@ -179,6 +185,7 @@
 
                       internal-definition-context?
                       syntax-local-make-definition-context
+                      syntax-local-make-definition-context-introducer
                       syntax-local-bind-syntaxes
                       internal-definition-context-binding-identifiers
                       internal-definition-context-introduce
@@ -210,7 +217,7 @@
 
                       resolved-module-path?
                       make-resolved-module-path
-                      resolved-module-path-name
+                      (rename safe-resolved-module-path-name resolved-module-path-name)
                       
                       module-path-index?
                       module-path-index-resolve

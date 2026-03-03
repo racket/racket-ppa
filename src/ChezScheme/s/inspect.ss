@@ -2087,9 +2087,7 @@
     (define make-record-object
       (lambda (x)
         (let* ((rtd ($record-type-descriptor x))
-               (fields (if (record-type-named-fields? rtd)
-                           (csv7:record-type-field-names rtd)
-                           ($record-type-field-indices rtd))))
+               (fields (csv7:record-type-field-names rtd)))
           (define check-field
             (lambda (f)
               (unless (or (and (symbol? f) (memq f fields))
@@ -3097,7 +3095,10 @@
          [(x* g)
           (unless (list? x*) ($oops who "~s is not a list" x*))
           (let ([g (filter-generation who g)])
-            (count_size_increments x* g))]))))
+            (with-tc-mutex
+             (unless (= $active-threads 1)
+               ($oops who "cannot count when multiple threads are active"))
+             (count_size_increments x* g)))]))))
 
   (set-who! compute-composition
     (case-lambda

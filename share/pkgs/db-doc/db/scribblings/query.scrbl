@@ -72,6 +72,9 @@ that is using a connection may leave the connection locked, causing
 future operations to block indefinitely. See also
 @secref["kill-safe"].
 
+@parheading{Multi-Statement Queries} This library does not support
+@secref["multi-stmt"].
+
 
 @section[#:tag "query-statements"]{Statements}
 
@@ -462,7 +465,9 @@ closed.
   statement holds its connection link weakly; a reference to a
   prepared statement will not keep a connection from being garbage
   collected.
-}
+
+@history[#:changed "1.10" @elem{Changed to accept @tech{virtual
+            statements} in addition to strings.}]}
 
 @defproc[(prepared-statement? [x any/c]) boolean?]{
 
@@ -540,7 +545,7 @@ closed.
   in the table.
 
   The @racket[gen] argument must be either a SQL string or a function
-  that accepts a databse system object and produces a SQL string. The
+  that accepts a database system object and produces a SQL string. The
   function variant allows the SQL syntax to be dynamically customized
   for the database system in use.
 
@@ -687,7 +692,7 @@ implicitly rolled back.
 @defproc[(commit-transaction [c connection?]) void?]{
 
   Attempts to commit the current transaction, if one is open. If the
-  transaction cannot be commited (for example, if it is @tech[#:key
+  transaction cannot be committed (for example, if it is @tech[#:key
   "invalid transaction"]{invalid}), an exception is raised.
 
   If the current transaction is a @tech{nested transaction}, the

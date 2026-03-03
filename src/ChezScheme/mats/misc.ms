@@ -35,6 +35,22 @@
              (with-syntax ((m (- nv 1)))
                (syntax (biglambda m (g . vars) (+ g e))))))))))
 
+(mat version
+  (string? (scheme-version))
+  (string? (scheme-version #f))
+  (string? (scheme-version #t))
+  (equal? (scheme-version) (scheme-version #f))
+  (= 3 (length (call-with-values scheme-version-number list)))
+  (let* ([alpha-s (format "-pre-release.~s" (scheme-pre-release))]
+         [ends? (lambda (s)
+                  (let ([len (string-length s)])
+                    (and (> len (string-length alpha-s))
+                         (equal? alpha-s (substring s (- len (string-length alpha-s)) len)))))])
+    (and (if (scheme-pre-release)
+             (ends? (scheme-version #t))
+             (not (ends? (scheme-version #t))))
+         (not (ends? (scheme-version))))))
+
 (mat cycle
   (let ((x '#1=(a b . #1#)))
     (eqv? x x))
@@ -1061,6 +1077,9 @@
     #t)
   (equal? (list pair-size pair-size)
           (compute-size-increments (list (cons 1 2) (cons 3 4))))
+  (equal? (list pair-size 0)
+          (compute-size-increments (let ([p (cons 1 2)])
+                                     (list p p))))
   (equal? (list (* 3 pair-size) pair-size)
           (let ([l (list 1 2)])
             (compute-size-increments (list (cons 3 l) (cons 4 l)))))
@@ -1108,49 +1127,65 @@
                             (let loop ()
                               (unless (check)
                                 (sleep (make-time 'time-duration 10000 0))
-                                (loop))))])
+                                (loop))))]
+             ;; to make sure a thread parameter's content is not counted:
+             [new-param (make-thread-parameter (make-bytevector (* 3 N)))])
         (mutex-acquire m)
-        (let ([th (fork-thread
-                   (lambda ()
-                     (let ([bstr (make-bytevector N)])
-                       (set-box! ready 'go)
-                       ;; Block so that thread becomes deactivated
-                       (mutex-acquire m)
-                       (mutex-release m)
-                       ;; bstr is retained in the thread's continuation until here
-                       (set-box! saved (bytevector-u8-ref bstr 0))
-                       (pause-until (lambda () (box-cas! ready 'finish 'done)))
-                       ;; Block so that thread becomes deactivated, again
-                       (mutex-acquire m)
-                       (mutex-release m))))])
+        (let* ([th-code
+                ;; we'll measure the difference between data reachable by this
+                ;; code versus data reachable from the thread
+                (lambda ()
+                  (let ([bstr (make-bytevector N)])
+                    (set-box! ready 'go)
+                    ;; Block so that thread becomes deactivated
+                    (mutex-acquire m)
+                    (mutex-release m)
+                    ;; bstr is retained in the thread's continuation until here
+                    (set-box! saved (bytevector-u8-ref bstr 0))
+                    (pause-until (lambda () (box-cas! ready 'finish 'done)))
+                    ;; Block so that thread becomes deactivated, again
+                    (mutex-acquire m)
+                    (mutex-release m)))]
+               [th (fork-thread th-code)])
           ;; Wait for thread to start
           (pause-until (lambda () (eq? 'go (unbox ready))))
           ;; Wait for thread to become inactive, blocked on the mutex
           (pause-until (lambda () (= 1 (#%$top-level-value '$active-threads))))
           ;; Get thread's size, which should include bstr
-          (let ([pre-sizes (compute-size-increments (list th))])
+          (let ([pre-sizes (compute-size-increments (list th-code
+                                                          th
+                                                          ;; don't count parameters towards the thread's
+                                                          ;; size; in particular, the `$tt-fat` parameter
+                                                          ;; from a "thread.ms" test can have random symbols,
+                                                          ;; some of which may be bound to large values
+                                                          (#%$tc-field 'parameters (#%$thread-tc th))))])
             (mutex-release m)
             ;; Wait for bytevector to be discarded in the thread
             (pause-until (lambda () (unbox saved)))
             (mutex-acquire m)
             (set-box! ready 'finish)
             ;; Wait for thread to become inactive again
+            (pause-until (lambda () (eq? 'done (unbox ready))))
             (pause-until (lambda () (= 1 (#%$top-level-value '$active-threads))))
             ;; Get thread's size, which shouldn't include bstr
-            (let ([post-sizes (compute-size-increments (list th))])
+            (let ([post-sizes (compute-size-increments (list th-code
+                                                             th
+                                                             (#%$tc-field 'parameters (#%$thread-tc th))))])
+              (printf "SIZES ~s\n" (list pre-sizes N post-sizes))
               (mutex-release m)
               ;; Wait for thread to exit
-              (let ()
-                (define $threads (foreign-procedure "(cs)threads" () scheme-object))
-                (pause-until (lambda () (= 1 (length ($threads))))))
+              (thread-join th)
               ;; Make sure `compute-size-increments` doesn't crash on a
               ;; terminated thread:
               (compute-size-increments (list th))
+              ;; drop extra bytevector from the current thread:
+              (new-param #f)
               ;; Main result: detected size of `bstr` in the thread
               ;; while it was part of the continuation
               (or (eq? (current-eval) interpret) ; interpreter continuation is not precise enough
-                  (and (> (car pre-sizes) N)
-                       (< (car post-sizes) N))))))))
+                  (and (> (cadr pre-sizes) N)
+                       (< (cadr post-sizes) N))
+                  (errorf 'compute-size-increments "failed ~s ~s ~s" pre-sizes N post-sizes)))))))
   )
 
 (mat collect+compute-size-increments
@@ -1174,6 +1209,9 @@
     #t)
   (equal? (list pair-size pair-size)
           (collect 0 0 0 (list (cons 1 2) (cons 3 4))))
+  (equal? (list pair-size 0)
+          (collect 0 0 0 (let ([p (cons 1 1)])
+                           (list p p))))
   (equal? (list (* 3 pair-size) pair-size)
           (let ([l (list 1 2)])
             (collect 0 0 0 (list (cons 3 l) (cons 4 l)))))
@@ -1439,6 +1477,9 @@
   (eq? (eval '(let ((x 3)) x) (ieee-environment)) 3)
   (eq? (eval '(let ((x 3)) x) (null-environment 5)) 3)
 
+  (eq? (eval '(< 3 5) (scheme-report-environment 5)) #true)
+  (eq? (eval '(< 3 5) (ieee-environment)) #true)
+
   (eq? (eval '(let ((p (delay 3))) (force p))) 3)
   (eq? (eval '(let ((p (delay 3))) (force p)) (interaction-environment)) 3)
   (eq? (eval '(let ((p (delay 3))) (force p)) (scheme-report-environment 5)) 3)
@@ -1449,6 +1490,10 @@
   (error? (eval '(sort < '(3 2 4)) (scheme-report-environment 5)))
   (error? (eval '(sort < '(3 2 4)) (ieee-environment)))
   (error? (eval '(sort < '(3 2 4)) (null-environment 5)))
+
+  (error? (eval '(< 3) (scheme-report-environment 5)))
+  (error? (eval '(< 3) (ieee-environment)))
+
 )
 
 (mat eval2
@@ -2006,7 +2051,7 @@
       (fields x y)
       (nongenerative #{vfasl-demo pfwhk286n2j894o33awcq9er4-0}))
     (define vfasl-content (list 1 1/2 3.0 4+5i 6.0+7.0i
-                                "apple" 'banana
+                                "apple" 'banana (string->uninterned-symbol "coconut")
                                 (make-vfasl-demo 10 "11")
                                 (vector 1 'two "three")
                                 (stencil-vector 30 'one 2.0 0+3i "four")
@@ -2017,6 +2062,9 @@
     (define (same-vfasl-content? v)
       (andmap (lambda (a b)
                 (or (eqv? a b)
+                    (and (uninterned-symbol? a)
+                         (uninterned-symbol? b)
+                         (equal? (symbol->string a) (symbol->string b)))
                     (and (or (and (string? a)
                                   (positive? (string-length a)))
                              (and (vector? a)
@@ -2039,8 +2087,13 @@
                            `(define (get-vfasled) vfasled)
                            `(define (call-vfasled) (vfasled)))
                      "testfile-fasl.so")
-    (vfasl-convert-file "testfile-fasl.so" "testfile-vfasl.so" #f)
-    (load "testfile-vfasl.so")
+    (case (machine-type)
+      [(pb tpb)
+       ;; vfasl not supported with endianness not statically known
+       (load "testfile-fasl.so")]
+      [else
+       (vfasl-convert-file "testfile-fasl.so" "testfile-vfasl.so" #f)
+       (load "testfile-vfasl.so")])
     #t)
   
   (same-vfasl-content? (vfasled))
@@ -2611,7 +2664,7 @@
              (define peano->n length)
              (define (peano-sub1 n)
                (if (null? n)
-                   (error 'peano-sub "cannot subtract 1 from 0")
+                   (errorf 'peano-sub "cannot subtract 1 from 0")
                    (cdr n)))
              (define peano-zero '())
              (define (peano-add1 n) (#%cons 'succ n))
@@ -2638,7 +2691,10 @@
 
   ((lambda (x)
      (and (time<? (make-time 'time-duration 0 0) x)
-          (or (time<? x (make-time 'time-duration 0 20))
+          ;; on a modern machine, we expect a time on the
+          ;; order of 1s, but allow a lof ot variation or
+          ;; a slow machine with up to 50s:
+          (or (time<? x (make-time 'time-duration 0 50))
               (#%$enable-check-heap))))
    (begin
      ($cc-fib 30)
@@ -4186,16 +4242,16 @@
       ;;; set-cdr! as it does not appear that frequently in tests.ss
       ;;;
       ;;;  before
-      ;;;      +--+--+    +--+--+    +--+--+         +--+--+    +--+--+    +--+--+
-      ;;;      | 1|------>| 2|------>| 3|------> ... | 6|------>| 7|------>| 8|#f|
-      ;;;      +--+--+    +--+--+    +--+--+         +--+--+    +--+--+    +--+--+
+      ;;;      +--+--+    +--+--+    +--+--+         +--+--+    +--+--+    +--+----+
+      ;;;      | 1|------>| 2|------>| 3|------> ... | 6|------>| 7|------>| 8| #f |
+      ;;;      +--+--+    +--+--+    +--+--+         +--+--+    +--+--+    +--+----+
       ;;;       ^^
       ;;;       yx
       ;;;
       ;;;  after
-      ;;;      +--+--+    +--+--+         +--+--+    +--+--+    +--+--+    +--+--+
-      ;;;      | 4|------>| 5|------> ... | 8|------>| 1|------>| 2|------>| 3|#f|
-      ;;;      +--+--+    +--+--+         +--+--+    +--+--+    +--+--+    +--+--+
+      ;;;      +--+--+    +--+--+         +--+--+    +--+--+    +--+--+    +--+----+
+      ;;;      | 4|------>| 5|------> ... | 8|------>| 1|------>| 2|------>| 3| #f |
+      ;;;      +--+--+    +--+--+         +--+--+    +--+--+    +--+--+    +--+----+
       ;;;       ^                                     ^
       ;;;       x                                     y
       (let ([x (cons 1 (cons 2 (cons 3 (cons 4 (cons 5 (cons 6 (cons 7 (cons 8 '()))))))))])
@@ -4636,8 +4692,8 @@
 )
 
 (unless (memq (machine-type) '(arm32le tarm32le arm64le tarm64le arm64osx tarm64osx ; timestamp counter tends to be priviledged on Arm
-				       arm64nt tarm64nt
-                                       pb)) ; doesn't increment for pb
+                                       arm64ios tarm64ios arm64nt tarm64nt
+                                       pb pb32l pb32b pb64l pb64b tpb tpb32l tpb32b tpb64l tpb64b)) ; doesn't increment for pb
   (mat $read-time-stamp-counter
 
     (let ([t (#%$read-time-stamp-counter)])
@@ -4723,7 +4779,7 @@
     (define should-be-named-i (letrec ([f (let ([i (lambda (x) x)]) i)]) f))
     (define should-be-named-j (let ([f (letrec ([j (lambda (x) x)]) j)]) f))
     (define (result-should-be-named-mk-CP)
-      (let ([struct:CP (make-record-type-descriptor* 'CP #f #f #f #f 1 1)])
+      (let ([struct:CP (make-record-type-descriptor 'CP #f #f #f #f '(1 . 1))])
         (let ([mk-CP (record-constructor (make-record-constructor-descriptor
                                           struct:CP #f #f))])
           mk-CP)))
@@ -4815,17 +4871,17 @@
   (equal? (wrapper-procedure-data (make-arity-wrapper-procedure (lambda args args) 1 'data))
           'data)
 
-  (error? (set-wrapper-procedure!))
-  (error? (set-wrapper-procedure! (make-arity-wrapper-procedure (lambda args args) 1 #f)))
-  (error? (set-wrapper-procedure! 1 void))
-  (error? (set-wrapper-procedure! (lambda args args) void))
-  (error? (set-wrapper-procedure! (interpret '(lambda args args)) void))
+  (error? (set-wrapper-procedure-procedure!))
+  (error? (set-wrapper-procedure-procedure! (make-arity-wrapper-procedure (lambda args args) 1 #f)))
+  (error? (set-wrapper-procedure-procedure! 1 void))
+  (error? (set-wrapper-procedure-procedure! (lambda args args) void))
+  (error? (set-wrapper-procedure-procedure! (interpret '(lambda args args)) void))
   (let ([p (make-wrapper-procedure (lambda args args) 8 #f)])
-    (set-wrapper-procedure! p vector)
+    (set-wrapper-procedure-procedure! p vector)
     (equal? (p 1 2 3)
             '#(1 2 3)))
   (let ([p (make-arity-wrapper-procedure (lambda args args) 8 #f)])
-    (set-wrapper-procedure! p vector)
+    (set-wrapper-procedure-procedure! p vector)
     (equal? (p 1 2 3)
             '#(1 2 3)))
 
@@ -5381,21 +5437,21 @@
                        (unless (null? objs)
                          (let ([v (car objs)])
                            (unless (= (#%$fxaddress v) (car addrs))
-                             (error 'immobile "address changed: ~s" v))
+                             (errorf 'immobile "address changed: ~s" v))
                            (cond
                              [(box? v)
                               (unless (eq? (unbox v) (cdr objs))
-                                (error 'immobile "bad box content"))]
+                                (errorf 'immobile "bad box content"))]
                              [(vector? v)
                               (let loop ([j 0])
                                 (unless (= j (vector-length v))
                                   (unless (eq? (cdr objs) (vector-ref v j))
-                                    (error 'immobile "bad vector content"))
+                                    (errorf 'immobile "bad vector content"))
                                   (loop (add1 j))))]
                              [(bytevector? v)
                               (void)]
                              [else
-                              (error 'immobile "bad object: ~s" v)]))
+                              (errorf 'immobile "bad object: ~s" v)]))
                          (check (cdr objs) (cdr addrs))))
                      (loop (sub1 i) objs addrs)))]))))
          (thread-loop (sub1 t))))
@@ -5455,4 +5511,76 @@
                (and (equal? (r-y ((car sels) rs))
                             "new-string-to-go")
                     (sel-loop (cdr sels))))]))))
+  )
+
+(mat $begin-unsafe
+  (equivalent-expansion?
+   (parameterize ([#%$suppress-primitive-inlining #f])
+     (expand/optimize '(lambda (x)
+                         (import (only $system $begin-unsafe))
+                         (let () (fx+ 2 ($begin-unsafe (fx+ 1 x)))))))
+   (if (fx= (optimize-level) 3)
+       '(lambda (x) (#3%fx+ 2 (#3%fx+ 1 x)))
+       '(lambda (x) (#2%fx+ 2 (#3%fx+ 1 x)))))
+  )
+
+(mat black-box
+  (begin
+    ;; detect whether `expt` work is done by counting allocation
+    (define-syntax does-the-work-at-run-time?
+      (syntax-rules ()
+        [(_ opt? e)
+         (equal?
+          opt?
+          (let ([SLOP 100])
+            (with-interrupts-disabled
+             (let ([before (bytes-allocated)])
+               e
+               (let ([after (bytes-allocated)])
+                 (> after (+ before SLOP)))))))]))
+    #t)
+
+  (does-the-work-at-run-time?
+   (or (not (enable-cp0))
+       (#%$suppress-primitive-inlining))
+   (let ([to-power 100])
+     (let loop ([i 1000])
+       (unless (zero? i)
+         ;; call to `expt` is likely optimized away entirely, since there's
+         ;; no effect and the result is unused:
+         (expt 2 to-power)
+         (loop (sub1 i))))))
+
+  (does-the-work-at-run-time?
+   (or (not (enable-cp0))
+       (#%$suppress-primitive-inlining))
+   (let ([to-power 100])
+     (let loop ([i 1000])
+       (unless (zero? i)
+         ;; likely optimized to just returning a folded constant, instead of
+         ;; calling `expt` each iteration:
+         (black-box (expt 2 to-power))
+         (loop (sub1 i))))))
+
+  (does-the-work-at-run-time?
+   (not (and (enable-cp0)
+             (not (#%$suppress-primitive-inlining))
+             (eqv? 3 (optimize-level))))
+   (let ([to-power (black-box 100)])
+     (let loop ([i 1000])
+       (unless (zero? i)
+         ;; in safe mode, likely calls `expt`, because `to-power` is not known
+         ;; to be a number, but likely optimized away with `(optimize-level 3)`:
+         (expt 2 to-power)
+         (loop (sub1 i))))))
+
+  (does-the-work-at-run-time?
+   #t
+   (let ([to-power (black-box 100)])
+   (let loop ([i 1000])
+     (unless (zero? i)
+       ;; arithmetic really performed every iteration, since `to-power` value
+       ;; is assumed unknown, and `expt` result is assumed to be used
+       (black-box (expt 2 to-power))
+       (loop (sub1 i))))))
   )

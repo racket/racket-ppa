@@ -619,6 +619,41 @@ choice is
 Therefore, a gamma distribution with @racket[shape = 0] behaves like @racket[(delta-dist 0)].
 }
 
+@subsection{Weibull Distributions}
+
+@margin-note{Wikipedia:
+             @hyperlink["http://wikipedia.org/wiki/Weibull_distribution"]{Weibull Distribution}.}
+@deftogether[(@defidform[Weibull-Dist]
+              @defproc[(weibull-dist [shape Positive-Real] [location Real 0] [scale Real 1]) Weibull-Dist]
+              @defproc[(weibull-dist-shape [k Weibull-Dist]) Positive-Flonum]
+              @defproc[(weibull-dist-location [d Weibull-Dist]) Real]
+              @defproc[(weibull-dist-scale [d Weibull-Dist]) Real])]{
+Represents the Weibull distribution family parameterized by shape, location and scale.
+
+@examples[#:eval untyped-eval
+                 (plot (for/list ([k  (in-list '(1/2 1 1 5))]
+                                  [d  (in-list '(0 0 3/2 0))]
+                                  [s  (in-list '(1 1 2 1))]
+                                  [i  (in-naturals)])
+                         (function (distribution-pdf (weibull-dist k d s))
+                                   #:color i #:label (if (and (= d 0) (= s 1))
+                                                         (format "Weibull(~a)" k)
+                                                         (format "Weibull(~a,~a,~a)" k d s))))
+                       #:x-min 0 #:x-max 6 #:y-label "density"
+                       #:legend-anchor 'top-right)
+                 
+                 (plot (for/list ([k  (in-list '(1/2 1 1 5))]
+                                  [d  (in-list '(0 0 3/2 0))]
+                                  [s  (in-list '(1 1 2 1))]
+                                  [i  (in-naturals)])
+                         (function (ordered-dist-cdf (weibull-dist k d s))
+                                   #:color i #:label (if (and (= d 0) (= s 1))
+                                                         (format "Weibull(~a)" k)
+                                                         (format "Weibull(~a,~a,~a)" k d s))))
+                       #:x-min 0 #:x-max 10 #:y-label "probability"
+                       #:legend-anchor 'bottom-right)]
+}
+
 @subsection{Logistic Distributions}
 
 @margin-note{Wikipedia:
@@ -675,6 +710,39 @@ which is the square of standard deviation. Construct normal distributions from v
                          (function (ordered-dist-cdf (normal-dist μ σ))
                                    #:color i #:label (format "N(~a,~a)" μ σ)))
                        #:x-min -5 #:x-max 5 #:y-label "probability")]
+}
+
+@subsection{Student-t Distributions}
+
+@margin-note{Wikipedia:
+             @hyperlink["https://en.wikipedia.org/wiki/Student's_t-distribution"]{Student-t Distribution}.}
+@deftogether[(@defidform[Student-t-Dist]
+              @defproc[(student-t-dist [freedom Positive-Real] [mean Real 0] [scale Real 1]) Student-t-Dist]
+              @defproc[(student-t-dist-freedom [d Student-t-Dist]) Positive-Flonum]
+              @defproc[(student-t-dist-mean [d Student-t-Dist]) Real]
+              @defproc[(student-t-dist-scale [d Student-t-Dist]) Real])]{
+Represents the student-t distribution family parameterized by degree of freedom, mean (also called ``location'') and scale.
+
+@examples[#:eval untyped-eval
+                 (plot (for/list ([ν  (in-list '(1 2 3 5.5))]
+                                  [μ  (in-list '(0 0 0 2.3))]
+                                  [σ  (in-list '(1 1 1 0.4))]
+                                  [i  (in-naturals)])
+                         (function (distribution-pdf (student-t-dist ν μ σ))
+                                   #:color i #:label (if (and (= μ 0) (= σ 1))
+                                                         (format "Stud-t(~a)" ν)
+                                                         (format "Stud-t(~a,~a,~a)" ν μ σ))))
+                       #:x-min -5 #:x-max 10 #:y-label "density")
+                 
+                 (plot (for/list ([ν  (in-list '(1 2 3 5.5))]
+                                  [μ  (in-list '(0 0 0 2.3))]
+                                  [σ  (in-list '(1 1 1 0.4))]
+                                  [i  (in-naturals)])
+                         (function (ordered-dist-cdf (student-t-dist ν μ σ))
+                                   #:color i #:label (if (and (= μ 0) (= σ 1))
+                                                         (format "Stud-t(~a)" ν)
+                                                         (format "Stud-t(~a,~a,~a)" ν μ σ))))
+                       #:x-min -5 #:x-max 10 #:y-label "probability")]
 }
 
 @subsection{Triangular Distributions}

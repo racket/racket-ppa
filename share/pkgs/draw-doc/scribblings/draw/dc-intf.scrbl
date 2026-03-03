@@ -405,7 +405,7 @@ See also @method[dc<%> set-smoothing] for information on the
 @defmethod[(draw-text [text string?]
                       [x real?]
                       [y real?]
-                      [combine? any/c #f]
+                      [combine-mode any/c #f]
                       [offset exact-nonnegative-integer? 0]
                       [angle real? 0])
            void?]{
@@ -421,12 +421,17 @@ The @racket[text] string is drawn starting from the @racket[offset]
  character, and continuing until the end of @racket[text] or the first
  null character.
 
-If @racket[combine?] is @racket[#t], then @racket[text] may be
- measured with adjacent characters combined to ligature glyphs, with
- Unicode combining characters as a single glyph, with kerning, with
- right-to-left rendering of characters, etc. If @racket[combine?] is
- @racket[#f], then the result is the same as if each character is
- measured separately, and Unicode control characters are ignored.
+If @racket[combine-mode] is @racket[#f], then the result is the same
+ as if each character is drawn separately, and Unicode control
+ characters are ignored. If @racket[combine-mode] is
+ @racket['grapheme], then the result is the same as if each Unicode
+ grapheme cluster is drawn separately, but multiple characters of
+ @racket[text] that form a grapheme cluster may be drawn as a single
+ glyph. Otherwise, for @racket[combine-mode] as any true value except
+ @racket['grapheme], @racket[text] may be drawn with adjacent
+ characters combined to form ligature glyphs, with Unicode combining
+ characters as a single glyph, with kerning, with right-to-left
+ rendering of characters, etc.
 
 The string is rotated by @racket[angle] radians counter-clockwise. If
  @racket[angle] is not zero, then the text is always drawn in
@@ -443,7 +448,27 @@ See also @method[dc<%> set-text-foreground], @method[dc<%>
 
 @|DrawSizeNote|
 
+@history[#:changed "1.20" @elem{Changed to treat @racket[combine-mode] as @racket['graheme]
+                                different than other true values.}]}
+
+
+@defmethod[(end-alpha)
+           void?]{
+
+Ends a drawing sequence started by @method[dc<%> start-alpha]. If no
+such drawing sequence is in progress, @method[dc<%> end-alpha] has no
+effect.
+
+The @racket[dc<%>] interface has an implementation of this method
+that implementing classes should override. The @racket[dc<%>]
+implementation has no effect.
+
+@history[#:added "1.21"
+         #:changed "1.22" @elem{Added an implementation of the method to
+                                the interface.}]
+
 }
+
 
 @defmethod[(end-doc)
            void?]{
@@ -715,7 +740,7 @@ set-text-background].
 
 @defmethod[(get-text-extent [string string?]
                             [font (or/c (is-a?/c font%) #f) #f]
-                            [combine? any/c #f]
+                            [combine-mode any/c #f]
                             [offset exact-nonnegative-integer? 0])
            (values (and/c real? (not/c negative?)) 
                    (and/c real? (not/c negative?))
@@ -754,12 +779,17 @@ The returned width and height define a rectangle is that guaranteed to
  depending on the whims of the font designer and the platform-specific
  font-scaling mechanism.
 
-If @racket[combine?] is @racket[#t], then @racket[text] may be drawn
- with adjacent characters combined to ligature glyphs, with Unicode
+If @racket[combine-mode] is @racket[#f], then the result is the same
+ as if each character is measured separately, and Unicode control
+ characters are ignored. If @racket[combine-mode] is
+ @racket['grapheme], then the result is the same as if each Unicode
+ grapheme cluster is measured separately, but multiple characters of
+ @racket[text] that form a grapheme cluster may be measured as a
+ single glyph. Otherwise, for @racket[combine-mode] as any true value
+ except @racket['grapheme], @racket[text] may be measured with
+ adjacent characters combined to form ligature glyphs, with Unicode
  combining characters as a single glyph, with kerning, with
- right-to-left ordering of characters, etc. If @racket[combine?] is
- @racket[#f], then the result is the same as if each character is
- drawn separately, and Unicode control characters are ignored.
+ right-to-left rendering of characters, etc.
 
 Unlike most methods, this method can be called for a
  @racket[bitmap-dc%] object without a bitmap installed.
@@ -769,7 +799,9 @@ Unlike most methods, this method can be called for a
  #:eval (make-base-eval '(require racket/class racket/draw))
  (define text-size-dc (new bitmap-dc% [bitmap (make-object bitmap% 1 1)]))
  (send text-size-dc get-text-extent "Pickles")]
-}
+
+@history[#:changed "1.20" @elem{Changed to treat @racket[combine-mode] as @racket['graheme]
+                                different than other true values.}]}
 
 
 @defmethod[(get-text-foreground)
@@ -900,7 +932,11 @@ to completely transparent (i.e., invisible) drawing, and @racket[1.0]
 corresponds to completely opaque drawing. For intermediate values,
 drawing is blended with the existing content of the drawing context.
 A color (e.g. for a brush) also has an alpha value; it is combined
-with the drawing context's alpha by multiplying.}
+with the drawing context's alpha by multiplying.
+
+See also @method[dc<%> start-alpha].
+
+}
 
 
 @defmethod*[([(set-background [color (is-a?/c color%)])
@@ -1160,6 +1196,36 @@ Determines how text is drawn:
 
 Sets the draw context's transformation. See @method[dc<%>
 get-transformation] for information about @racket[t].}
+
+@defmethod[(start-alpha [opacity (real-in 0 1)])
+           void?]{
+
+Starts a compositing drawing sequence that is not rendered until
+@method[dc<%> end-alpha] is called. At that point, the accumulated
+sequence is conceptually rendered to a separate context, and then
+transferred at once with @racket[opacity] times the current opacity as
+produced by @method[dc<%> get-alpha]. The @method[dc<%> start-alpha]
+call meanwhile sets the current opacity to @racket[1.0], and
+@method[dc<%> end-alpha] restores the drawing context's opacity to the
+setting before @method[dc<%> start-alpha].
+
+This effect is different than using @method[dc<%> set-alpha] (times
+the current @method[dc<%> get-alpha] result) in the case that drawing
+between @method[dc<%> start-alpha] and @method[dc<%> end-alpha]
+produces overlapping output. In that case, using @method[dc<%>
+set-alpha] would affect the drawing operations separately, while
+@method[dc<%> start-alpha] creates an opacity adjustment on the overlapped
+result, instead.
+
+The @racket[dc<%>] interface has an implementation of this method
+that implementing classes should override. The @racket[dc<%>]
+implementation has no effect.
+
+@history[#:added "1.21"
+         #:changed "1.22" @elem{Added an implementation of the method to
+                                the interface.}]
+
+}
 
 
 @defmethod[(start-doc [message string?])

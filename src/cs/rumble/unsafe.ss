@@ -33,6 +33,7 @@
 (define unsafe-fxxor (unsafe-primitive fxxor))
 (define unsafe-fxnot (unsafe-primitive fxnot))
 (define unsafe-fxrshift (unsafe-primitive fxarithmetic-shift-right))
+(define unsafe-fxrshift/logical (unsafe-primitive fxsrl))
 (define unsafe-fxlshift (unsafe-primitive fxarithmetic-shift-left))
 (define unsafe-fxlshift/wraparound (unsafe-primitive fxsll/wraparound))
 (define unsafe-fxpopcount (unsafe-primitive fxpopcount))
@@ -81,12 +82,22 @@
 (define unsafe-flsqrt (unsafe-primitive flsqrt))
 (define unsafe-flexpt (unsafe-primitive flexpt))
 
+(define unsafe-flbit-field (unsafe-primitive flbit-field))
+
 (define (unsafe-flrandom gen) (pseudo-random-generator-next! gen))
 
 (define unsafe-vector*-length (unsafe-primitive vector-length))
 (define unsafe-vector*-ref (unsafe-primitive vector-ref))
 (define unsafe-vector*-set! (unsafe-primitive vector-set!))
 (define unsafe-vector*-cas! (unsafe-primitive vector-cas!))
+(define unsafe-vector*-append (unsafe-primitive vector-append))
+(define unsafe-vector*-set/copy (unsafe-primitive vector-set/copy))
+
+(define unsafe-vector*-copy
+  (case-lambda
+   [(vec) ((unsafe-primitive vector-copy) vec)]
+   [(vec start) ((unsafe-primitive vector-copy) vec start (fx- ((unsafe-primitive vector-length) vec) start))]
+   [(vec start end) ((unsafe-primitive vector-copy) vec start (fx- end start))]))
 
 (define (unsafe-struct*-cas! s k old new)
   (#3%$record-cas! s k old new))
@@ -122,62 +133,47 @@
 
 (define (unsafe-s16vector-ref s16 k)
   (let* ([cptr (unsafe-struct*-ref s16 0)]
-         [mem (cpointer-memory cptr)]
          [k (fx* k 2)])
-    (if (bytes? mem)
-        (bytevector-s16-native-ref mem k)
-        (foreign-ref 'integer-16 mem k))))
+    (ftype-any-ref integer-16 () (cpointer-fptr cptr) k)))
 (define (unsafe-s16vector-set! s16 k v)
   (let* ([cptr (unsafe-struct*-ref s16 0)]
-         [mem (cpointer-memory cptr)]
          [k (fx* k 2)])
-    (if (bytes? mem)
-        (bytevector-s16-native-set! mem k v)
-        (foreign-set! 'integer-16 mem k v))))
+    (ftype-any-set! integer-16 () (cpointer-fptr cptr) k v)))
 
 (define (unsafe-u16vector-ref u16 k)
   (let* ([cptr (unsafe-struct*-ref u16 0)]
-         [mem (cpointer-memory cptr)]
          [k (fx* k 2)])
-    (if (bytes? mem)
-        (bytevector-u16-native-ref mem k)
-        (foreign-ref 'unsigned-16 mem k))))
+    (ftype-any-ref unsigned-16 () (cpointer-fptr cptr) k)))
 (define (unsafe-u16vector-set! u16 k v)
   (let* ([cptr (unsafe-struct*-ref u16 0)]
-         [mem (cpointer-memory cptr)]
          [k (fx* k 2)])
-    (if (bytes? mem)
-        (bytevector-u16-native-set! mem k v)
-        (foreign-set! 'unsigned-16 mem k v))))
+    (ftype-any-set! unsigned-16 () (cpointer-fptr cptr) k v)))
 
 (define (unsafe-f64vector-ref f64 k)
   (let* ([cptr (unsafe-struct*-ref f64 0)]
-         [mem (cpointer-memory cptr)]
          [k (fx* k 8)])
-    (if (bytes? mem)
-        (bytevector-ieee-double-native-ref mem k)
-        (foreign-ref 'double mem k))))
+    (ftype-any-ref double () (cpointer-fptr cptr) k)))
 (define (unsafe-f64vector-set! f64 k v)
   (let* ([cptr (unsafe-struct*-ref f64 0)]
-         [mem (cpointer-memory cptr)]
          [k (fx* k 8)])
-    (if (bytes? mem)
-        (bytevector-ieee-double-native-set! mem k v)
-        (foreign-set! 'double mem k v))))
+    (ftype-any-set! double () (cpointer-fptr cptr) k v)))
 
 ;; FIXME
 (define (unsafe-f80vector-ref f80 k)
   (let* ([cptr (unsafe-struct*-ref f80 0)]
-         [mem (cpointer-memory cptr)])
-    (if (bytes? mem)
-        (bytevector-ieee-double-native-ref mem k)
-        (foreign-ref 'double mem k))))
+         [k (fx* k 8)])
+    (ftype-any-ref double () (cpointer-fptr cptr) k)))
 (define (unsafe-f80vector-set! f80 k v)
   (let* ([cptr (unsafe-struct*-ref f80 0)]
-         [mem (cpointer-memory cptr)])
-    (if (bytes? mem)
-        (bytevector-ieee-double-native-set! mem k v)
-        (foreign-set! 'double mem k v))))
+         [k (fx* k 8)])
+    (ftype-any-set! double () (cpointer-fptr cptr) k v)))
+
+(define unsafe-stencil-vector (unsafe-primitive stencil-vector))
+(define unsafe-stencil-vector-length (unsafe-primitive stencil-vector-length))
+(define unsafe-stencil-vector-mask (unsafe-primitive stencil-vector-mask))
+(define unsafe-stencil-vector-ref (unsafe-primitive stencil-vector-ref))
+(define unsafe-stencil-vector-set! (unsafe-primitive stencil-vector-set!))
+(define unsafe-stencil-vector-update (unsafe-primitive stencil-vector-update))
 
 (define unsafe-stencil-vector (unsafe-primitive stencil-vector))
 (define unsafe-stencil-vector-length (unsafe-primitive stencil-vector-length))

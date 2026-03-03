@@ -12,7 +12,7 @@
          db/private/generic/prepared
          "message.rkt"
          "dbsystem.rkt"
-         (only-in "util.rkt" pg-custom-type?))
+         (only-in "util.rkt" postgresql-connection<%>))
 (provide connection%
          password-hash)
 
@@ -43,11 +43,16 @@
                   ;; custodian-b : (U #f (custodian-box Boolean))
                   ;; If present, should have same custodian as underlying
                   ;; ports. Useful because SSL obscures port closure.
-                  custodian-b)
+                  custodian-b
+                  ;; connect&attach-proc : connection% -> Boolean
+                  ;; Used to establish a new connection to the server
+                  ;; when issuing cancel requests.
+                  connect&attach-proc)
     (init-field [dbsystem dbsystem/integer-datetimes]) ;; see connect:after-auth
     (define inport #f)
     (define outport #f)
     (define process-id #f)
+    (define secret-key #f)
     (define integer-datetimes? 'unknown)  ;; see connect:after-auth
 
     (inherit call-with-lock
@@ -118,18 +123,18 @@
           (check-ready-for-query fsym #f))))
 
     ;; recv-message : symbol -> message
-    (define/private (recv-message fsym)
+    (define/private (recv-message fsym [error-info null])
       (let ([r (raw-recv)])
         (cond [(ErrorResponse? r)
                ;; No need to check for FATAL errors here and disconnect, because
                ;; followed by EOF, handled by check-ready-for-query.
                (check-ready-for-query fsym #t)
-               (raise-backend-error fsym r)]
+               (raise-backend-error fsym r error-info)]
               [(or (NoticeResponse? r)
                    (NotificationResponse? r)
                    (ParameterStatus? r))
                (handle-async-message fsym r)
-               (recv-message fsym)]
+               (recv-message fsym error-info)]
               [else r])))
 
     ;; raw-recv : -> message
@@ -203,6 +208,34 @@
                               [else seen?])))
                     #f
                     #f))))))))
+
+    (define/public (cancel)
+      (define conn
+        (new this%
+             [notice-handler void]
+             [notification-handler void]
+             [allow-cleartext-password? allow-cleartext-password?]
+             [custodian-b (make-custodian-box (current-custodian) #t)]
+             [connect&attach-proc (lambda (_)
+                                    (error 'connect&attach "nesting not allowed"))]))
+      (with-handlers ([exn:fail? (lambda (e)
+                                   (send conn disconnect* #f)
+                                   (raise e))])
+        (connect&attach-proc conn)
+        (send conn -send-cancel process-id secret-key)
+        (send conn disconnect* #f)))
+
+    (define/public (-send-cancel other-process-id other-secret-key)
+      (when (or process-id secret-key)
+        (error 'cancel "may not be called on real connections"))
+      (call-with-lock 'cancel
+        (lambda ()
+          (send-message (make-CancelRequest other-process-id other-secret-key))
+          ;; Wait for the server to close the connection, which is how
+          ;; we know that it has received the cancel request.
+          (define resp (recv-message 'cancel))
+          (unless (eof-object? resp)
+            (error/internal 'cancel (format "unexpected response to cancel message: ~e" resp))))))
 
     ;; == Connection management
 
@@ -298,11 +331,44 @@
                                  #:channel-binding (ssl-port? inport)))
                   (connect:auth/scram "SCRAM-SHA-256" scram)
                   (connect:expect-auth username password local?)]
+                 [(and (member "OAUTHBEARER" methods) (or local? (ssl-port? inport)))
+                  (connect:auth/oauthbearer "OAUTHBEARER" password)]
                  [else
-                  (error/no-support 'postgresql-connect
-                                    (format "SASL authentication ~a" methods))])]
+                  (error 'postgresql-connect
+                         "no supported SASL authentication mechanism~a"
+                         (apply string-append
+                          (for/list ([method (in-list methods)])
+                            (format "\n  server offered: ~s, ~a"
+                                    method
+                                    (case method
+                                      [("SCRAM-SHA-256-PLUS") "requires SSL"]
+                                      [("SCRAM-SHA-256") "supported"]
+                                      [("OAUTHBEARER") "requires local or SSL"]
+                                      [else "unsupported"])))))])]
+          [(NegotiateProtocolVersion major minor unsupported-options)
+           (unless (and (= 3 major) (null? unsupported-options))
+             (error/comm 'postgresql-connect "during authentication"))
+           (connect:expect-auth username password local?)]
           ;; ErrorResponse handled by recv-message
           [_ (error/comm 'postgresql-connect "during authentication")])))
+
+    (define/private (connect:auth/oauthbearer method password)
+      (define msg
+        (cond [password (format "n,,\1auth=Bearer ~a\1\1" password)]
+              [else (format "n,,\1auth=\1\1")]))
+      (send-message (make-SASLInitialResponse method msg))
+      (match (recv-message 'postgresql-connect)
+        [(AuthenticationOk)
+         (connect:expect-ready-for-query)]
+        [(AuthenticationSASLContinue content)
+         ;; Rejected, content contains error info as JSON object
+         (send-message (make-SASLResponse "\1"))
+         (define error-info (list (cons 'auth/oauthbearer content)))
+         ;; The server should now send an ErrorResponse. If so, it is enhanced
+         ;; with info from server. If not, raise fallback error.
+         (void (recv-message 'postgresql-connect error-info))
+         (error 'postgresql-connect "authentication failed (OAUTHBEARER)")]
+        [_ (error/comm 'postgresql-connect "during authentication")]))
 
     (define/private (connect:auth/scram method scram)
       (send-message (make-SASLInitialResponse method (sasl-next-message scram)))
@@ -328,6 +394,7 @@
            (connect:after-auth)]
           [(struct BackendKeyData (pid secret))
            (set! process-id pid)
+           (set! secret-key secret)
            (connect:expect-ready-for-query)]
           [_
            (error/comm 'postgresql-connect "after authentication")])))
@@ -581,11 +648,15 @@
     (define/private (prepare1:describe-params fsym)
       (match (recv-message fsym)
         [(struct ParameterDescription (param-typeids)) param-typeids]
+        ['too-many-parameters
+         (error fsym "query has more parameters than the protocol allows")]
         [other-r (prepare1:error fsym other-r)]))
 
     (define/private (prepare1:describe-result fsym)
       (match (recv-message fsym)
         [(struct RowDescription (field-dvecs)) field-dvecs]
+        ['too-many-fields
+         (error fsym "query has more result fields than the protocol allows")]
         [(struct NoData ()) null]
         [other-r (prepare1:error fsym other-r)]))
 
@@ -770,7 +841,7 @@
 ;; ========================================
 
 ;; md5-password : string (U string (list 'hash string)) bytes -> string
-;; Compute the MD5 hash of a password in the form expected by the PostgreSQL 
+;; Compute the MD5 hash of a password in the form expected by the PostgreSQL
 ;; backend.
 (define (md5-password user password salt)
   (let ([hash
@@ -788,8 +859,8 @@
 ;; ========================================
 
 ;; raise-backend-error : symbol ErrorResponse -> raises exn
-(define (raise-backend-error who r)
-  (define props (ErrorResponse-properties r))
+(define (raise-backend-error who r [extra-info null])
+  (define props (append (ErrorResponse-properties r) extra-info))
   (define code (cdr (assq 'code props)))
   (define message (cdr (assq 'message props)))
   (raise-sql-error who code message props))

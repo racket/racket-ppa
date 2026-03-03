@@ -6,8 +6,10 @@
 (require string-constants
          racket/class
          racket/string
+         racket/promise
          mred/mred-sig
          syntax-color/module-lexer
+         syntax-color/racket-lexer
          syntax-color/racket-indentation
          syntax-color/racket-navigation
          "collapsed-snipclass-helpers.rkt"
@@ -373,11 +375,21 @@
     tabify-on-return?
     tabify
     tabify-selection
+    tabify-selection/reverse-choices
     tabify-all
     insert-return
-    box-comment-out-selection
+
     comment-out-selection
+    box-comment-out-selection
+    region-comment-out-selection
+    uncomment-box/selection
     uncomment-selection
+    uncomment-selection/region
+    uncomment-selection/line
+    uncomment-selection/box
+    commented-out/line?
+    commented-out/region?
+
     get-forward-sexp
     remove-sexp
     forward-sexp
@@ -666,6 +678,10 @@
              (when (< first-para end-para)
                (end-busy-cursor)))))))
 
+    (define/public (tabify-selection/reverse-choices [start-pos (get-start-position)]
+                                                     [end-pos (get-end-position)])
+      (tabify-selection start-pos end-pos))
+
     (define/public (tabify-all) (tabify-selection 0 (last-position)))
     (define/public (insert-return)
       (begin-edit-sequence #t #f)
@@ -702,109 +718,282 @@
                          last-para)))
             last-para)))
 
-    (define/public (comment-out-selection [start-pos (get-start-position)]
-                                          [end-pos (get-end-position)])
+    (define/public (region-comment-out-selection [start-pos (get-start-position)]
+                                                 [end-pos (get-end-position)]
+                                                 #:start [start "#|"]
+                                                 #:end [end "|#"]
+                                                 #:continue [continue ""]
+                                                 #:padding [padding "  "])
       (begin-edit-sequence)
-      (let ([first-pos-is-first-para-pos?
-             (= (paragraph-start-position (position-paragraph start-pos))
-                start-pos)])
-        (let* ([first-para (position-paragraph start-pos)]
-               [last-para (calc-last-para end-pos)])
-          (let para-loop ([curr-para first-para])
-            (when (<= curr-para last-para)
-              (let ([first-on-para (paragraph-start-position curr-para)])
-                (insert #\; first-on-para)
-                (para-loop (add1 curr-para))))))
-        (when first-pos-is-first-para-pos?
-          (set-position
-           (paragraph-start-position (position-paragraph (get-start-position)))
-           (get-end-position))))
+      (define start-para (position-paragraph start-pos))
+      (define end-para (position-paragraph end-pos))
+      (insert end end-pos)
+      (insert padding end-pos)
+      (insert padding start-pos)
+      (insert start start-pos)
+      (for ([i (in-range (+ start-para 1) end-para)])
+        (define para-start (paragraph-start-position i))
+        (insert padding para-start)
+        (insert continue para-start))
+      (end-edit-sequence)
+      #t)
+
+    (define/public (comment-out-selection [start-pos (get-start-position)]
+                                          [end-pos (get-end-position)]
+                                          #:start [start-comment ";"]
+                                          #:padding [padding ""])
+      (begin-edit-sequence)
+      (define first-pos-is-first-para-pos?
+        (= (paragraph-start-position (position-paragraph start-pos))
+           start-pos))
+      (define first-para (position-paragraph start-pos))
+      (define last-para (calc-last-para end-pos))
+      (let para-loop ([curr-para first-para])
+        (when (<= curr-para last-para)
+          (define first-on-para (paragraph-start-position curr-para))
+          (insert padding first-on-para)
+          (insert start-comment first-on-para)
+          (para-loop (add1 curr-para))))
+      (when first-pos-is-first-para-pos?
+        (set-position
+         (paragraph-start-position (position-paragraph (get-start-position)))
+         (get-end-position)))
       (end-edit-sequence)
       #t)
 
     (define/public (box-comment-out-selection [_start-pos 'start]
                                               [_end-pos 'end])
-      (let ([start-pos (if (eq? _start-pos 'start)
-                           (get-start-position)
-                           _start-pos)]
-            [end-pos (if (eq? _end-pos 'end)
-                         (get-end-position)
-                         _end-pos)])
-        (begin-edit-sequence)
-        (split-snip start-pos)
-        (split-snip end-pos)
-        (let* ([cb (instantiate comment-box:snip% ())]
-               [text (send cb get-editor)])
-          (let loop ([snip (find-snip start-pos 'after-or-none)])
-            (cond
-              [(not snip) (void)]
-              [((get-snip-position snip) . >= . end-pos) (void)]
-              [else
-               (send text insert (send snip copy)
-                     (send text last-position)
-                     (send text last-position))
-               (loop (send snip next))]))
-          (delete start-pos end-pos)
-          (insert cb start-pos)
-          (set-position start-pos start-pos))
-        (end-edit-sequence)
-        #t))
+      (define start-pos (if (eq? _start-pos 'start)
+                            (get-start-position)
+                            _start-pos))
+      (define end-pos (if (eq? _end-pos 'end)
+                          (get-end-position)
+                          _end-pos))
+      (begin-edit-sequence)
+      (split-snip start-pos)
+      (split-snip end-pos)
+      (define cb (new comment-box:snip%))
+      (define text (send cb get-editor))
+      (let loop ([snip (find-snip start-pos 'after-or-none)])
+        (cond
+          [(not snip) (void)]
+          [((get-snip-position snip) . >= . end-pos) (void)]
+          [else
+           (send text insert (send snip copy)
+                 (send text last-position)
+                 (send text last-position))
+           (loop (send snip next))]))
+      (delete start-pos end-pos)
+      (insert cb start-pos)
+      (set-position start-pos start-pos)
+      (end-edit-sequence)
+      #t)
 
     ;; uncomment-box/selection : -> void
     ;; uncomments a comment box, if the focus is inside one.
     ;; otherwise, calls uncomment selection to uncomment
     ;; something else.
     (inherit get-focus-snip)
-    (define/public (uncomment-box/selection)
+    (define/public (uncomment-box/selection #:start [start ";"] #:padding [padding ""])
       (begin-edit-sequence)
-      (let ([focus-snip (get-focus-snip)])
-        (cond
-          [(not focus-snip) (uncomment-selection)]
-          [(is-a? focus-snip comment-box:snip%)
-           (extract-contents
-            (get-snip-position focus-snip)
-            focus-snip)]
-          [else (uncomment-selection)]))
+      (define focus-snip (get-focus-snip))
+      (cond
+        [(not focus-snip) (uncomment-selection #:start start #:padding padding)]
+        [(is-a? focus-snip comment-box:snip%)
+         (extract-contents
+          (get-snip-position focus-snip)
+          focus-snip)]
+        [else (uncomment-selection #:start start #:padding padding)])
       (end-edit-sequence)
       #t)
 
     (define/public (uncomment-selection [start-pos (get-start-position)]
-                                        [end-pos (get-end-position)])
-      (let ([snip-before (find-snip start-pos 'before-or-none)]
-            [snip-after (find-snip start-pos 'after-or-none)])
+                                        [end-pos (get-end-position)]
+                                        #:start [start-comment ";"]
+                                        #:padding [padding ""])
+      (or (uncomment-selection/box start-pos end-pos)
+          (uncomment-selection/line start-pos end-pos
+                                    #:start start-comment
+                                    #:padding padding))
+      #t)
 
+    (define/public (uncomment-selection/region [start-pos (get-start-position)]
+                                               [end-pos (get-end-position)]
+                                               #:start [start "#|"]
+                                               #:end [end "|#"]
+                                               #:continue [continue ""]
+                                               #:padding [padding "  "])
+      (define info
+        (looks-region-commented start-pos end-pos
+                                #:start start
+                                #:end end
+                                #:continue continue
+                                #:padding padding))
+      (when info
         (begin-edit-sequence)
+        (for ([region-to-remove (in-list info)])
+          (delete (car region-to-remove) (cdr region-to-remove)))
+        (end-edit-sequence))
+      #t)
+
+    (define/public (uncomment-selection/line [start-pos (get-start-position)]
+                                             [end-pos (get-end-position)]
+                                             #:start [start-comment ";"]
+                                             #:padding [padding ""])
+      (begin-edit-sequence)
+      (define last-pos (last-position))
+      (define first-para (position-paragraph start-pos))
+      (define last-para (calc-last-para end-pos))
+      (for ([curr-para (in-range first-para (+ last-para 1))])
+        (define commented (looks-line-commented curr-para
+                                                #:start start-comment
+                                                #:padding padding))
+        (when commented
+          (delete (car commented) (cdr commented))))
+      (end-edit-sequence)
+      #t)
+
+    (define/public (uncomment-selection/box [start-pos (get-start-position)]
+                                            [end-pos (get-end-position)])
+      (define snip-before (find-snip start-pos 'before-or-none))
+      (define snip-after (find-snip start-pos 'after-or-none))
+      (begin-edit-sequence)
+      (begin0
         (cond
           [(and (= start-pos end-pos)
                 snip-before
                 (is-a? snip-before comment-box:snip%))
-           (extract-contents start-pos snip-before)]
+           (extract-contents start-pos snip-before)
+           #t]
           [(and (= start-pos end-pos)
                 snip-after
                 (is-a? snip-after comment-box:snip%))
-           (extract-contents start-pos snip-after)]
+           (extract-contents start-pos snip-after)
+           #t]
           [(and (= (+ start-pos 1) end-pos)
                 snip-after
                 (is-a? snip-after comment-box:snip%))
-           (extract-contents start-pos snip-after)]
-          [else
-           (let* ([last-pos (last-position)]
-                  [first-para (position-paragraph start-pos)]
-                  [last-para (calc-last-para end-pos)])
-             (let para-loop ([curr-para first-para])
-               (when (<= curr-para last-para)
-                 (let ([first-on-para
-                        (skip-whitespace  (paragraph-start-position curr-para)
-                                          'forward
-                                          #f)])
-                   (split-snip first-on-para)
-                   (when (and (< first-on-para last-pos)
-                              (char=? #\; (get-character first-on-para))
-                              (is-a? (find-snip first-on-para 'after-or-none) string-snip%))
-                     (delete first-on-para (+ first-on-para 1)))
-                   (para-loop (add1 curr-para))))))])
-        (end-edit-sequence))
-      #t)
+           (extract-contents start-pos snip-after)
+           #t]
+          [else #f])
+        (end-edit-sequence)))
+
+    (define/public (commented-out/line? [start-pos (get-start-position)]
+                                        [end-pos (get-end-position)]
+                                        #:start [start-comment ";"]
+                                        #:padding [padding ""])
+      (define first-para (position-paragraph start-pos))
+      (define last-para (calc-last-para end-pos))
+      (and (for/or ([curr-para (in-range first-para (+ last-para 1))])
+             (looks-line-commented curr-para
+                                   #:start start-comment
+                                   #:padding padding))
+           #t))
+
+    (define/public (commented-out/region? [start-pos (get-start-position)]
+                                          [end-pos (get-end-position)]
+                                          #:start [start "#|"]
+                                          #:end [end "|#"]
+                                          #:continue [continue ""])
+      (and (looks-region-commented start-pos end-pos
+                                   #:start start
+                                   #:end end
+                                   #:continue continue
+                                   #:padding "")
+           #t))
+
+    ;; -> (or/c (cons/c natural? natural?) #f)
+    ;; if #f, it doesn't look like the paragraph is commented out
+    ;; if a natural, it does, and the comment start at the result
+    (define/private (looks-line-commented curr-para
+                                          #:start start-comment
+                                          #:padding padding)
+      (define first-on-para
+        (skip-whitespace (paragraph-start-position curr-para)
+                         'forward
+                         #f))
+      (define last-on-para (paragraph-end-position curr-para))
+      (define end-of-potential-comment
+        (+ first-on-para (string-length start-comment)))
+      (cond
+        [(has-the-string-at? first-on-para start-comment)
+         (extend-region-with-padding (cons first-on-para end-of-potential-comment)
+                                     padding)]
+        [else #f]))
+
+    (define/private (looks-region-commented start-pos end-pos
+                                            #:start start
+                                            #:end end
+                                            #:continue continue
+                                            #:padding padding)
+      (define start-para (position-paragraph start-pos))
+      (define end-para (position-paragraph end-pos))
+      (define start-comment-pos
+        (find-string start 'forward
+                     (paragraph-start-position start-para)
+                     (paragraph-end-position start-para)))
+      (define end-comment-pos
+        (find-string end 'forward
+                     (paragraph-start-position end-para)
+                     (paragraph-end-position end-para)))
+      (cond
+        [(and start-comment-pos end-comment-pos)
+         (define middles
+           (for/list ([para (in-range (+ start-para 1) end-para)])
+             (define start-pos (paragraph-start-position para))
+             (define rgn
+               (and (has-the-string-at? start-pos continue)
+                    (cons start-pos (+ start-pos (string-length continue)))))
+             (and rgn (extend-region-with-padding rgn padding))))
+         (append
+          (list (extend-region-with-padding
+                 (cons end-comment-pos (+ end-comment-pos (string-length end)))
+                 padding
+                 #:prefix? #t))
+          (filter values middles)
+          (list (extend-region-with-padding
+                 (cons start-comment-pos (+ start-comment-pos (string-length start)))
+                 padding)))]
+        [else #f]))
+
+    (define/private (extend-region-with-padding region padding #:prefix? [prefix? #f])
+      (match-define (cons start end) region)
+      (cond
+        [prefix?
+         (define start-before-padding (- start (string-length padding)))
+         (cond
+           [(and (0 . <= . start-before-padding)
+                 (has-the-string-at? start-before-padding padding))
+            (cons start-before-padding end)]
+           [else region])]
+        [else
+         (define end-after-padding (+ end (string-length padding)))
+         (cond
+           [(has-the-string-at? end padding)
+            (cons start end-after-padding)]
+           [else region])]))
+
+    (define/private (has-the-string-at? start str)
+      (define end (+ start (string-length str)))
+      (split-snip start)
+      (split-snip end)
+      (define all-string-snips?
+        (let loop ([snip (find-snip start 'after-or-none)])
+          (cond
+            [snip
+             (define snip-pos (get-snip-position snip))
+             (cond
+               [(= snip-pos end) #t]
+               [(< snip-pos end)
+                (and (is-a? snip string-snip%)
+                     (loop (send snip next)))]
+               [else
+                (error 'racket.rkt::internal-error
+                       "went too far, but did a split-snip first which seems strange")])]
+            [else #t])))
+      (and all-string-snips?
+           (equal? (get-text start (+ start (string-length str)))
+                   str)))
 
     ;; extract-contents : number (is-a?/c comment-box:snip%) -> void
     ;; copies the contents of the comment-box-snip out of the snip
@@ -1178,27 +1367,28 @@
     (|{| |}|)))
 
 (define (wrap-get-token get-token- get-tabify-pref)
+  (define (set-type-sym type sym) (if (hash? type) (hash-set type 'type sym) sym))
+  (define (type-val type key) (and (hash? type) (hash-ref type key #f)))
   (define wrapped-get-token
     (cond
       [(procedure-arity-includes? get-token- 3)
        (λ (in offset mode)
          (define-values (lexeme type paren start end backup-delta new-mode)
-           (get-token- in offset mode))
+           (parameterize ([current-lexeme->semantic-type-guess (make-lexeme->semantic-type-guess get-tabify-pref)])
+             (get-token- in offset mode)))
          (cond
-           [(and (eq? type 'symbol)
-                 (string? lexeme)
-                 (get-head-sexp-type-from-prefs lexeme (get-tabify-pref)))
-            (values lexeme 'keyword paren start end backup-delta new-mode)]
+           [(memq (type-val type 'semantic-type-guess) '(keyword builtin))
+            (values lexeme (set-type-sym type 'keyword) paren start end backup-delta new-mode)]
            [else
             (values lexeme type paren start end backup-delta new-mode)]))]
       [else
        (λ (in)
-         (define-values (lexeme type paren start end) (get-token- in))
+         (define-values (lexeme type paren start end)
+           (parameterize ([current-lexeme->semantic-type-guess (make-lexeme->semantic-type-guess get-tabify-pref)])
+             (get-token- in)))
          (cond
-           [(and (eq? type 'symbol)
-                 (string? lexeme)
-                 (get-head-sexp-type-from-prefs lexeme (get-tabify-pref)))
-            (values lexeme 'keyword paren start end)]
+           [(memq (type-val type 'semantic-type-guess) '(keyword builtin))
+            (values lexeme (set-type-sym type 'keyword) paren start end)]
            [else
             (values lexeme type paren start end)]))]))
   (procedure-rename wrapped-get-token
@@ -1210,6 +1400,10 @@
 (define (get-head-sexp-type-from-prefs text pref)
   ((racket-tabify-table->head-sexp-type pref) text))
 
+(define (make-lexeme->semantic-type-guess get-tabify-pref)
+  (let ([lexeme->head-sexp-type/promise (delay (racket-tabify-table->head-sexp-type (get-tabify-pref)))])
+    (lambda (lexeme)
+      (and ((force lexeme->head-sexp-type/promise) lexeme) 'keyword))))
 
 ;; in-position? : text (list symbol) -> boolean
 ;; determines if the cursor is currently sitting in a particular
@@ -1294,9 +1488,11 @@
   (define open-len (if (string? open-brace) (string-length open-brace) 1))
   (send text begin-edit-sequence #t #f)
   (send text insert open-brace selection-start)
-  (define tok-type (send text classify-position selection-start))
+  (define tok-type (if (send text is-stopped?)
+                       #f
+                       (send text classify-position selection-start)))
   (when (or (not checkp)
-            (and (symbol? checkp) (eq? checkp tok-type))
+            (and (symbol? checkp) (equal? checkp tok-type))
             (and (procedure? checkp) (checkp tok-type)))
     (define hash-before?  ; tweak to detect and correctly close block comments #| ... |#
       ; Notice: This is racket-specific and despite the name of the file we should instead rely
@@ -1325,8 +1521,11 @@
               (= startpos (send text get-end-position)))
          (send text insert open-brace startpos (add1 startpos))
          (send text insert open-brace))]
-
-    [else  ; automatic-parens is enabled
+    ; from here automatic-parens is enabled
+    [(send text is-stopped?)
+     ;; when the colorer is stopped we just blindly insert both
+     (insert-brace-pair text open-brace close-brace)]
+    [else
      (define c (immediately-following-cursor text))
      (define cur-token
        (send text classify-position (send text get-start-position)))
@@ -1439,9 +1638,13 @@
     (send text begin-edit-sequence)
     (define start (send text get-start-position))
     (define stop (send text get-end-position))
-    (send text insert char start stop)
-    (when (and closer (preferences:get 'framework:automatic-parens))
-      (send text insert closer (+ start 1) (+ start 1)))
+    (cond
+      [(and closer (preferences:get 'framework:automatic-parens))
+       (send text insert closer stop stop)
+       (send text insert char start start)
+       (send text set-position (+ start 1))]
+      [else
+       (send text insert char start stop)])
     (send text end-edit-sequence)))
 
 (define (map-pairs-keybinding-functions keymap opener closer
@@ -1523,6 +1726,8 @@
                      (λ (x) (send x select-up-sexp)))
   (add-edit-function "tabify-at-caret"
                      (λ (x) (send x tabify-selection)))
+  (add-edit-function "tabify-at-caret/reverse-choices"
+                     (λ (x) (send x tabify-selection/reverse-choices)))
   (add-edit-function "do-return"
                      (λ (x) (send x insert-return)))
   (add-edit-function "comment-out"
@@ -1636,6 +1841,7 @@
     (send keymap map-function key func))
 
   (map "TAB" "tabify-at-caret")
+  (map "s:TAB" "tabify-at-caret/reverse-choices")
 
   (map "return" "do-return")
   (map "s:return" "do-return")

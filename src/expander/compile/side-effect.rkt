@@ -75,7 +75,7 @@
         [(make-struct-field-mutator)
          (and (ok-make-struct-field-accessor/mutator? e locals 'general-mutator defns)
               1)]
-        [(make-struct-type-property)
+        [(make-struct-type-property unsafe-make-struct-type-property/guard-calls-no-arguments)
          (and (ok-make-struct-type-property? e defns)
               3)]
         [(gensym)
@@ -362,6 +362,7 @@
      (and (quoted? false? super-expr)
           ;; checking that we have at least 2 fields
           (immutable-field? 1 immutables-expr))]
+    [(prop:object-name) (immutable-field? val-expr immutables-expr)]
     [else
      (define o (lookup-defn defns prop-name))
      (cond

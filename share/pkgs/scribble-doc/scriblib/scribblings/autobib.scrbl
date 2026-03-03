@@ -11,7 +11,7 @@
 
 This library provides support for bibliography management in a Scribble
 document. The @racket[define-cite] form is used to bind procedures
-that create in-line citations and generate the bibilography in the
+that create in-line citations and generate the bibliography in the
 document.
 
 Individual bibliography entries are created with the @racket[make-bib]
@@ -29,7 +29,7 @@ function. See below for an example.
       #:title    "Reference: Racket"
       #:author   (authors "Matthew Flatt" "PLT")
       #:date     "2010"
-      #:location (techrpt-location #:institution "PLT Inc." 
+      #:location (techrpt-location #:institution "PLT Inc."
                                    #:number "PLT-TR-2010-1")
       #:url      "http://racket-lang.org/tr1/"))
 
@@ -47,6 +47,9 @@ function can be used. For example, the following snippet:
 }|
 
 includes a citation to section 8 of the Racket reference.
+
+@history[#:changed "1.61"
+  @elem{Added fields and location types for better bibtex support.}]
 
 @defform/subs[(define-cite ~cite-id citet-id generate-bibliography-id
                            option ...)
@@ -88,10 +91,16 @@ or more bibliography entries which have the same authors. It has the contract
 ]
 
 The function bound to @racket[generate-bibliography-id] generates the
-section for the bibliography. It has the contract
+section for the bibliography, with a title as per the @racket[#:sec-title] argument
+(defaults to @racket["Bibliography"]) and a tag as per the @racket[#:tag] argument
+(defaults to @racket["doc-bibliography"]).
+If the @racket[#:sec-title] argument is @racket[#f] instead a string,
+only the content of the bibliography is created, as a table,
+and not the enclosing section as a part.
 
 @racketblock[
-(->* () (#:tag string? #:sec-title string?) part?)
+(->* () (#:tag string? #:sec-title (or/c #f string?))
+     (or/c part? block?))
 ]
 
 If provided, the function bound to @racket[cite-author-id]
@@ -115,21 +124,19 @@ The functions bound to @racket[cite-author-id] and
 
 @codeblock[#:keep-lang-line? #f]|{
  #lang scribble/base
- @citeauthor[scribble-cite]'s (@citeyear[scribble-cite])  autobib library is pretty nifty.
+ @citeauthor[scribble-cite]'s (@citeyear[scribble-cite]) autobib
+ library is pretty nifty.
 }|
-
-The default value for the @racket[#:tag] argument is @racket["doc-bibliography"]
-and for @racket[#:sec-title] is @racket["Bibliography"].
 
 The optional @racket[spaces-expr] determines the number of blank lines that appear
 between citations. The default number of lines is 1.
 
 The optional @racket[style-expr] determines the way that citations and
 the bibliography are rendered.@margin-note*{Programmer-defined styles
-may be supported in the future.} Currently, two built-in style are
+may be supported in the future.} Currently, two built-in styles are
 provided, and @racket[author+date-style] is the default.
 
-For @racket[author+date-style], 
+For @racket[author+date-style],
 if two citations' references would render the same (as judged by equal
 authors and dates that are considered the same) but are different, the
 optionally provided function from @racket[disambiguator-expr] is used
@@ -168,12 +175,13 @@ Returns @racket[#t] if @racket[v] is a value produced by
                    [#:is-book? is-book? any/c #f]
                    [#:location location any/c #f]
                    [#:date date (or/c #f date? exact-nonnegative-integer? string?) #f]
-                   [#:url url string? #f]
+                   [#:url url (or/c #f string?) #f]
+                   [#:doi doi (or/c #f string?) #f]
                    [#:note note any/c #f])
          bib?]{
 
 Produces a value that represents a document to cite. Except for
-@racket[is-book?] and @racket[url], the arguments are used as
+@racket[is-book?], @racket[url], and @racket[doi], the arguments are used as
 content, except that @racket[#f] means that the information is not
 supplied. Functions like @racket[proceedings-location],
 @racket[author-name], and @racket[authors] help produce elements in a
@@ -187,27 +195,38 @@ first, last names, and name suffixes separately, so that names can be
 ordered and rendered correctly. When a string is provided as an author
 name, the last non-empty sequence of alphabetic characters or
 @litchar["-"] after a space is treated as the author name, and the
-rest is treated as the first name.}
+rest is treated as the first name.
+
+@history[#:changed "1.49" @elem{Added @racket[#:doi].}]}
 
 @defproc[(in-bib [orig bib?] [where string?]) bib?]{
 
 Extends a bib value so that the rendered citation is suffixed with
 @racket[where], which might be a page or chapter number.}
 
-@defproc[(proceedings-location [location any/c]
-                               [#:pages pages (or (list/c any/c any/c) #f) #f]
+@defproc[(proceedings-location [#:editor editor_ any/c #f]
+                               [location any/c]
                                [#:series series any/c #f]
-                               [#:volume volume any/c #f])
+                               [#:volume volume any/c #f]
+                               [#:number number any/c #f]
+                               [#:pages pages (or (list/c any/c any/c) #f) #f]
+                               [#:organization organization any/c #f]
+                               [#:publisher publisher #f]
+                               [#:address address #f])
          element?]{
 
 Combines elements to generate an element that is suitable for
 describing a paper's location within a conference or workshop
-proceedings.}
+proceedings.
+
+ @history[#:changed "1.61"
+   @elem{Added fields for bibtex support: editor number organization publisher address.}]
+}
 
 @defproc[(journal-location [title any/c]
-                           [#:pages pages (or (list/c any/c any/c) #f) #f]
+                           [#:volume volume any/c #f]
                            [#:number number any/c #f]
-                           [#:volume volume any/c #f])
+                           [#:pages pages (or (list/c any/c any/c) #f) #f])
          element?]{
 
 Combines elements to generate an element that is suitable for
@@ -215,37 +234,107 @@ describing a paper's location within a journal.}
 
 
 @defproc[(book-location [#:edition edition any/c #f]
-                        [#:publisher publisher any/c #f])
+                        [#:chapter chapter any/c #f]
+                        [#:editor editor any/c #f]
+                        [#:series series any/c #f]
+                        [#:volume volume any/c #f]
+                        [#:number number any/c #f]
+                        [#:pages pages any/c #f]
+                        [#:publisher publisher any/c #f]
+                        [#:address address any/c #f])
          element?]{
-
 Combines elements to generate an element that is suitable for
 describing a book's location.
-Both arguments are optional, but at least one must be supplied.}
+
+@history[#:changed "1.61"
+  @elem{Added fields for bibtex support: editor chapter series volume number pages address.
+        Made all arguments optional.}]
+}
+
+
+@defproc[(booklet-location [#:howpublished howpublished any/c #f]
+                           [#:address address any/c #f])
+         element?]{
+Combines elements to generate an element that is suitable for
+describing a booklet's location.
+
+@history[#:added "1.61"]
+}
+
+
+@defproc[(misc-location [#:howpublished howpublished any/c #f])
+         element?]{
+Combines elements to generate an element that is suitable for
+describing a bibtex misc entry's location.
+
+@history[#:added "1.61"]
+}
+
+
+@defproc[(manual-location [#:organization organization any/c #f]
+                          [#:edition edition any/c #f])
+         element?]{
+Combines elements to generate an element that is suitable for
+describing a manual's location.
+
+@history[#:added "1.61"]
+}
+
 
 @defproc[(techrpt-location [#:institution institution any/c]
-                           [#:number number any/c])
+                           [#:type type any/c #f]
+                           [#:number number any/c #f]
+                           [#:address address any/c #f])
          element?]{
 
 Combines elements to generate an element that is suitable for
-describing a technical report's location.}
+describing a technical report's location.
+
+@history[#:changed "1.61" @elem{Added fields for bibtex support: type address.}]
+}
 
 @defproc[(dissertation-location [#:institution institution any/c]
-                                [#:degree degree any/c "PhD"])
+                                [#:degree degree any/c "PhD"]
+                                [#:type type any/c #f]
+                                [#:address address any/c #f])
          element?]{
 
 Combines elements to generate an element that is suitable for
-describing a dissertation.}
+describing a dissertation.
+
+@history[#:changed "1.61"
+  @elem{Added fields for bibtex support: type address.}]
+}
+
+@defproc[(webpage-location [url string? #f]
+                           [#:accessed accessed any/c #f])
+         element?]{
+ Combines elements to generate an element that is suitable for
+ describing a web page.
+
+ @history[#:changed "1.61"
+   @elem{Made field url optional now that any autobib entry may have a url.}]
+}
 
 
 @defproc[(book-chapter-location [title any/c]
-                           [#:pages pages (or (list/c any/c any/c) #f) #f]
-                           [#:section section any/c #f]
-                           [#:volume volume any/c #f]
-                           [#:publisher publisher any/c #f])
+                                [#:edition edition any/c #f]
+                                [#:chapter chapter any/c #f]
+                                [#:editor editor any/c #f]
+                                [#:series series any/c #f]
+                                [#:volume volume any/c #f]
+                                [#:number number any/c #f]
+                                [#:pages pages any/c #f]
+                                [#:publisher publisher any/c #f]
+                                [#:address address any/c #f])
          element?]{
 
 Combines elements to generate an element that is suitable for
-describing a paper's location within a chapter or part of a book.}
+describing a paper's location within a chapter or part of a book or collection of books.
+
+@history[#:changed "1.61"
+  @elem{Added fields for bibtex support: editor chapter number address.}]
+}
 
 
 @defproc[(author-name [first any/c]
@@ -286,16 +375,16 @@ same way as by @racket[make-bib].}
   Shortens given names in calls to @racket[author] and @racket[make-bib]
   to just the first initial when the parameter value is not @racket[#f].
   Otherwise, does not change the author names.
-  
+
   Defaults to @racket[#f].
-  
+
   @history[#:added "1.5"]
 }
 
 @defparam[url-rendering rendering-function (-> string? any)]{
   Accepts a URL as a string and renders it for use in a bibliography entry.
-  
+
   Defaults to @racket[(λ (url) (link url (make-element 'url (list url))))].
-  
+
   @history[#:added "1.39"]
 }

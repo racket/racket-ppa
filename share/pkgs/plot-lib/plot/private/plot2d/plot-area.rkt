@@ -61,7 +61,7 @@
          [put-text-foreground (-> Plot-Color Void)]
          [reset-drawing-params (-> Void)]
          [put-arrow-head (-> (U (List '= Nonnegative-Real) Nonnegative-Real) Nonnegative-Real Void)]
-         [put-lines (-> (Listof (Vectorof Real)) Void)]
+         [put-lines (->* [(Listof (Vectorof Real))] [Boolean] Void)]
          [put-line (-> (Vectorof Real) (Vectorof Real) Void)]
          [put-polygon (-> (Listof (Vectorof Real)) Void)]
          [put-rect (-> Rect Void)]
@@ -257,7 +257,8 @@
                                      legend
                                      (vector (ivl dc-x-min (+ dc-x-min dc-x-size))
                                              (ivl dc-y-min (+ dc-y-min dc-y-size)))
-                                     (legend-anchor->anchor legend-anchor)))]
+                                     (legend-anchor->anchor legend-anchor)
+                                     (plot-legend-padding)))]
              [gap (pen-gap)]
              [make-print
               (λ ([get-bounds : (-> (Listof Real))])
@@ -640,16 +641,23 @@
     (define: right : Real  0)
     (define: top : Real  0)
     (define: bottom : Real  0)
-    (let-values ([(left-val right-val top-val bottom-val)
-                  (margin-fixpoint 0 dc-x-size 0 dc-y-size
-                                   init-left-margin  init-right-margin
-                                   init-top-margin   init-bottom-margin
-                                   (λ ([left : Real] [right : Real] [top : Real] [bottom : Real])
-                                     (get-param-vs/set-view->dc! left right top bottom)))])
-      (set! left left-val)
-      (set! right right-val)
-      (set! top top-val)
-      (set! bottom bottom-val))
+    (let ([inset (plot-inset)])
+      (let-values ([(left-inset right-inset top-inset bottom-inset)
+                    (if (list? inset)
+                        (values (list-ref inset 0) (list-ref inset 1) (list-ref inset 2) (list-ref inset 3))
+                        (values inset inset inset inset))])
+        (let-values ([(left-val right-val top-val bottom-val)
+                      (margin-fixpoint
+                       left-inset        (- dc-x-size right-inset)
+                       top-inset         (- dc-y-size bottom-inset)
+                       init-left-margin  init-right-margin
+                       init-top-margin   init-bottom-margin
+                       (λ ([left : Real] [right : Real] [top : Real] [bottom : Real])
+                         (get-param-vs/set-view->dc! left right top bottom)))])
+          (set! left left-val)
+          (set! right right-val)
+          (set! top top-val)
+          (set! bottom bottom-val))))
 
     ;; When an aspect ratio has been defined, adjust the margins so that the
     ;; actual plot area maintains this ratio.
@@ -803,7 +811,7 @@
 
     (define/public (put-alpha alpha) (send pd set-alpha alpha))
 
-    (define/public (put-pen color width style [cap 'round]) (send pd set-pen color width style cap))
+    (define/public (put-pen color width style [cap (line-cap)]) (send pd set-pen color width style cap))
     (define/public (put-major-pen [style 'solid]) (send pd set-major-pen style))
     (define/public (put-minor-pen [style 'solid]) (send pd set-minor-pen style))
 
@@ -827,7 +835,12 @@
 
     ;; Shapes
 
-    (define/public (put-lines vs)
+    ;; When ignore-axis-transforms? is #t, we don't sub-divide lines based on
+    ;; axis transforms.  This allows drawing a straight line regardless of the
+    ;; axis transforms used, such as a log-log plot.  This is used to
+    ;; replicate "lines" functionality form other plotting libraries.  See
+    ;; also #110.
+    (define/public (put-lines vs [ignore-axis-transforms? #f])
       (for ([vs  (in-list (exact-vector2d-sublists vs))])
         (let ([vss  (if clipping?
                         (clip-lines/bounds vs
@@ -836,9 +849,11 @@
                         (list vs))])
           (for ([vs  (in-list vss)])
             (unless (empty? vs)
-              (let* ([vs  (if identity-transforms? vs (subdivide-lines (λ ([v : (Vectorof Real)])
-                                                                         (plot->dc v))
-                                                                       vs))]
+              (let* ([vs  (if (or identity-transforms? ignore-axis-transforms?)
+                              vs
+                              (subdivide-lines (λ ([v : (Vectorof Real)])
+                                                 (plot->dc v))
+                                               vs))]
                      [vs  (map (λ ([v : (Vectorof Real)])
                                  (plot->dc v))
                                vs)])

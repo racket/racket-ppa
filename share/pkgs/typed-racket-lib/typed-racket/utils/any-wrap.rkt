@@ -83,29 +83,28 @@
       (define-values (sym init auto ref set! imms par skip?)
         (parameterize ([current-inspector inspector])
           (struct-type-info struct-type)))
-      (define-values (fun/chap-list _)
+      (define fun/chap-list
         (for/fold ([res null]
-                   [imms imms])
-          ([n (in-range (+ init auto))])
+                   [imms imms]
+                   #:result res)
+                  ([n (in-range (+ init auto))])
           (if (and (pair? imms) (= (car imms) n))
               ;; field is immutable
-              (values
-               (list* (make-struct-field-accessor ref n)
-                      (lambda (s v) (with-contract-continuation-mark
-                                     blame+neg-party
-                                     (any-wrap/traverse v neg-party seen)))
-                      res)
-               (cdr imms))
+              (values (list* (make-struct-field-accessor ref n)
+                             (lambda (s v)
+                               (with-contract-continuation-mark blame+neg-party
+                                                                (any-wrap/traverse v neg-party seen)))
+                             res)
+                      (cdr imms))
               ;; field is mutable
-              (values
-               (list* (make-struct-field-accessor ref n)
-                      (lambda (s v) (with-contract-continuation-mark
-                                     blame+neg-party
-                                     (any-wrap/traverse v neg-party seen)))
-                      (make-struct-field-mutator set! n)
-                      (lambda (s v) (fail neg-party s))
-                      res)
-               imms))))
+              (values (list* (make-struct-field-accessor ref n)
+                             (lambda (s v)
+                               (with-contract-continuation-mark blame+neg-party
+                                                                (any-wrap/traverse v neg-party seen)))
+                             (make-struct-field-mutator set! n)
+                             (lambda (s v) (fail neg-party s))
+                             res)
+                      imms))))
       (cond
         [par (append fun/chap-list (extract-functions par))]
         [else fun/chap-list]))
@@ -126,13 +125,27 @@
        v]
       [(? unsafe-val?)
        (fail neg-party v)]
-      [(cons x y) (cons (any-wrap/traverse x neg-party seen/v) (any-wrap/traverse y neg-party seen/v))]
+      [(cons x y)
+       (define x* (any-wrap/traverse x neg-party seen/v))
+       (define y* (any-wrap/traverse y neg-party seen/v))
+       (cond
+         [(and (eq? x x*) (eq? y y*)) v]
+         [else (cons x* y*)])]
       [(? vector? (? immutable?))
        ;; fixme -- should have an immutable for/vector
-       (vector->immutable-vector
-        (for/vector #:length (vector-length v)
-          ([i (in-vector v)]) (any-wrap/traverse i neg-party seen/v)))]
-      [(? box? (? immutable?)) (box-immutable (any-wrap/traverse (unbox v) neg-party seen/v))]
+       (define all-eq? #t)
+       (define v*
+         (for/vector #:length (vector-length v) ([i (in-vector v)])
+           (define i* (any-wrap/traverse i neg-party seen/v))
+           (unless (eq? i i*)
+             (set! all-eq? #f))
+           i*))
+       (if all-eq? v (vector->immutable-vector v*))]
+      [(? box? (? immutable?))
+       (define v* (any-wrap/traverse (unbox v) neg-party seen/v))
+       (cond
+         [(eq? v* (unbox v)) v]
+         [else (box-immutable v*)])]
       [(? box?) (chaperone-box v
                                (lambda (v e)
                                  (with-contract-continuation-mark
@@ -145,13 +158,17 @@
       ;; [(? hasheqv? (? immutable?))
       ;;  (for/hasheqv ([(k v) (in-hash v)]) (values k v))]
 
-      [(? (λ (e)
-            (and (hash? e) (immutable? e)
-                 (not (hash-eqv? e)) (not (hash-eq? e)))))
-       (hash-map/copy v
-                      (lambda (k v)
-                        (values (any-wrap/traverse k neg-party seen/v)
-                                (any-wrap/traverse v neg-party seen/v))))]
+      [(? (λ (e) (and (hash? e) (immutable? e))))
+       (define all-eq? #t)
+       (define v*
+         (hash-map/copy v
+                        (lambda (k v)
+                          (define k* (any-wrap/traverse k neg-party seen/v))
+                          (define v* (any-wrap/traverse v neg-party seen/v))
+                          (unless (and (eq? k k*) (eq? v v*))
+                            (set! all-eq? #f))
+                          (values k* v*))))
+       (if all-eq? v v*)]
       [(? vector?) (chaperone-vector v
                                      (lambda (v i e)
                                        (with-contract-continuation-mark
@@ -224,15 +241,17 @@
 (define (on-opaque-error v blame neg-party)
   (raise-any-wrap/c-opaque-error v blame neg-party))
 
-;; on-opaque-display-warning : Val Blame Neg-Party -> Val
+;; make-on-opaque-display-warning : (-> (Val Blame Neg-Party -> Val))
 ;; To be passed as the #:on-opaque argument to make any-wrap/c display
 ;; a warning, but keep going with possible unsoundness.
-(define (on-opaque-display-warning v blame neg-party)
-  ;; this can lead to unsoundness, see https://github.com/racket/typed-racket/issues/379.
-  ;; an error here would make this sound, but it breaks the math library as of 2016-07-08,
-  ;; see https://github.com/racket/typed-racket/pull/385#issuecomment-231354377.
-  (display-any-wrap/c-opaque-warning v blame neg-party)
-  (chaperone-struct v))
+(define (make-on-opaque-display-warning)
+  (define display-warning (make-display-any-wrap/c-opaque-warning))
+  (lambda (v blame neg-party)
+    ;; this can lead to unsoundness, see https://github.com/racket/typed-racket/issues/379.
+    ;; an error here would make this sound, but it breaks the math library as of 2016-07-08,
+    ;; see https://github.com/racket/typed-racket/pull/385#issuecomment-231354377.
+    (display-warning v blame neg-party)
+    (chaperone-struct v)))
 
 ;; make-any-wrap/c : (-> #:on-opaque (-> Val Blame Neg-Party (U Val Error)) Chaperone-Contract)
 (define (make-any-wrap/c #:on-opaque on-opaque)
@@ -244,8 +263,8 @@
 (define any-wrap/c
   (make-any-wrap/c #:on-opaque on-opaque-error))
 
-(define any-wrap-warning/c
-  (make-any-wrap/c #:on-opaque on-opaque-display-warning))
+(define (make-any-wrap-warning/c)
+  (make-any-wrap/c #:on-opaque (make-on-opaque-display-warning)))
 
 ;; struct?/inspector : (-> Inspector (-> Any Boolean))
 (define ((struct?/inspector inspector) v)
@@ -262,19 +281,23 @@
     "  value: ~e\n")
    v))
 
-;; display-any-wrap/c-opaque-warning : (-> Any Blame Neg-Party Void)
-(define (display-any-wrap/c-opaque-warning v blame neg-party)
-  (displayln
-   ((current-blame-format)
-    (blame-add-missing-party blame neg-party)
-    v
-    (format
-     (string-append
-      "any-wrap/c: Unable to protect opaque value passed as `Any`\n"
-      "  value: ~e\n"
-      "  This warning will become an error in a future release.\n")
-     v))
-   (current-error-port)))
+;; make-display-any-wrap/c-opaque-warning : (-> (-> Any Blame Neg-Party Void))
+(define (make-display-any-wrap/c-opaque-warning)
+  (define seen (make-hasheq))
+  (lambda (v blame neg-party)
+    (unless (hash-has-key? seen v)
+      (hash-set! seen v #true)
+      (displayln
+       ((current-blame-format)
+        (blame-add-missing-party blame neg-party)
+        v
+        (format
+         (string-append
+          "any-wrap/c: Unable to protect opaque value passed as `Any`\n"
+          "  value: ~e\n"
+          "  This warning will become an error in a future release.\n")
+         v))
+       (current-error-port)))))
 
 ;; Contract for "safe" struct predicate procedures.
 ;; We can trust that these obey the type (-> Any Boolean).
@@ -284,4 +307,4 @@
            (struct-type-property-predicate-procedure? x))
        (not (impersonator? x))))
 
-(provide any-wrap/c any-wrap-warning/c struct-predicate-procedure?/c)
+(provide any-wrap/c make-any-wrap-warning/c struct-predicate-procedure?/c)

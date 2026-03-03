@@ -93,8 +93,10 @@
                                  (listof (->* () #:rest (listof pict-convertible?) pict-convertible?)))]
                [col-seps (or/c (listof real?) (list*of real?))]
                [row-seps (or/c (listof real?) (list*of real?))])
-              #:pre (ncols picts)
-              (zero? (remainder (length picts) ncols))
+              #:pre/desc (ncols picts)
+              (let ((rem (remainder (length picts) ncols)))
+                (or (zero? rem)
+                    (format "ncols does not divide number of picts (~a % ~a = ~a)" (length picts) ncols rem)))
               [result pict?])]
   [dc (->i ([draw (-> (is-a?/c dc<%>) real? real? any)]
             [w real?]
@@ -112,7 +114,9 @@
                ([d (or/c #f real?)]
                 [a (or/c #f real?)])
                [p pict?])]
-  [cellophane (-> pict-convertible? (real-in 0 1) pict?)]
+  [cellophane (->* (pict-convertible? (real-in 0 1))
+                   (#:composite? any/c)
+                   pict?)]
 
   [linewidth (-> (or/c real? #f) pict-convertible? pict?)]
 
@@ -333,7 +337,9 @@
   (vector (send c red) (send c green) (send c blue)))
 
 (define *-find/c
-  (-> pict-convertible? pict-path? (values real? real?)))
+  (->* (pict-convertible? pict-path?)
+       (#:nth (or/c 'unique exact-nonnegative-integer?))
+       (values real? real?)))
 
 (define *-append/c
   (->* ()
@@ -423,10 +429,15 @@
 (require "private/play-pict.rkt")
 (provide
  (contract-out
-  [fade-pict (->* ((real-in 0.0 1.0) pict-convertible? pict-convertible?) (#:combine (-> pict-convertible? pict-convertible? pict?)) pict?)]
+  [fade-pict (->* ((real-in 0.0 1.0) pict-convertible? pict-convertible?)
+                  (#:combine (-> pict-convertible? pict-convertible? pict?)
+                   #:composite? any/c)
+                  pict?)]
   [slide-pict (-> pict-convertible? pict-convertible? pict-convertible? pict-convertible? (real-in 0.0 1.0) pict?)]
   [slide-pict/center (-> pict-convertible? pict-convertible? pict-convertible? pict-convertible? (real-in 0.0 1.0) pict?)]
-  [fade-around-pict (-> (real-in 0.0 1.0) pict-convertible? (-> pict-convertible? pict?) pict?)]
+  [fade-around-pict (->* ((real-in 0.0 1.0) pict-convertible? (-> pict-convertible? pict?))
+                         (#:composite? any/c)
+                         pict?)]
   [sequence-animations (->* () #:rest (listof (-> (real-in 0.0 1.0) pict-convertible?))
                             (-> (real-in 0.0 1.0) pict?))]
   [reverse-animations (->* () #:rest (listof (-> (real-in 0.0 1.0) pict-convertible?))

@@ -144,6 +144,18 @@ X__(string_p) (int argc, Scheme_Object *argv[])
 }
 
 static Scheme_Object *
+X_(immutable, string_p) (int argc, Scheme_Object *argv[])
+{
+  return ((SCHEME_X_STRINGP(argv[0]) && SCHEME_IMMUTABLEP(argv[0])) ? scheme_true : scheme_false);
+}
+
+static Scheme_Object *
+X_(mutable, string_p) (int argc, Scheme_Object *argv[])
+{
+  return ((SCHEME_X_STRINGP(argv[0]) && !SCHEME_IMMUTABLEP(argv[0])) ? scheme_true : scheme_false);
+}
+
+static Scheme_Object *
 X_(make, string) (int argc, Scheme_Object *argv[])
 {
   intptr_t len;
@@ -333,7 +345,7 @@ X__(do_string_append) (const char *who, int argc, Scheme_Object *argv[])
   }
 
   if (!len)
-    return X(zero_length, _string);
+    return X(scheme_zero_length, _string);
 
   naya = X(scheme_alloc, _string)(len, 0);
   chars = SCHEME_X_STR_VAL(naya);
@@ -373,6 +385,49 @@ X(scheme_append, _string)(Scheme_Object *str1, Scheme_Object *str2)
   r[len1 + len2] = 0;
 
   return naya;
+}
+
+static Scheme_Object *
+X(do_apply, _string_append)(const char *who, int argc, Scheme_Object *argv[])
+{
+  intptr_t pos = 0, len;
+  Scheme_Object *arg, *lst, *s;
+
+  lst = argv[1];
+  len = 0;
+  while (SCHEME_PAIRP(lst)) {
+    if (!SCHEME_X_STRINGP(SCHEME_CAR(lst))) {
+      if (pos >= SCHEME_INT_VAL(argv[0])) {
+        arg = argv[1];
+        scheme_wrong_contract(who, "(listof " IS_STR ")", -1, 0, &arg);
+      } else {
+        arg = SCHEME_CAR(lst);
+        scheme_wrong_contract(who, IS_STR, -1, 0, &arg);
+      }
+    }
+    len += SCHEME_X_STRTAG_VAL(SCHEME_CAR(lst));
+    pos++;
+    lst = SCHEME_CDR(lst);
+  }
+
+  if (!SCHEME_NULLP(lst)) {
+    arg = argv[1];
+    scheme_wrong_contract(who, "(listof " IS_STR ")", -1, 0, &arg);
+  }
+
+  s = X(scheme_alloc, _string)(len, 0);
+
+  lst = argv[1];
+  len = 0;
+  while (!SCHEME_NULLP(lst)) {
+    memcpy(SCHEME_X_STR_VAL(s) XFORM_OK_PLUS len,
+           SCHEME_X_STR_VAL(SCHEME_CAR(lst)),
+           sizeof(Xchar) * SCHEME_X_STRTAG_VAL(SCHEME_CAR(lst)));
+    len += SCHEME_X_STRTAG_VAL(SCHEME_CAR(lst));
+    lst = SCHEME_CDR(lst);
+  }
+
+  return s;
 }
 
 static Scheme_Object *

@@ -1,4 +1,178 @@
 ------------------------------
+       Version 9.1
+------------------------------
+
+  . improve the handling of the dark mode preferences and improve the
+    GUI for choosing color schemes
+
+  . improve the interactivity of on-paint when there are a lot of
+    check-syntax arrows by caching the arrow drawing in a bitmap
+    and computing the bitmap on multiple events
+
+  . make check syntax arrows curve. The amount and direction of the
+    curve is controlled by the x-coordinates of the position of the
+    references; if a reference is relatively to the left, then the
+    angle that the arrow makes as it leaves the binding occurrence is
+    relatively more horizontal (and ditto for references that are more
+    to the right).
+
+  . improve the handling of the dark vs light mode color scheme
+    preferences
+
+  . the contour window (via the menu-shortcut keystroke "u") shrinks
+    when the widest line in the window got smaller
+
+  . improve the Insert Large Letters to be language-sensitive it the
+    choice of comment characters
+
+  . bug fixes and refactorings
+
+
+------------------------------
+       Version 9.0
+------------------------------
+
+  . check syntax tracks identifiers that it finds in the origin fields
+    of identifiers that are in the origin fields (before it would not
+    consider the origin field of identifiers that were in the origin field)
+
+  . bug fixes, documentation improvements, and refactorings
+
+------------------------------
+       Version 8.18
+------------------------------
+
+  . add support for shift-tab to go backwards to previous
+    tab positions
+
+  . adjust the macro stepper to support the string-constants
+    library, allowing it to be translated to other languages.
+
+  . bug fixes and refactorings
+
+------------------------------
+       Version 8.17
+------------------------------
+
+  . split out the drracket-core package to provide a version of
+    drracket with a smaller set of dependencies
+
+  . when none of the packages that supply languages via the
+    "Language|Choose Language..." menu item are installed, do not show
+    the language menu. Also, in that situation, move the configuration
+    of the language (that would be in the "show details" part of the
+    language dialog) into a new pane in the preferences dialog.
+
+  . fix a bug in the handling of stacktraces with nonexistent files
+
+------------------------------
+       Version 8.16
+------------------------------
+
+   . bug fixes specially focused on improving the #lang htdp/ languages
+
+------------------------------
+       Version 8.15
+------------------------------
+
+   . drracket remembers the previously opened files when starting a new session
+
+   . right-clicking on an image to save the file works with picts
+
+   . bug fixes and resyntax improvements to the codebase
+
+------------------------------
+       Version 8.14
+------------------------------
+
+   . add submodule-based filtering to the module browser
+
+   . added a notion of invisible parentheses to the paren matcher,
+     motivated by Rhombus. Invisible parens are a property of the
+     colorer tokens and don't require a token that actually takes up
+     space that's notated as a parenthesis.
+
+   . bug fixes and doc improvements
+
+------------------------------
+       Version 8.13
+------------------------------
+
+   . bug fixes
+
+------------------------------
+       Version 8.12
+------------------------------
+
+   . minor improvements and bug fixes
+
+------------------------------
+       Version 8.11
+------------------------------
+
+   . add indentation guides (<menu-key>-shift-i)
+
+   . generalize comment-out functionality to be #lang-specific
+
+   . show tooltip on bound identifiers that have no binding occurrences
+
+   . documentation improvements
+
+   . bug fixes
+
+------------------------------
+       Version 8.10
+------------------------------
+
+   . The define-popdown in the upper left corner of the DrRacket
+     window is customizable via `drracket:define-popup` for each
+     #lang language
+
+   . misc bug fixes and documentation improvements
+
+------------------------------
+       Version 8.9
+------------------------------
+
+   . switching into and out of dark mode is handled better
+     on Mac OS and Linux
+
+   . improved the interaction between submodules and
+     require arrows in Check Syntax
+
+   . misc bug fixes
+
+------------------------------
+       Version 8.8
+------------------------------
+
+   . changed the way expression submission works in the interactions
+     window, slightly. As before, just typing return defers to the
+     language to decide (for #lang racket and related languages it
+     looks for a complete sexp), and typing alt- and control-return
+     forces a submission, even if it does not look complete. 
+
+     The new behavior is that shift-return never submits, even if the
+     input looks complete.
+
+   . bug fixes and documentation improvements
+
+------------------------------
+       Version 8.7
+------------------------------
+
+   . improved raco dependencies-graph and the Module Browser
+     (available in the View menu and the Racket menu with different
+     GUI styles). It is faster and has new support for filtering based
+     on packages.
+
+   . improve the responsiveness when killing programs that print a lot
+
+   . Emojis are supported in DrRacket's editor
+
+   . misc, minor bug fixes
+
+------------------------------
        Version 8.6
 ------------------------------
 

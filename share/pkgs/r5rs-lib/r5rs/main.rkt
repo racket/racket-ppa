@@ -274,7 +274,8 @@
                       (syntax/loc stx
                         (r5rs:lambda args . body))])
          (syntax/loc stx
-           (define id proc)))]
+           ;; use `r5rs:define` again, in case curried mode was used
+           (r5rs:define id proc)))]
       [(_ . rest)
        (syntax/loc stx
          (define . rest))]))
@@ -458,7 +459,7 @@
                                     [els (#%expression rhs) ...]))]
                                [[datums rhs ...]
                                 (syntax/loc clause
-                                  [(memv v '(datums)) (#%expression rhs) ...])]))
+                                  [(memv v 'datums) (#%expression rhs) ...])]))
                            (cddr (syntax->list stx)))])
          (syntax/loc stx
            (let ([v expr])

@@ -69,7 +69,7 @@
             [(c fc)  (values b fb)]
             [(fs)  (f s)]
             ;; Replace the endpoint with the same sign as s
-            [(a fa b fb)  (if ((* fa fs) . < . 0.0)
+            [(a fa b fb)  (if (if (< fa 0.) (< 0. fs) (< fs 0.))
                               (values a fa s fs)
                               (values s fs b fb))]
             ;; Make sure b is closer
@@ -88,7 +88,7 @@
         [(= fb 0.0)  b]
         [(or (flnan? a) (flnan? fa) (flnan? b) (flnan? fb))  +nan.0]
         ;; Check signs
-        [((* fa fb) . >= . 0.0)
+        [(if (< fa 0.) (< fb 0.) (< 0. fb))
          (debugf "(f ~v) = ~v and (f ~v) = ~v do not bracket a root~n" a fa b fb)
          +nan.0]
         [else

@@ -1008,7 +1008,7 @@ See @racket[define-custom-hash-types] for an example.
  in terms of a hash table where keys are compared with
  @racket[eql?], hashed with @racket[hash1] and
  @racket[hash2], and where the key predicate is
- @racket[key?]. See @racket[gen:equal] and @racket[gen:equal+hash] for information
+ @racket[key?]. See @racket[gen:equal-mode+hash] and @racket[gen:equal+hash] for information
  on suitable equality and hashing functions.
 
 The @racket[make-custom-hash] and @racket[make-weak-custom-hash]
@@ -1041,7 +1041,7 @@ See also @racket[define-custom-hash-types].
 
 }
 
-@section{Passing keyword arguments in dictionaries}
+@section{Passing Keyword Arguments in Dictionaries}
 
 @defproc[
  (keyword-apply/dict [proc procedure?]

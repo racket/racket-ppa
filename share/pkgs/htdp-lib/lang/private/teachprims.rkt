@@ -125,6 +125,11 @@ namespace.
 
 (define-teach beginner random 
   (lambda (a)
+    (unless (and (natural? a) (positive? a))
+      (raise
+       (make-exn:fail:contract
+        (format "random: expected a positive integer; given ~e" a)
+        (current-continuation-marks))))
     (random a)))
 
 (define-teach beginner number->string-digits 
@@ -161,6 +166,22 @@ namespace.
         (format "sqr: expected a number; given ~e" a)
         (current-continuation-marks))))
     (sqr a)))
+
+(define-teach beginner <
+  (lambda (a b . args)
+    (apply < a b args)))
+
+(define-teach beginner <=
+  (lambda (a b . args)
+    (apply <= a b args)))
+
+(define-teach beginner >
+  (lambda (a b . args)
+    (apply > a b args)))
+
+(define-teach beginner >=
+  (lambda (a b . args)
+    (apply >= a b args)))
 
 (define-teach beginner memq
   (lambda (a b)
@@ -518,6 +539,10 @@ namespace.
  beginner-/
  beginner-*
  beginner-sqr
+ beginner-<
+ beginner-<=
+ beginner->
+ beginner->=
  beginner-list?
  beginner-member
  beginner-member?

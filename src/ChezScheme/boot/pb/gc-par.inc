@@ -131,9 +131,26 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
                   {
                     uptr len = Sbytevector_reference_length(p);
                     memcpy_aligned(&BVIT(new_p, 0), &BVIT(p, 0), ptr_bytes * len);
-                    if ((len & 1) == 0)
                     {
-                      INITBVREFIT(new_p, len) = FIX(0);
+                      uptr extra = (Sbytevector_length(p)) - (len * ptr_bytes);
+                      if (extra == 0)
+                      {
+                        if ((len & 1) == 0)
+                        {
+                          INITBVREFIT(new_p, len) = FIX(0);
+                        }
+                      }
+                      else
+                      {
+                        INITBVREFIT(new_p, len) = INITBVREFIT(p, len);
+                        {
+                          uptr xlen = len + 1;
+                          if ((xlen & 1) == 0)
+                          {
+                            INITBVREFIT(new_p, xlen) = FIX(0);
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -544,6 +561,15 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                   }
                 }
               }
+              else if (num == Strue)
+              {
+                uptr offset = (uptr)(*((pp + 1)));
+                {
+                  ptr obj = TO_PTR((((uptr)(*(pp))) - offset));
+                  relocate_impure(&obj, from_g);
+                  *(pp) = TO_PTR((((uptr)obj) + offset));
+                }
+              }
               else
               {
                 seginfo* pm_si = SegInfo((ptr_get_segment(num)));
@@ -803,6 +829,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
             relocate_pure(&(STACKLINK(tc)));
             relocate_pure(&(WINDERS(tc)));
             relocate_pure(&(ATTACHMENTS(tc)));
+            relocate_pure(&(HANDLERSTACK(tc)));
             CACHEDFRAME(tc) = Sfalse;
             {
               ptr xcp = FRAME(tc, 0);
@@ -831,8 +858,9 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                             }
                             fp = fp - (ENTRYFRAMESIZE(ret));
                             {
-                              ptr* pp = (ptr*)(TO_VOIDP(fp));
                               iptr oldret = ret;
+                              ptr num = ENTRYLIVEMASK(oldret);
+                              ptr* pp = (ptr*)(TO_VOIDP(fp));
                               ret = (iptr)(*(pp));
                               {
                                 ptr xcp = *(pp);
@@ -847,57 +875,54 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                                         relocate_code(c_p, x_si);
                                         *(pp) = (ptr)(((uptr)c_p) + co);
                                       }
+                                      if (Sfixnump(num))
                                       {
-                                        ptr num = ENTRYLIVEMASK(oldret);
-                                        if (Sfixnump(num))
                                         {
+                                          uptr mask = UNFIX(num);
+                                          while (mask != 0)
                                           {
-                                            uptr mask = UNFIX(num);
-                                            while (mask != 0)
+                                            pp += 1;
+                                            if (mask & 1)
                                             {
-                                              pp += 1;
-                                              if (mask & 1)
-                                              {
-                                                relocate_pure(&(*(pp)));
-                                              }
-                                              mask >>= 1;
+                                              relocate_pure(&(*(pp)));
                                             }
+                                            mask >>= 1;
                                           }
+                                        }
+                                      }
+                                      else
+                                      {
+                                        seginfo* n_si = SegInfo((ptr_get_segment(num)));
+                                        if (!(n_si -> old_space))
+                                        {
+                                        }
+                                        else if (SEGMENT_IS_LOCAL(n_si, num))
+                                        {
+                                          relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
+                                          num = ENTRYLIVEMASK(oldret);
                                         }
                                         else
                                         {
-                                          seginfo* n_si = SegInfo((ptr_get_segment(num)));
-                                          if (!(n_si -> old_space))
+                                          RECORD_REMOTE(n_si);
+                                          num = S_G.zero_length_bignum;
+                                        }
+                                        {
+                                          iptr index = BIGLEN(num);
+                                          while (index != 0)
                                           {
-                                          }
-                                          else if (SEGMENT_IS_LOCAL(n_si, num))
-                                          {
-                                            relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
-                                            num = ENTRYLIVEMASK(oldret);
-                                          }
-                                          else
-                                          {
-                                            RECORD_REMOTE(n_si);
-                                            num = S_G.zero_length_bignum;
-                                          }
-                                          {
-                                            iptr index = BIGLEN(num);
-                                            while (index != 0)
+                                            index -= 1;
                                             {
-                                              index -= 1;
+                                              INT bits = bigit_bits;
+                                              bigit mask = BIGIT(num, index);
+                                              while (bits > 0)
                                               {
-                                                INT bits = bigit_bits;
-                                                bigit mask = BIGIT(num, index);
-                                                while (bits > 0)
+                                                bits -= 1;
+                                                pp += 1;
+                                                if (mask & 1)
                                                 {
-                                                  bits -= 1;
-                                                  pp += 1;
-                                                  if (mask & 1)
-                                                  {
-                                                    relocate_pure(&(*(pp)));
-                                                  }
-                                                  mask >>= 1;
+                                                  relocate_pure(&(*(pp)));
                                                 }
+                                                mask >>= 1;
                                               }
                                             }
                                           }
@@ -909,6 +934,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                               }
                             }
                           }
+                          PAR_SWEEPERS_WORKAROUND();
                           U(tc) = 0;
                           V(tc) = 0;
                           W(tc) = 0;
@@ -1043,8 +1069,9 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                               }
                               fp = fp - (ENTRYFRAMESIZE(ret));
                               {
-                                ptr* pp = (ptr*)(TO_VOIDP(fp));
                                 iptr oldret = ret;
+                                ptr num = ENTRYLIVEMASK(oldret);
+                                ptr* pp = (ptr*)(TO_VOIDP(fp));
                                 ret = (iptr)(*(pp));
                                 {
                                   ptr xcp = *(pp);
@@ -1059,57 +1086,54 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                                           relocate_code(c_p, x_si);
                                           *(pp) = (ptr)(((uptr)c_p) + co);
                                         }
+                                        if (Sfixnump(num))
                                         {
-                                          ptr num = ENTRYLIVEMASK(oldret);
-                                          if (Sfixnump(num))
                                           {
+                                            uptr mask = UNFIX(num);
+                                            while (mask != 0)
                                             {
-                                              uptr mask = UNFIX(num);
-                                              while (mask != 0)
+                                              pp += 1;
+                                              if (mask & 1)
                                               {
-                                                pp += 1;
-                                                if (mask & 1)
-                                                {
-                                                  relocate_pure(&(*(pp)));
-                                                }
-                                                mask >>= 1;
+                                                relocate_pure(&(*(pp)));
                                               }
+                                              mask >>= 1;
                                             }
+                                          }
+                                        }
+                                        else
+                                        {
+                                          seginfo* n_si = SegInfo((ptr_get_segment(num)));
+                                          if (!(n_si -> old_space))
+                                          {
+                                          }
+                                          else if (SEGMENT_IS_LOCAL(n_si, num))
+                                          {
+                                            relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
+                                            num = ENTRYLIVEMASK(oldret);
                                           }
                                           else
                                           {
-                                            seginfo* n_si = SegInfo((ptr_get_segment(num)));
-                                            if (!(n_si -> old_space))
+                                            RECORD_REMOTE(n_si);
+                                            num = S_G.zero_length_bignum;
+                                          }
+                                          {
+                                            iptr index = BIGLEN(num);
+                                            while (index != 0)
                                             {
-                                            }
-                                            else if (SEGMENT_IS_LOCAL(n_si, num))
-                                            {
-                                              relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
-                                              num = ENTRYLIVEMASK(oldret);
-                                            }
-                                            else
-                                            {
-                                              RECORD_REMOTE(n_si);
-                                              num = S_G.zero_length_bignum;
-                                            }
-                                            {
-                                              iptr index = BIGLEN(num);
-                                              while (index != 0)
+                                              index -= 1;
                                               {
-                                                index -= 1;
+                                                INT bits = bigit_bits;
+                                                bigit mask = BIGIT(num, index);
+                                                while (bits > 0)
                                                 {
-                                                  INT bits = bigit_bits;
-                                                  bigit mask = BIGIT(num, index);
-                                                  while (bits > 0)
+                                                  bits -= 1;
+                                                  pp += 1;
+                                                  if (mask & 1)
                                                   {
-                                                    bits -= 1;
-                                                    pp += 1;
-                                                    if (mask & 1)
-                                                    {
-                                                      relocate_pure(&(*(pp)));
-                                                    }
-                                                    mask >>= 1;
+                                                    relocate_pure(&(*(pp)));
                                                   }
+                                                  mask >>= 1;
                                                 }
                                               }
                                             }
@@ -1245,6 +1269,15 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
                       pp += 1;
                     }
                   }
+                }
+              }
+              else if (num == Strue)
+              {
+                uptr offset = (uptr)(*((pp + 1)));
+                {
+                  ptr obj = TO_PTR((((uptr)(*(pp))) - offset));
+                  relocate_indirect(obj);
+                  *(pp) = TO_PTR((((uptr)obj) + offset));
                 }
               }
               else
@@ -1441,6 +1474,7 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
             relocate_pure(&(STACKLINK(tc)));
             relocate_pure(&(WINDERS(tc)));
             relocate_pure(&(ATTACHMENTS(tc)));
+            relocate_pure(&(HANDLERSTACK(tc)));
             {
               ptr xcp = FRAME(tc, 0);
               {
@@ -1467,8 +1501,9 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
                             }
                             fp = fp - (ENTRYFRAMESIZE(ret));
                             {
-                              ptr* pp = (ptr*)(TO_VOIDP(fp));
                               iptr oldret = ret;
+                              ptr num = ENTRYLIVEMASK(oldret);
+                              ptr* pp = (ptr*)(TO_VOIDP(fp));
                               ret = (iptr)(*(pp));
                               {
                                 ptr xcp = *(pp);
@@ -1482,57 +1517,54 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
                                       {
                                         relocate_code(c_p, x_si);
                                       }
+                                      if (Sfixnump(num))
                                       {
-                                        ptr num = ENTRYLIVEMASK(oldret);
-                                        if (Sfixnump(num))
                                         {
+                                          uptr mask = UNFIX(num);
+                                          while (mask != 0)
                                           {
-                                            uptr mask = UNFIX(num);
-                                            while (mask != 0)
+                                            pp += 1;
+                                            if (mask & 1)
                                             {
-                                              pp += 1;
-                                              if (mask & 1)
-                                              {
-                                                relocate_pure(&(*(pp)));
-                                              }
-                                              mask >>= 1;
+                                              relocate_pure(&(*(pp)));
                                             }
+                                            mask >>= 1;
                                           }
+                                        }
+                                      }
+                                      else
+                                      {
+                                        seginfo* n_si = SegInfo((ptr_get_segment(num)));
+                                        if (!(n_si -> old_space))
+                                        {
+                                        }
+                                        else if (SEGMENT_IS_LOCAL(n_si, num))
+                                        {
+                                          relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
+                                          num = ENTRYLIVEMASK(oldret);
                                         }
                                         else
                                         {
-                                          seginfo* n_si = SegInfo((ptr_get_segment(num)));
-                                          if (!(n_si -> old_space))
+                                          RECORD_REMOTE(n_si);
+                                          num = S_G.zero_length_bignum;
+                                        }
+                                        {
+                                          iptr index = BIGLEN(num);
+                                          while (index != 0)
                                           {
-                                          }
-                                          else if (SEGMENT_IS_LOCAL(n_si, num))
-                                          {
-                                            relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
-                                            num = ENTRYLIVEMASK(oldret);
-                                          }
-                                          else
-                                          {
-                                            RECORD_REMOTE(n_si);
-                                            num = S_G.zero_length_bignum;
-                                          }
-                                          {
-                                            iptr index = BIGLEN(num);
-                                            while (index != 0)
+                                            index -= 1;
                                             {
-                                              index -= 1;
+                                              INT bits = bigit_bits;
+                                              bigit mask = BIGIT(num, index);
+                                              while (bits > 0)
                                               {
-                                                INT bits = bigit_bits;
-                                                bigit mask = BIGIT(num, index);
-                                                while (bits > 0)
+                                                bits -= 1;
+                                                pp += 1;
+                                                if (mask & 1)
                                                 {
-                                                  bits -= 1;
-                                                  pp += 1;
-                                                  if (mask & 1)
-                                                  {
-                                                    relocate_pure(&(*(pp)));
-                                                  }
-                                                  mask >>= 1;
+                                                  relocate_pure(&(*(pp)));
                                                 }
+                                                mask >>= 1;
                                               }
                                             }
                                           }
@@ -1654,8 +1686,9 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
                             }
                             fp = fp - (ENTRYFRAMESIZE(ret));
                             {
-                              ptr* pp = (ptr*)(TO_VOIDP(fp));
                               iptr oldret = ret;
+                              ptr num = ENTRYLIVEMASK(oldret);
+                              ptr* pp = (ptr*)(TO_VOIDP(fp));
                               ret = (iptr)(*(pp));
                               {
                                 ptr xcp = *(pp);
@@ -1669,57 +1702,54 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
                                       {
                                         relocate_code(c_p, x_si);
                                       }
+                                      if (Sfixnump(num))
                                       {
-                                        ptr num = ENTRYLIVEMASK(oldret);
-                                        if (Sfixnump(num))
                                         {
+                                          uptr mask = UNFIX(num);
+                                          while (mask != 0)
                                           {
-                                            uptr mask = UNFIX(num);
-                                            while (mask != 0)
+                                            pp += 1;
+                                            if (mask & 1)
                                             {
-                                              pp += 1;
-                                              if (mask & 1)
-                                              {
-                                                relocate_pure(&(*(pp)));
-                                              }
-                                              mask >>= 1;
+                                              relocate_pure(&(*(pp)));
                                             }
+                                            mask >>= 1;
                                           }
+                                        }
+                                      }
+                                      else
+                                      {
+                                        seginfo* n_si = SegInfo((ptr_get_segment(num)));
+                                        if (!(n_si -> old_space))
+                                        {
+                                        }
+                                        else if (SEGMENT_IS_LOCAL(n_si, num))
+                                        {
+                                          relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
+                                          num = ENTRYLIVEMASK(oldret);
                                         }
                                         else
                                         {
-                                          seginfo* n_si = SegInfo((ptr_get_segment(num)));
-                                          if (!(n_si -> old_space))
+                                          RECORD_REMOTE(n_si);
+                                          num = S_G.zero_length_bignum;
+                                        }
+                                        {
+                                          iptr index = BIGLEN(num);
+                                          while (index != 0)
                                           {
-                                          }
-                                          else if (SEGMENT_IS_LOCAL(n_si, num))
-                                          {
-                                            relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
-                                            num = ENTRYLIVEMASK(oldret);
-                                          }
-                                          else
-                                          {
-                                            RECORD_REMOTE(n_si);
-                                            num = S_G.zero_length_bignum;
-                                          }
-                                          {
-                                            iptr index = BIGLEN(num);
-                                            while (index != 0)
+                                            index -= 1;
                                             {
-                                              index -= 1;
+                                              INT bits = bigit_bits;
+                                              bigit mask = BIGIT(num, index);
+                                              while (bits > 0)
                                               {
-                                                INT bits = bigit_bits;
-                                                bigit mask = BIGIT(num, index);
-                                                while (bits > 0)
+                                                bits -= 1;
+                                                pp += 1;
+                                                if (mask & 1)
                                                 {
-                                                  bits -= 1;
-                                                  pp += 1;
-                                                  if (mask & 1)
-                                                  {
-                                                    relocate_pure(&(*(pp)));
-                                                  }
-                                                  mask >>= 1;
+                                                  relocate_pure(&(*(pp)));
                                                 }
+                                                mask >>= 1;
                                               }
                                             }
                                           }
@@ -1827,6 +1857,15 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
                   mask >>= 1;
                   pp += 1;
                 }
+              }
+            }
+            else if (num == Strue)
+            {
+              uptr offset = (uptr)(*((pp + 1)));
+              {
+                ptr obj = TO_PTR((((uptr)(*(pp))) - offset));
+                relocate_dirty(&obj, youngest);
+                *(pp) = TO_PTR((((uptr)obj) + offset));
               }
             }
             else
@@ -2097,6 +2136,15 @@ static void sweep_record(thread_gc *tgc, ptr p, IGEN from_g)
               }
             }
           }
+          else if (num == Strue)
+          {
+            uptr offset = (uptr)(*((pp + 1)));
+            {
+              ptr obj = TO_PTR((((uptr)(*(pp))) - offset));
+              relocate_impure(&obj, from_g);
+              *(pp) = TO_PTR((((uptr)obj) + offset));
+            }
+          }
           else
           {
             seginfo* pm_si = SegInfo((ptr_get_segment(num)));
@@ -2166,6 +2214,15 @@ static IGEN sweep_dirty_record(thread_gc *tgc, ptr p, IGEN youngest)
               mask >>= 1;
               pp += 1;
             }
+          }
+        }
+        else if (num == Strue)
+        {
+          uptr offset = (uptr)(*((pp + 1)));
+          {
+            ptr obj = TO_PTR((((uptr)(*(pp))) - offset));
+            relocate_dirty(&obj, youngest);
+            *(pp) = TO_PTR((((uptr)obj) + offset));
           }
         }
         else
@@ -2300,6 +2357,7 @@ static void sweep_thread(thread_gc *tgc, ptr p)
         relocate_pure(&(STACKLINK(tc)));
         relocate_pure(&(WINDERS(tc)));
         relocate_pure(&(ATTACHMENTS(tc)));
+        relocate_pure(&(HANDLERSTACK(tc)));
         CACHEDFRAME(tc) = Sfalse;
         {
           ptr xcp = FRAME(tc, 0);
@@ -2328,8 +2386,9 @@ static void sweep_thread(thread_gc *tgc, ptr p)
                         }
                         fp = fp - (ENTRYFRAMESIZE(ret));
                         {
-                          ptr* pp = (ptr*)(TO_VOIDP(fp));
                           iptr oldret = ret;
+                          ptr num = ENTRYLIVEMASK(oldret);
+                          ptr* pp = (ptr*)(TO_VOIDP(fp));
                           ret = (iptr)(*(pp));
                           {
                             ptr xcp = *(pp);
@@ -2344,57 +2403,54 @@ static void sweep_thread(thread_gc *tgc, ptr p)
                                     relocate_code(c_p, x_si);
                                     *(pp) = (ptr)(((uptr)c_p) + co);
                                   }
+                                  if (Sfixnump(num))
                                   {
-                                    ptr num = ENTRYLIVEMASK(oldret);
-                                    if (Sfixnump(num))
                                     {
+                                      uptr mask = UNFIX(num);
+                                      while (mask != 0)
                                       {
-                                        uptr mask = UNFIX(num);
-                                        while (mask != 0)
+                                        pp += 1;
+                                        if (mask & 1)
                                         {
-                                          pp += 1;
-                                          if (mask & 1)
-                                          {
-                                            relocate_pure(&(*(pp)));
-                                          }
-                                          mask >>= 1;
+                                          relocate_pure(&(*(pp)));
                                         }
+                                        mask >>= 1;
                                       }
+                                    }
+                                  }
+                                  else
+                                  {
+                                    seginfo* n_si = SegInfo((ptr_get_segment(num)));
+                                    if (!(n_si -> old_space))
+                                    {
+                                    }
+                                    else if (SEGMENT_IS_LOCAL(n_si, num))
+                                    {
+                                      relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
+                                      num = ENTRYLIVEMASK(oldret);
                                     }
                                     else
                                     {
-                                      seginfo* n_si = SegInfo((ptr_get_segment(num)));
-                                      if (!(n_si -> old_space))
+                                      RECORD_REMOTE(n_si);
+                                      num = S_G.zero_length_bignum;
+                                    }
+                                    {
+                                      iptr index = BIGLEN(num);
+                                      while (index != 0)
                                       {
-                                      }
-                                      else if (SEGMENT_IS_LOCAL(n_si, num))
-                                      {
-                                        relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
-                                        num = ENTRYLIVEMASK(oldret);
-                                      }
-                                      else
-                                      {
-                                        RECORD_REMOTE(n_si);
-                                        num = S_G.zero_length_bignum;
-                                      }
-                                      {
-                                        iptr index = BIGLEN(num);
-                                        while (index != 0)
+                                        index -= 1;
                                         {
-                                          index -= 1;
+                                          INT bits = bigit_bits;
+                                          bigit mask = BIGIT(num, index);
+                                          while (bits > 0)
                                           {
-                                            INT bits = bigit_bits;
-                                            bigit mask = BIGIT(num, index);
-                                            while (bits > 0)
+                                            bits -= 1;
+                                            pp += 1;
+                                            if (mask & 1)
                                             {
-                                              bits -= 1;
-                                              pp += 1;
-                                              if (mask & 1)
-                                              {
-                                                relocate_pure(&(*(pp)));
-                                              }
-                                              mask >>= 1;
+                                              relocate_pure(&(*(pp)));
                                             }
+                                            mask >>= 1;
                                           }
                                         }
                                       }
@@ -2406,6 +2462,7 @@ static void sweep_thread(thread_gc *tgc, ptr p)
                           }
                         }
                       }
+                      PAR_SWEEPERS_WORKAROUND();
                       U(tc) = 0;
                       V(tc) = 0;
                       W(tc) = 0;
@@ -2556,8 +2613,9 @@ static void sweep_continuation(thread_gc *tgc, ptr p, IGEN from_g)
                             }
                             fp = fp - (ENTRYFRAMESIZE(ret));
                             {
-                              ptr* pp = (ptr*)(TO_VOIDP(fp));
                               iptr oldret = ret;
+                              ptr num = ENTRYLIVEMASK(oldret);
+                              ptr* pp = (ptr*)(TO_VOIDP(fp));
                               ret = (iptr)(*(pp));
                               {
                                 ptr xcp = *(pp);
@@ -2572,57 +2630,54 @@ static void sweep_continuation(thread_gc *tgc, ptr p, IGEN from_g)
                                         relocate_code(c_p, x_si);
                                         *(pp) = (ptr)(((uptr)c_p) + co);
                                       }
+                                      if (Sfixnump(num))
                                       {
-                                        ptr num = ENTRYLIVEMASK(oldret);
-                                        if (Sfixnump(num))
                                         {
+                                          uptr mask = UNFIX(num);
+                                          while (mask != 0)
                                           {
-                                            uptr mask = UNFIX(num);
-                                            while (mask != 0)
+                                            pp += 1;
+                                            if (mask & 1)
                                             {
-                                              pp += 1;
-                                              if (mask & 1)
-                                              {
-                                                relocate_pure(&(*(pp)));
-                                              }
-                                              mask >>= 1;
+                                              relocate_pure(&(*(pp)));
                                             }
+                                            mask >>= 1;
                                           }
+                                        }
+                                      }
+                                      else
+                                      {
+                                        seginfo* n_si = SegInfo((ptr_get_segment(num)));
+                                        if (!(n_si -> old_space))
+                                        {
+                                        }
+                                        else if (SEGMENT_IS_LOCAL(n_si, num))
+                                        {
+                                          relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
+                                          num = ENTRYLIVEMASK(oldret);
                                         }
                                         else
                                         {
-                                          seginfo* n_si = SegInfo((ptr_get_segment(num)));
-                                          if (!(n_si -> old_space))
+                                          RECORD_REMOTE(n_si);
+                                          num = S_G.zero_length_bignum;
+                                        }
+                                        {
+                                          iptr index = BIGLEN(num);
+                                          while (index != 0)
                                           {
-                                          }
-                                          else if (SEGMENT_IS_LOCAL(n_si, num))
-                                          {
-                                            relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
-                                            num = ENTRYLIVEMASK(oldret);
-                                          }
-                                          else
-                                          {
-                                            RECORD_REMOTE(n_si);
-                                            num = S_G.zero_length_bignum;
-                                          }
-                                          {
-                                            iptr index = BIGLEN(num);
-                                            while (index != 0)
+                                            index -= 1;
                                             {
-                                              index -= 1;
+                                              INT bits = bigit_bits;
+                                              bigit mask = BIGIT(num, index);
+                                              while (bits > 0)
                                               {
-                                                INT bits = bigit_bits;
-                                                bigit mask = BIGIT(num, index);
-                                                while (bits > 0)
+                                                bits -= 1;
+                                                pp += 1;
+                                                if (mask & 1)
                                                 {
-                                                  bits -= 1;
-                                                  pp += 1;
-                                                  if (mask & 1)
-                                                  {
-                                                    relocate_pure(&(*(pp)));
-                                                  }
-                                                  mask >>= 1;
+                                                  relocate_pure(&(*(pp)));
                                                 }
+                                                mask >>= 1;
                                               }
                                             }
                                           }
@@ -3609,6 +3664,15 @@ static IBOOL object_directly_refers_to_self(ptr p)
                       pp += 1;
                     }
                   }
+                }
+              }
+              else if (num == Strue)
+              {
+                uptr offset = (uptr)(*((pp + 1)));
+                {
+                  ptr obj = TO_PTR((((uptr)(*(pp))) - offset));
+                  if (p == obj) return 1;
+                  *(pp) = TO_PTR((((uptr)obj) + offset));
                 }
               }
               else

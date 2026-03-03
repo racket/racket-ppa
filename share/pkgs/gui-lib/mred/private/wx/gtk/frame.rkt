@@ -28,7 +28,12 @@
               display-bitmap-resolution
               location->window
               get-current-mouse-state
-              gtk_window_set_transient_for))
+              gtk_window_set_transient_for
+
+              gtk_fixed_new
+              gtk_fixed_move
+
+              tell-all-frames-request-refresh-all-canvas-children))
 
 ;; ----------------------------------------
 
@@ -131,6 +136,13 @@
               (->normal h))))
     #f))
 
+(define-signal-handler connect-map "map"
+  (_fun _GtkWidget _pointer -> _void)
+  (lambda (gtk event)
+    (let ([wx (gtk->wx gtk)])
+      (when wx
+        (send wx notify-children-top-realize)))))
+
 (define-cstruct _GdkEventWindowState ([type _int]
                                       [window _GtkWindow]
                                       [send_event _int8]
@@ -220,6 +232,9 @@
     (gtk_widget_add_events panel-gtk (bitwise-ior GDK_KEY_PRESS_MASK
 						  GDK_KEY_RELEASE_MASK))
     (connect-key panel-gtk)
+
+    (when wayland?
+      (connect-map gtk))
 
     (unless is-dialog?
       (gtk_window_set_icon_list gtk (cdr (force icon-pixbufs+glist))))
@@ -388,6 +403,10 @@
     (define/override (refresh-all-children)
       (when saved-child
         (send saved-child refresh)))
+
+    (define/override (notify-children-top-realize)
+      (when saved-child
+	(send saved-child notify-children-top-realize)))
 
     (define/override (direct-show on?)
       ;; atomic mode
@@ -602,19 +621,20 @@
     (cond
       ;; work around the upstream issue https://gitlab.gnome.org/GNOME/gtk/-/issues/2599
       [(and wayland?
-            ;; for gtk3 >= 3.24.9
+            ;; for gtk3 >= 3.24.9 and < 3.24.42
             gtk3?
             (or
              (> (gtk_get_minor_version) 24)
              (and (= (gtk_get_minor_version) 24)
-                  (>= (gtk_get_micro_version) 9))))
+                  (>= (gtk_get_micro_version) 9)
+                  (< (gtk_get_micro_version) 42))))
        (define scale (gdk_screen_get_monitor_scale_factor
                       (gdk_screen_get_default)
                       num))
-       (make-GdkRectangle (/ (GdkRectangle-x r) scale)
-                          (/ (GdkRectangle-y r) scale)
-                          (/ (GdkRectangle-width r) scale)
-                          (/ (GdkRectangle-height r) scale))]
+       (make-GdkRectangle (floor (inexact->exact (/ (GdkRectangle-x r) scale)))
+                          (floor (inexact->exact (/ (GdkRectangle-y r) scale)))
+                          (floor (inexact->exact (/ (GdkRectangle-width r) scale)))
+                          (floor (inexact->exact (/ (GdkRectangle-height r) scale))))]
       [else r])))
 
 (define (display-origin x y all? num fail)
@@ -674,7 +694,17 @@
            (maybe GDK_MOD1_MASK 'alt)
            (maybe GDK_META_MASK 'meta))))
 
+(define (tell-all-frames-request-refresh-all-canvas-children)
+  (tell-all-frames-something
+   (λ (f)
+     (send f request-refresh-all-canvas-children))))
+
 (define (tell-all-frames-signal-changed n)
+  (tell-all-frames-something
+   (λ (f)
+     (send f display-changed))))
+
+(define (tell-all-frames-something proc)
   (define frames (for/list ([f (in-hash-keys all-frames)]) f))
   (for ([f (in-hash-keys all-frames)])
     (define e (send f get-eventspace))
@@ -682,7 +712,7 @@
       (parameterize ([current-eventspace e])
         (queue-callback
          (λ () 
-           (send f display-changed)))))))
+           (proc f)))))))
 
 (define-signal-handler 
   connect-monitor-changed-signal

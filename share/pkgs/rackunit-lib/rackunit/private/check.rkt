@@ -45,6 +45,7 @@
          fail)
 
 (define current-check-handler (make-parameter display-test-failure/error))
+(define (not-break-exn? x) (not (exn:break? x)))
 
 ;; Like default-check-around, except without test logging. This used to be used
 ;; by test-case, and is currently undocumented. Typed Racket's wrapper around
@@ -53,7 +54,7 @@
 ;; plain-check-around.
 (define (check-around thunk)
   (define handler (current-check-handler))
-  (with-handlers ([(λ (_) #t) handler]) (thunk)))
+  (with-handlers ([not-break-exn? handler]) (thunk)))
 
 ;; Evaluates a check just like a normal function, with no calls to test-log!
 ;; or the current check handler. Check failures are raised as plain exceptions.
@@ -67,7 +68,7 @@
   ;; Nested checks should be evaluated as normal functions, to avoid double
   ;; counting test results.
   (parameterize ([current-check-around plain-check-around])
-    (with-handlers ([(λ (_) #t) log-and-handle!])
+    (with-handlers ([not-break-exn? log-and-handle!])
       (chk-thunk)
       (test-log! #t))))
 
@@ -212,7 +213,7 @@
   (raise-error-if-not-thunk 'check-not-exn thunk)
   (with-handlers
       ([exn:test:check? refail-check]
-       [exn?
+       [(and/c exn? not-break-exn?)
         (lambda (exn)
           (with-default-check-info*
            (list
@@ -228,8 +229,6 @@
 (define-simple-check-values
   [(check operator expr1 expr2) (operator expr1 expr2)]
   [(check-pred predicate expr) (predicate expr)]
-  [(check-= expr1 expr2 epsilon)
-   (<= (magnitude (- expr1 expr2)) epsilon)]
   [(check-true expr) (eq? expr #t)]
   [(check-false expr) (eq? expr #f)]
   [(check-not-false expr) expr]
@@ -238,10 +237,20 @@
   [(check-not-equal? expr1 expr2) (not (equal? expr1 expr2))]
   [(fail) #f])
 
+(define-check (check-= expr1 expr2 epsilon)
+  (with-check-info*
+   (list (make-check-actual expr1)
+         (make-check-expected expr2)
+         (make-check-tolerance epsilon))
+   (lambda ()
+     (unless (<= (magnitude (- expr1 expr2)) epsilon)
+       (fail-check)))))
+
 (define-check (check-within expr1 expr2 epsilon)
   (with-check-info*
    (list (make-check-actual expr1)
-         (make-check-expected expr2))
+         (make-check-expected expr2)
+         (make-check-tolerance epsilon))
    (lambda ()
      (unless (equal?/within expr1 expr2 epsilon)
        (fail-check)))))
@@ -263,7 +272,9 @@
                 (syntax->location (quote-syntax #,(datum->syntax #f 'loc stx))))
               (make-check-expression '#,(syntax->datum stx))
               (make-check-actual actual-val)
-              (make-check-expected 'expected))
+              (make-check-info 'pattern 'expected)
+              #,@(cond [(eq? (syntax-e #'pred) #t) '()]
+                       [else #'((make-check-info 'condition 'pred))]))
         (lambda ()
          (check-true (match actual-val
                        [expected pred]

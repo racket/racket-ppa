@@ -5,10 +5,10 @@
           racket/path
           racket/runtime-path
           scribble/racket
-          (for-label quickscript)
           (for-syntax racket/base) ; for build-path in runtime-path
-          (for-label racket/gui)
-          (for-label drracket/tool-lib))
+          (for-label quickscript
+                     racket/gui
+                     drracket/tool-lib))
 
 @(define (codeblock/file file)
    (list
@@ -21,6 +21,8 @@
 
 @;author{Laurent Orseau}
 @(smaller (author+email "Laurent Orseau" "laurent.orseau@gmail.com"))
+
+@defmodule[quickscript]
 
 @section{Introduction}
 
@@ -42,7 +44,7 @@ Quickscript is installed automatically with DrRacket, so you don't need to do an
 
 You can use Quickscript on its own, but the
 @hyperlink["https://pkgs.racket-lang.org/package/quickscript-extra"]{Quickscript Extra}
-package has a wide range of useful scripts as well as some 
+package has a wide range of useful scripts as well as some
 example scripts intended for customisation by the user.
 
 To install it, either look for @tt{quickscript-extra} in the DrRacket menu @gui{File|Package Manager},
@@ -70,7 +72,7 @@ In the .rkt file that just opened in DrRacket, modify the @racket[define-script]
 @(racketblock
   (define-script reverse-selection
     #:label "Reverse"
-    (λ (selection) 
+    (λ (selection)
       (list->string (reverse (string->list selection))))))
 and save the file.
 
@@ -107,7 +109,7 @@ When all of them are used, a script can look like this:
                   #:editor ed
                   #:definitions defs
                   #:interactions ints
-                  #:file f) 
+                  #:file f)
       "Hello world!")))
 
 Note that the arguments of the properties are literals, not expressions, so they must @italic{not} be quoted.
@@ -126,7 +128,6 @@ Below we detail first the procedure and its arguments and then the script's prop
                  (elem " | "))))
 @;subsection{At a glance}
 
-@defmodule[quickscript]
 @defform[(define-script name
            property ...
            proc)
@@ -172,7 +173,7 @@ The procedure must returns either @racket[#f] or a @racket[string?].
 If it returns @racket[#f], no change is applied to the current editor, but if it returns a string,
 then the current selection is replace with the return value.
 
-If some of the above keywords are specified in the procedure, the Script Plugin detects them and passes the
+If some of the above keywords are specified in the procedure, Quickscript detects them and passes the
 corresponding values, so the procedure can take various forms:
 @(racketblock
   (λ (selection) ....)
@@ -194,7 +195,7 @@ Here is the meaning of the keyword arguments:
     (define-script current-file-example
       #:label "Current file example"
       #:output-to message-box
-      (λ (selection #:file f) 
+      (λ (selection #:file f)
         (string-append "File: " (if f (path->string f) "no-file")
                        "\nSelection: " selection))))
 
@@ -231,7 +232,7 @@ Here is the meaning of the keyword arguments:
     (define-script number-tabs
       #:label "Number of tabs"
       #:output-to message-box
-      (λ (selection #:frame fr) 
+      (λ (selection #:frame fr)
         (format "Number of tabs in DrRacket: ~a"
                 (send fr get-tab-count)))))
  }]
@@ -241,7 +242,7 @@ but not additional mandatory arguments. For example:
 @(racketblock
     (define-script append-plop
       #:label "Append plop"
-      (λ (selection [more ""] #:even-more [even-more ""]) 
+      (λ (selection [more ""] #:even-more [even-more ""])
         (string-append selection "_plop" more even-more)))
 
     (define-script append-plop-plip
@@ -303,7 +304,7 @@ There are some additional properties:
       #:label "Persistent counter"
       #:persistent
       #:output-to message-box
-      (λ (selection) 
+      (λ (selection)
         (set! count (+ count 1))
         (number->string count))))
 
@@ -324,16 +325,87 @@ There are some additional properties:
   @;See a more detailed example in @example-link{persistent-counter.rkt}.
 
   }
- 
+
  @item{@racket[#:os-types (listof (one-of/c unix macosx windows))]
-        
+
   This keyword must be followed by a list of supported os-types.
   Defaults to all types, i.e. @racket[(unix macosx windows)].
-  
+
  }]
 
 If changes are made to these properties, the Scripts menu will probably need to be reloaded
 by clicking on @gui{Scripts|Manage|Reload menu}.
+
+@section{Hooks}
+
+A script function defined with @racket[define-script] always adds a menu item, and is called
+only when the menu item is clicked or called.
+
+By contrast, script functions defined with @racket[define-hook] do not add a menu item, but are run
+automatically on specific events --- see the list below.
+
+@defform[(define-hook name
+           property ...
+           proc)
+         #:grammar
+          ; Do not split these line (verbatim typesetting)
+         [(property (code:line #:help-string string)
+                    (code:line #:persistent? #t #,(elem "|") #f)
+                    (code:line #:os-types (os-type ...) ))
+          (os-type #,(grammar-choice 'macosx 'unix 'windows))
+          (proc (code:line (#,(elem-symbol 'λ) ([#:editor editor-id]
+                                                [#:definitions definitions-id]
+                                                [#:interactions interactions-id]
+                                                [#:frame frame-id]
+                                                [#:file file-id]
+                                                other-kwargs ...)
+                             body-expr ...
+                             return-expr))) ;string-expr #,(elem "|") void-expr #,(elem "|") #f
+          ]
+         ]{
+Defines a hook.
+The hook identifier @racket[name] must be one of the supported hooks (see list below).
+
+See @racket[define-script] for information regarding the keyword arguments of the script function,
+and the properties of the script.
+Note that a hook function does not have a @racket[selection-id] argument.
+Each hook may receive additional optional arguments in @racket[other-kwargs], but as for scripts,
+these arguments are optional and do not need to be specified in the hook function's signature:
+Quickscript recognizes which keywords are asked for by the hook.
+
+The additional keywords accepted by the hook function are the arguments of the original method or
+function.
+
+For example, the following hook displays a message box when a file is loaded in DrRacket:
+ @racketblock[
+ (define-hook after-load-file
+   (λ (#:file f #:in-new-tab? new-tab?)
+     (message-box "on-load-file" (format "f: ~a\n new-tab?: ~a" f new-tab?))))]
+
+DrRacket's frame is always available via the @racket[#:frame] keyword.
+
+@emph{Note: }
+While @emph{scripts} default keyword arguments always correspond to current tab (the one in focus),
+hooks may be called on other tabs.
+
+List of supported hooks, with the additional keywords within parentheses:
+ @itemlist[
+ @item{@racket[after-load-file] @racket[(#:in-new-tab?)] :
+   called after a file is loaded in an existing tab or in a new tab.}
+ @item{@racket[on-save-file] @racket[(#:save-filename #:format)] :
+   called before the file is saved.}
+ @item{@racket[after-save-file] @racket[()] : called after a file is saved.}
+ @item{@racket[after-create-new-tab ()] : called when a new tab is created.}
+ @item{@racket[on-tab-change] @racket[(#:tab-from #:tab-to)] :
+  called when the keyboard focus changes from @racket[#:tab-from] to @racket[#:tab-to].}
+ @item{@racket[on-tab-close] @racket[(#:tab)] :
+   called before the tab is closed.}
+ @item{@racket[on-startup] @racket[()] : called when DrRacket starts, but before the frame is shown.}
+ @item{@racket[after-create-new-drracket-frame] @racket[(#:show)]: called after a new DrRacket frame
+   is created.}
+ @item{@racket[on-close] @racket[()] : called when a DrRacket frame is closed.}
+ ]
+}
 
 @section{Script library}
 
@@ -374,40 +446,22 @@ or on @hyperlink["http://pasterack.org/"]{PasteRack}, and share the link.
 A user can then copy/paste the contents into a new script.
 Don't forget to include a permissive license such as MIT/Apache 2.
 
-
-The @emph{best} way to distribute scripts is by creating a package---the user only has to install
-the package.
-Assuming your scripts are stored in the @racket["scripts"] subdirectory,
-include a file (say @racket["register.rkt"]) at the root directory of
-the package containing the following code:
-@margin-note{If the file @racket["register.rkt"] is not at the root,
-                         the runtime-path needs to be modified accordingly.}
-@codeblock|{
-#lang racket/base
-(require (for-syntax racket/base
-                     racket/runtime-path
-                     (only-in quickscript/library
-                              add-third-party-script-directory!)))
-
-;; This file is going to be called during setup and will automatically
-;; register the scripts subdirectory in quickscript's library.
-(begin-for-syntax
-  (define-runtime-path script-dir "scripts")
-  (add-third-party-script-directory! script-dir))
-  }|
-
-You can see an example with
-@hyperlink["https://github.com/Metaxal/quickscript-extra"]{quickscript-extra}.
-
-Don't forget to register your package on the
-@hyperlink["https://pkgs.racket-lang.org/"]{Racket server}.
+@; The @emph{best} way to distribute scripts is by creating a package---the user only has to install
+@; the package.
+@; ... but the current mechanism is broken, see https://github.com/Metaxal/quickscript/issues/79 ...
+@;
+@; You can see an example with
+@; @hyperlink["https://github.com/Metaxal/quickscript-extra"]{quickscript-extra}.
+@;
+@; Don't forget to register your package on the
+@; @hyperlink["https://pkgs.racket-lang.org/"]{Racket server}.
 
 
 @section{License}
 
-MIT License
+Apache-2.0 or MIT License, at your option.
 
-Copyright (c) 2012-2018 by @link["mailto:laurent.orseau@gmail.com"]{Laurent Orseau @"<laurent.orseau@gmail.com>"}.
+Copyright (c) 2012-2023 by @link["mailto:laurent.orseau@gmail.com"]{Laurent Orseau @"<laurent.orseau@gmail.com>"}.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

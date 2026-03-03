@@ -357,7 +357,7 @@
 ;; ---------------------------------------------------------------------
 ;; Version and machine types:
 
-(define-constant scheme-version #x09050902)
+(define-constant scheme-version #x0a040001)
 
 (define-syntax define-machine-types
   (lambda (x)
@@ -376,40 +376,48 @@
 (define-machine-types
   any
   pb        tpb
-  pb64l     tpb64l
-  pb64b     tpb64b
   pb32l     tpb32l
   pb32b     tpb32b
-  i3le      ti3le
+  pb64l     tpb64l
+  pb64b     tpb64b
   i3nt      ti3nt
+  i3osx     ti3osx
+  i3le      ti3le
   i3fb      ti3fb
   i3ob      ti3ob
-  i3osx     ti3osx
-  a6le      ta6le
-  a6osx     ta6osx
-  a6ob      ta6ob
-  a6s2      ta6s2
-  i3s2      ti3s2
-  a6fb      ta6fb
   i3nb      ti3nb
-  a6nb      ta6nb
-  a6nt      ta6nt
+  i3s2      ti3s2
   i3qnx     ti3qnx
-  arm32le   tarm32le
-  ppc32le   tppc32le
-  arm64le   tarm64le
-  arm64osx  tarm64osx
+  i3gnu     ti3gnu
+  a6nt      ta6nt
+  a6osx     ta6osx
+  a6ios     ta6ios
+  a6le      ta6le
+  a6fb      ta6fb
+  a6ob      ta6ob
+  a6nb      ta6nb
+  a6s2      ta6s2
   ppc32osx  tppc32osx
-  arm32fb   tarm32fb
+  ppc32le   tppc32le
   ppc32fb   tppc32fb
-  arm64fb   tarm64fb
-  arm32ob   tarm32ob
   ppc32ob   tppc32ob
-  arm64ob   tarm64ob
-  arm32nb   tarm32nb
   ppc32nb   tppc32nb
-  arm64nb   tarm64nb
+  arm32le   tarm32le
+  arm32fb   tarm32fb
+  arm32ob   tarm32ob
+  arm32nb   tarm32nb
   arm64nt   tarm64nt
+  arm64osx  tarm64osx
+  arm64ios  tarm64ios
+  arm64le   tarm64le
+  arm64fb   tarm64fb
+  arm64ob   tarm64ob
+  arm64nb   tarm64nb
+  rv64le    trv64le
+  rv64fb    trv64fb
+  rv64ob    trv64ob
+  rv64nb    trv64nb
+  la64le    tla64le
 )
 
 (include "machine.def")
@@ -591,6 +599,8 @@
   (arm32 reloc-arm32-abs reloc-arm32-call reloc-arm32-jump)
   (arm64 reloc-arm64-abs reloc-arm64-call reloc-arm64-jump)
   (ppc32 reloc-ppc32-abs reloc-ppc32-call reloc-ppc32-jump)
+  (riscv64 reloc-riscv64-abs reloc-riscv64-call reloc-riscv64-jump)
+  (loongarch64 reloc-loongarch64-abs reloc-loongarch64-call reloc-loongarch64-jump)
   (pb reloc-pb-abs reloc-pb-proc))
 
 (constant-case ptr-bits
@@ -1199,7 +1209,8 @@
       (fixnum (constant ptr-bytes) fixnum?)
       (char 1 $foreign-char?)
       (wchar (fxsrl (constant wchar-bits) 3) $foreign-wchar?)
-      (boolean (fxsrl (constant int-bits) 3) (lambda (x) #t)))))
+      (boolean (fxsrl (constant int-bits) 3) (lambda (x) #t))
+      (stdbool (fxsrl (constant stdbool-bits) 3) (lambda (x) #t)))))
 )
 
 (define-syntax record-datatype
@@ -1491,6 +1502,7 @@
   ([double data]))
 
 (define-constant flonum-bytes 8)
+(define-constant flonum-bits (* 8 (constant flonum-bytes)))
 
 ; on 32-bit systems, the iptr pad will have no effect above and
 ; beyond the normal padding.  on 64-bit systems, the pad
@@ -1600,6 +1612,7 @@
    [iptr scheme-stack-size]
    [ptr winders]
    [ptr attachments]
+   [ptr handler-stack]
    [ptr cached-frame]
    [ptr U]
    [ptr V]
@@ -1738,9 +1751,9 @@
    [ptr link]))
 
 (define-primitive-structure-disps rp-header type-untyped
-  ([uptr toplink]
-   [uptr mv-return-address]
+  ([uptr mv-return-address]
    [ptr livemask]
+   [uptr toplink]
    [iptr frame-size])) ; low bit is 0 to distinguish from a `rp-compact-header`
 (define-constant return-address-mv-return-address-disp
   (- (constant rp-header-mv-return-address-disp) (constant size-rp-header)))
@@ -1879,7 +1892,7 @@
   (discard                  #b00000000000000001000000)
   (single-valued            #b00000000000000010000000)
   (true                 (or #b00000000000000100000000 single-valued))
-  (mifoldable           (or #b00000000000001000000000 single-valued))
+  (mifoldable+              #b00000000000001000000000)
   (cp02                     #b00000000000010000000000)
   (cp03                     #b00000000000100000000000)
   (system-keyword           #b00000000001000000000000)
@@ -1898,6 +1911,7 @@
   (cptypes3x                cptypes2)
   (arith-op                 (or proc pure true))
   (alloc                    (or proc discard true))
+  (mifoldable               (or mifoldable+ single-valued))
   ; would be nice to check that these and only these actually have cp0 partial folders
   (partial-folder           (or cp02 cp03))
   )
@@ -2102,6 +2116,8 @@
   (expt 2 (+ 20 (constant log2-ptr-bytes))))
 (define-constant default-heap-reserve-ratio 1.0)
 (define-constant default-max-nonstatic-generation 4)
+
+(define-constant fuel-word-count-shift 2)
 
 (constant-case address-bits
   [(32)
@@ -2809,6 +2825,9 @@
      (fl> #f 2 #t #t)
      (fl<= #f 2 #t #t)
      (fl>= #f 2 #t #t)
+     (flbit-field #f 3 #t #t)
+     (flmin #f 2 #t #t)
+     (flmax #f 2 #t #t)
      (callcc #f 1 #f #f)
      (display-string #f 2 #f #t)
      (cfl* #f 2 #f #t)
@@ -2873,6 +2892,8 @@
      (eqv? #f 2 #f #t)
      (set-car! #f 2 #t #t)
      (set-cdr! #f 2 #t #t)
+     (car-cas! #f 3 #t #t)
+     (cdr-cas! #f 3 #t #t)
      (caar #f 1 #t #t)
      (cadr #f 1 #t #t)
      (cdar #f 1 #t #t)
@@ -2965,7 +2986,9 @@
      (bytevector=? #f 2 #f #f)
      (bytevector-ieee-double-native-ref #f 2 #t #t)
      (bytevector-ieee-double-native-set! #f 2 #t #t)
-     (real->flonum #f 2 #f #t)
+     ($real->flonum #f 2 #f #t)
+     (exact? #f 1 #t #t)
+     (inexact? #f 1 #t #t)
      (unsafe-port-eof? #f 1 #f #t)
      (unsafe-lookahead-u8 #f 1 #f #t)
      (unsafe-unget-u8 #f 2 #f #t)

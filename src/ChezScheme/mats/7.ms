@@ -1068,12 +1068,17 @@
            (lambda ()
              (pretty-print '(display "hello 5\n")))
            '(replace))
+         (with-output-to-file "testfile-6.ss"
+           (lambda ()
+             (pretty-print '(error 'boot "fail")))
+           '(replace))
          (parameterize ([optimize-level 2])
            (compile-script "testfile-1")
            (compile-script "testfile-2")
            (compile-file "testfile-3")
            (compile-file "testfile-4")
-           (compile-file "testfile-5")))
+           (compile-file "testfile-5")
+           (compile-file "testfile-6")))
        (void))
   (equal?
     (begin
@@ -1152,7 +1157,7 @@
   ; which scheme-start is set, which was failing because its relocation information was discarded
   ; by the static-generation collection.
   (or
-   (case (machine-type) [(pb tpb pb32 tpb32) #t] [else #f]) ; callables not always in pb
+   (pb?) ; callables not always in pb, and boot files may not work with pbchunk
    (equal?
     (let ([would-be-scheme (find-source (format "..~abin~a~a~ascheme~a" 
                                                 (directory-separator)
@@ -1180,6 +1185,14 @@
           (unless (eof-object? err) (error 'bootfile-test2 err))
           out)))
     "#<code>\n"))
+  ;; make sure an error from a boot file exits with a non-0 exit code
+  (not (equal?
+        (begin
+          (parameterize ([optimize-level 2])
+            (make-boot-file "testfile.boot" '("petite")
+                            "testfile-6.so"))
+          (system (format "~a -b ./testfile.boot -q" (patch-exec-path *scheme*))))
+        0))
 )
 
 (mat hostop
@@ -5675,8 +5688,9 @@ evaluating module init
               (parameterize ([print-vector-length #t]) (pretty-print v))
               #t))))))
   (parameterize ([collect-maximum-generation 4]
-                 [collect-generation-radix 4]
-                 [collect-trip-bytes (expt 2 20)])
+                 [collect-generation-radix 2]
+                 [collect-trip-bytes (expt 2 20)]
+                 [collect-maximum-generation-threshold-factor 0])
     (collect (collect-maximum-generation))
     (let ([b0 (maximum-memory-bytes)])
       (define tail-spin
@@ -5688,6 +5702,30 @@ evaluating module init
       (let ([b1 (maximum-memory-bytes)])
         (or (< (- b1 b0) (expt 2 24))
             (errorf #f "b0 = ~s, b1 = ~s, b1-b0 = ~s" b0 b1 (- b1 b0))))))
+  (begin
+    (define try-gc-threshold
+      (lambda (gc-max?)
+        (let* ([v (gensym)]
+               [w (weak-cons v '())])
+          (parameterize ([collect-maximum-generation 4]
+                         [collect-generation-radix 4]
+                         [collect-trip-bytes (expt 2 20)]
+                         [collect-maximum-generation-threshold-factor (if gc-max? 0 1000)])
+            (collect (collect-maximum-generation))
+            (set! v #f)
+            (let ()
+              (define tail-spin
+                (lambda (n)
+                  (do ([i 1 (fx+ i 1)] [next (cons 0 '()) (cdr next)])
+                      ((fx= i n))
+                    (set-cdr! next (cons i '())))))
+              (tail-spin 50000000)
+              (if gc-max?
+                  (eq? #!bwp (car w))
+                  (symbol? (car w))))))))
+    #t)
+  (try-gc-threshold #t)
+  (try-gc-threshold #f)
  )
 
 (mat object-counts
@@ -6157,8 +6195,8 @@ evaluating module init
    (>= (bytes-deallocated) 0)
    (let ([b (bytes-deallocated)] [c (collections)])
      (with-interrupts-disabled ; ensure allocated list stays in generation 0 until printed
-      (let ([x (make-list 10 'a)])
-        (pretty-print x))
+      (let ([x (make-list 10000 'a)])
+        (pretty-print (list-tail x 9990)))
       (collect))
      (and (> (collections) c) (or (eq? (current-eval) interpret)
                                   (> (bytes-deallocated) b))))

@@ -18,6 +18,7 @@ READ_ONLY Scheme_Object *scheme_make_struct_type_proc;
 READ_ONLY Scheme_Object *scheme_make_struct_field_accessor_proc;
 READ_ONLY Scheme_Object *scheme_make_struct_field_mutator_proc;
 READ_ONLY Scheme_Object *scheme_make_struct_type_property_proc;
+READ_ONLY Scheme_Object *scheme_unsafe_make_struct_type_property_proc;
 READ_ONLY Scheme_Object *scheme_struct_type_p_proc;
 READ_ONLY Scheme_Object *scheme_current_inspector_proc;
 READ_ONLY Scheme_Object *scheme_make_inspector_proc;
@@ -42,6 +43,7 @@ READ_ONLY static Scheme_Object *scheme_checked_proc_property;
 READ_ONLY static Scheme_Object *struct_info_proc;
 ROSYM static Scheme_Object *ellipses_symbol;
 ROSYM static Scheme_Object *prefab_symbol;
+ROSYM static Scheme_Object *current_symbol;
 
 /* locals */
 
@@ -486,6 +488,12 @@ scheme_init_struct (Scheme_Startup_Env *env)
                              scheme_make_struct_type_property_proc,
                              env);
 
+  REGISTER_SO(scheme_unsafe_make_struct_type_property_proc);
+  scheme_unsafe_make_struct_type_property_proc = scheme_make_prim_w_arity2(make_struct_type_property,
+                                                                           "unsafe-make-struct-type-property/guard-calls-no-arguments",
+                                                                           1, 7,
+                                                                           3, 3);
+
   REGISTER_SO(scheme_make_struct_field_accessor_proc);
   scheme_make_struct_field_accessor_proc = scheme_make_prim_w_arity(make_struct_field_accessor,
                                                                     "make-struct-field-accessor",
@@ -498,6 +506,7 @@ scheme_init_struct (Scheme_Startup_Env *env)
   scheme_make_struct_field_mutator_proc = scheme_make_prim_w_arity(make_struct_field_mutator,
                                                                    "make-struct-field-mutator",
                                                                    2, 5);
+
   scheme_addto_prim_instance("make-struct-field-mutator",
 			     scheme_make_struct_field_mutator_proc,
 			     env);
@@ -713,6 +722,9 @@ scheme_init_struct (Scheme_Startup_Env *env)
 
   REGISTER_SO(prefab_symbol);
   prefab_symbol = scheme_intern_symbol("prefab");
+
+  REGISTER_SO(current_symbol);
+  current_symbol = scheme_intern_symbol("current");
 
 
   REGISTER_SO(scheme_source_property);
@@ -962,7 +974,7 @@ Scheme_Object *scheme_chaperone_props_get(Scheme_Object *props, Scheme_Object *p
     }
     return NULL;
   } else
-    return (Scheme_Object *)scheme_hash_tree_get((Scheme_Hash_Tree *)props, prop);
+    return (Scheme_Object *)scheme_eq_hash_tree_get((Scheme_Hash_Tree *)props, prop);
 }
 
 Scheme_Object *scheme_chaperone_props_remove(Scheme_Object *props, Scheme_Object *prop)
@@ -1490,6 +1502,16 @@ static Scheme_Object *guard_property(Scheme_Object *prop, Scheme_Object *v, Sche
     } else
       return v;
   }
+}
+
+int scheme_known_noncalling_guard_struct_type_property(Scheme_Object *v)
+{
+  return (SAME_OBJ(v, write_property)
+          || SAME_OBJ(v, scheme_equal_property)
+          || SAME_OBJ(v, print_attribute_property)
+          || SAME_OBJ(v, evt_property)
+          || SAME_OBJ(v, proc_property)
+          || SAME_OBJ(v, method_property));
 }
 
 /*========================================================================*/
@@ -4761,6 +4783,28 @@ Scheme_Object *scheme_rename_struct_proc(Scheme_Object *p, Scheme_Object *sym, S
   return NULL;
 }
 
+static void format_name(char *name, int lp, int lp1, int lp2,
+                        const char *pre, const char *tn, int ltn, int xltn,
+                        const char *post1, const char *fn, int lfn, int xlfn,
+                        const char *post2) {
+  int total;
+
+  memcpy(name, pre, lp);
+  total = lp;
+  if (xltn)
+    memcpy(name + total, (ltn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)tn) : tn, xltn);
+  total += xltn;
+  memcpy(name + total, post1, lp1);
+  total += lp1;
+  if (xlfn)
+    memcpy(name + total, (lfn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)fn) : fn, xlfn);
+  total += xlfn;
+  memcpy(name + total, post2, lp2);
+  total += lp2;
+
+  name[total] = 0;
+}
+
 static Scheme_Object *make_name(const char *pre, const char *tn, int ltn,
 				const char *post1, const char *fn, int lfn,
 				const char *post2, int sym)
@@ -4784,30 +4828,21 @@ static Scheme_Object *make_name(const char *pre, const char *tn, int ltn,
   total += xlfn;
   total += (lp2 = strlen(post2));
 
-  if (sym && (total < 256))
+  if (sym && (total < 256)) {
     name = buffer;
-  else
-    name = (char *)scheme_malloc_atomic(sizeof(char)*(total + 1));
-  
-  memcpy(name, pre, lp);
-  total = lp;
-  if (xltn)
-    memcpy(name + total, (ltn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)tn) : tn, xltn);
-  total += xltn;
-  memcpy(name + total, post1, lp1);
-  total += lp1;
-  if (xlfn)
-    memcpy(name + total, (lfn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)fn) : fn, xlfn);
-  total += xlfn;
-  memcpy(name + total, post2, lp2);
-  total += lp2;
-
-  name[total] = 0;
-
-  if (sym)
+    format_name(name, lp, lp1, lp2,
+                pre, tn, ltn, xltn,
+                post1, fn, lfn, xlfn,
+                post2);
     return scheme_intern_exact_symbol(name, total);
-  else
+  } else {
+    name = (char *)scheme_malloc_atomic(sizeof(char)*(total + 1));
+    format_name(name, lp, lp1, lp2,
+                pre, tn, ltn, xltn,
+                post1, fn, lfn, xlfn,
+                post2);
     return (Scheme_Object *)name;
+  }
 }
 
 /*========================================================================*/
@@ -5527,9 +5562,9 @@ static Scheme_Object *make_struct_type(int argc, Scheme_Object **argv)
         if (SAME_OBJ(inspector, prefab_symbol)) {
           prefab = 1;
           inspector = scheme_false;
-	} else if (!SCHEME_FALSEP(inspector)) {
+	} else if (!SCHEME_FALSEP(inspector) && !SAME_OBJ(inspector, current_symbol)) {
 	  if (!SAME_TYPE(SCHEME_TYPE(argv[6]), scheme_inspector_type))
-	    scheme_wrong_contract("make-struct-type", "(or/c inspector? #f 'prefab)", 6, argc, argv);
+	    scheme_wrong_contract("make-struct-type", "(or/c inspector? #f 'current 'prefab)", 6, argc, argv);
 	}
 
 	if (argc > 7) {
@@ -5581,8 +5616,11 @@ static Scheme_Object *make_struct_type(int argc, Scheme_Object **argv)
   if (!uninitc)
     uninit_val = scheme_false;
 
-  if (!inspector)
+  if (!inspector || SAME_OBJ(inspector, current_symbol))
     inspector = scheme_get_param(scheme_current_config(), MZCONFIG_INSPECTOR);
+
+  MZ_ASSERT(SCHEME_FALSEP(inspector) || SAME_OBJ(inspector, prefab_symbol)
+         || SAME_TYPE(SCHEME_TYPE(inspector), scheme_inspector_type));
 
   immutable_array = immutable_pos_list_to_immutable_array(immutable_pos_list, initc + uninitc);
 
@@ -6620,7 +6658,8 @@ Scheme_Object *scheme_parse_chaperone_props(const char *who, int start_at, int a
     /* Check */
     for (pos = start_at; pos < argc; pos += 2) {
       v = argv[pos];
-      if (!SAME_TYPE(SCHEME_TYPE(v), scheme_chaperone_property_type))
+      if (!SAME_TYPE(SCHEME_TYPE(v), scheme_chaperone_property_type)
+          && (v != scheme_hash_kind_key))
         scheme_wrong_contract(who, "impersonator-property?", pos, argc, argv);
 
       if (pos + 1 >= argc)

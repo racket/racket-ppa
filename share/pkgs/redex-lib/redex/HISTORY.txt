@@ -1,3 +1,79 @@
+v9.1
+
+  * bug fixes and documentation improvements
+
+v9.0
+
+  No changes since v8.18
+
+v8.18
+
+  * changed redex-check's default generation strategy so that it
+    always uses random generation. Specifically, spends half of its
+    attempts on the enumerator and half on random generation when the
+    total number of attempts is 1000 or less. Otherwise it caps the
+    enumerator to 500 attempts.
+
+  * bug fixes and docs improvements
+
+v8.17
+
+  * render-judgment-form and judgment-form->pict are functions, making
+    them suitable to abstract over (before, they required their
+    arguments to be identifiers bound to judgment forms)
+
+  * fixed the rendering of nonterminals that have both subscripts and primes
+
+  * minor bug fix in redex's typesetting code
+
+v8.16
+
+  * bug fixes
+
+v8.15
+
+  no changes since 8.14
+
+v8.14
+
+  * bug fix
+
+v8.13
+
+  * bug fix
+
+v8.12
+
+  * documentation improvements
+
+v8.11
+
+  * added `redex-define` and `term-define`, thanks to Shu-Hung You
+
+  * documentation fixes
+
+v8.10
+
+  * added judgment-form->rule-names
+
+  * unbreak traces/ps
+
+v8.9
+
+  * bug fix
+
+v8.8
+
+  * improved typesetting support when customized renders are used in
+    certain multi-line situations. Thanks to Shu-Hung You for
+    suggesting the fix.
+
+  * fixed more bugs in randomized testing for delimited continuations
+
+v8.7
+
+  * fixed bugs in randomized testing for delimited continuations
+
 v8.6
 
   * added support for simultaneous substitutions, thanks to Phil Nguyen

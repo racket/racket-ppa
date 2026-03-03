@@ -6,10 +6,10 @@
          (prefix-in c: (contract-req))
          "../rep/type-rep.rkt"
          "../rep/type-constr.rkt"
-         "struct-type-constr.rkt"
          "../rep/free-variance.rkt"
          "../rep/values-rep.rkt"
          "../private/parse-type.rkt"
+         "../private/user-defined-type-constr.rkt"
          "../private/syntax-properties.rkt"
          "../types/base-abbrev.rkt"
          "../types/abbrev.rkt"
@@ -44,8 +44,9 @@
 (provide tc/struct
          tc/struct-prop-values
          tc/make-struct-type-property
-         name-of-struct d-s
-         refine-struct-variance!
+         name-of-struct
+         names-referred-in-struct
+         d-s
          register-parsed-struct-sty!
          register-parsed-struct-bindings!)
 
@@ -59,7 +60,7 @@
 ;; desc : struct-desc
 ;; struct-info : struct-info?
 ;; type-only : Boolean
-(struct parsed-struct (sty names desc struct-info type-only) #:transparent)
+(struct parsed-struct (sty names desc struct-info) #:transparent)
 
 ;; struct-name : Id  (the identifier for the static struct info,
 ;;                    usually the same as the type-name)
@@ -91,13 +92,27 @@
   (syntax-parse stx
     [t:typed-struct #'t.type-name]))
 
+(define (names-referred-in-struct stx)
+  (define-values (tvars field-types)
+    (syntax-parse stx
+      [t:typed-struct (values (attribute t.tvars)
+                              (attribute t.types))]))
+  (define name (name-of-struct stx))
+
+  (cond
+    [(null? tvars) null]
+    [else
+     (append-map (lambda (t)
+                   (define-values (r _ __) (parse-for-effects name (cons tvars t)))
+                   r)
+                 field-types)]))
+
 ;; a simple wrapper to get proc from a polymorphic or monomorhpic structure
 (define/cond-contract (get-struct-proc sty)
   (c:-> (c:or/c Struct? Poly?) (c:or/c #f Fun?))
   (Struct-proc (match sty
                  [(? Struct?) sty]
                  [(Poly: names (? Struct? sty)) sty])))
-
 
 (define/cond-contract (tc/struct-prop-values st-tname pnames pvals)
   (c:-> identifier? (c:listof identifier?) (c:listof syntax?) void?)
@@ -178,10 +193,10 @@
       (if (null? l)
           (values (reverse getters) (reverse setters))
           (loop (cddr l) (cons (car l) getters) (cons (cadr l) setters)))))
-  (match (build-struct-names nm flds #f #f nm #:constructor-name maker*)
-    [(list sty maker pred getters/setters ...)
-     (let-values ([(getters setters) (split getters/setters)])
-       (struct-names nm type-name sty maker extra-maker pred getters setters))]))
+  (match-define (list sty maker pred getters/setters ...)
+    (build-struct-names nm flds #f #f nm #:constructor-name maker*))
+  (define-values (getters setters) (split getters/setters))
+  (struct-names nm type-name sty maker extra-maker pred getters setters))
 
 ;; gets the fields of the parent type, if they exist
 ;; Option[Struct-Ty] -> Listof[Type]
@@ -232,10 +247,12 @@
   ;; a type constructor to create the monomophic structure types of foo. e.g (foo Integer)
   (register-type-name type-name
                       (make-Poly (struct-desc-tvars desc) sty))
-  (define sty^ (make-Poly (struct-desc-tvars desc) sty))
   (unless (empty? (struct-desc-tvars desc))
-    (define ty-op (make-type-constr (struct-type-op sty^)
-                                (length (struct-desc-tvars desc))))
+    (define variances (map (lambda _ variance:const) (struct-desc-tvars desc)))
+    (define ty-op (make-type-constr (user-defined-type-op (struct-desc-tvars desc) sty #f)
+                                    (length (struct-desc-tvars desc))
+                                    #:variances
+                                    variances))
     (register-type-constructor! type-name ty-op)))
 
 ;; Register the appropriate types, return a list of struct bindings
@@ -306,11 +323,10 @@
 
   ;; is this structure covariant in *all* arguments?
   (define (covariant-for? fields mutable)
-    (for*/and ([var (in-list tvars)]
-               [t (in-list fields)])
-      (let ([variance (hash-ref (free-vars-hash (free-vars* t)) var variance:const)])
-        (or (variance:const? variance)
-            (and (not mutable) (variance:co? variance))))))
+    (for*/and ([t (in-list fields)]
+               [variance (in-list (variances-in-type t tvars))])
+      (or (variance:const? variance)
+          (and (not mutable) (variance:co? variance)))))
 
   (define covariant?
     (and (covariant-for? self-fields mutable)
@@ -397,14 +413,14 @@
     (for/list ([opname (in-list operators)]
                [self-fld (in-list self-fields)]
                [idx-parent-cnt (in-naturals parent-count)])
-      (let-values ([(fn-args poly-ty) (mk-vals opname self-fld idx-parent-cnt st-type-alias)])
-        (apply add-struct-operator-fn! opname fn-args)
-        (make-def-binding opname poly-ty))))
+      (define-values (fn-args poly-ty) (mk-vals opname self-fld idx-parent-cnt st-type-alias))
+      (apply add-struct-operator-fn! opname fn-args)
+      (make-def-binding opname poly-ty)))
 
   (define bindings
     (list* (make-def-binding struct-type (make-StructType sty))
            (make-def-binding predicate
-                             (make-pred-ty (mk-pred-ty st-type-alias-maybe-with-proc)))
+                             (unsafe-shallow:make-pred-ty (mk-pred-ty st-type-alias-maybe-with-proc)))
            (append*
             (mk-operator-bindings! getters add-struct-accessor-fn! mk-getter-vals)
             (maybe-cons (and self-mutable (mk-operator-bindings! setters add-struct-mutator-fn! mk-setter-vals))))))
@@ -442,26 +458,92 @@
                            def-bindings))))
 
 (define (register-parsed-struct-sty! ps)
-  (match ps
-    ((parsed-struct sty names desc si type-only)
-     (register-sty! sty names desc))))
+  (match-define (parsed-struct sty names desc si) ps)
+  (register-sty! sty names desc))
 
 (define (register-parsed-struct-bindings! ps)
-  (match ps
-    ((parsed-struct sty names desc si type-only)
-     (if type-only
-         null
-         (register-struct-bindings! sty names desc si)))))
+  (match-define (parsed-struct sty names desc si) ps)
+  (register-struct-bindings! sty names desc si))
 
-;; Listof<Parsed-Struct> -> Void
-;; Refines the variance of struct types in the name environment
-(define (refine-struct-variance! parsed-structs)
-  (define stys (map parsed-struct-sty parsed-structs))
-  (define tvarss (map (compose struct-desc-tvars parsed-struct-desc) parsed-structs))
-  (define names
-    (for/list ([parsed-struct (in-list parsed-structs)])
-      (struct-names-type-name (parsed-struct-names parsed-struct))))
-  (refine-variance! names stys tvarss))
+;; extract the type annotation of prop:procedure value
+(define/cond-contract (extract-proc-ty proc-ty-stx desc fld-names st-name)
+  (c:-> (c:listof syntax?) struct-desc? (c:listof identifier?) identifier? Type?)
+
+  (unless (equal? (length proc-ty-stx) 1)
+    (tc-error "prop:procedure can only have one value assigned to it"))
+
+  (let ([proc-ty-stx (car proc-ty-stx)])
+    (syntax-parse proc-ty-stx
+      #:literals (struct-field-index)
+      ;; a field index is provided
+      [n_:exact-nonnegative-integer
+       (define n (syntax-e #'n_))
+       (define max-idx (sub1 (length (struct-desc-self-fields desc))))
+       (unless (<= n max-idx)
+         (tc-error/fields
+          "index too large"
+          "index"
+          n
+          "maximum allowed index"
+          max-idx
+          #:stx proc-ty-stx))
+       (define ty (list-ref (struct-desc-self-fields desc) n))
+       (unless (Fun? ty)
+         (tc-error/fields
+          (format "field ~a is not a function" (syntax-e (list-ref fld-names n)))
+          "expected"
+          "Procedure"
+          "given"
+          ty
+          #:stx proc-ty-stx))
+       ty]
+
+      ;; a field name is provided (via struct-field-index)
+      [(struct-field-index fld-nm:id)
+       (define idx (index-of fld-names #'fld-nm
+                             free-identifier=?))
+       ;; fld-nm must be valid, because invalid field names have been reported by
+       ;; struct-field-index at this point
+       (list-ref (struct-desc-self-fields desc) idx)]
+
+      [ty-stx:st-proc-ty^
+       #:do [(define ty (parse-type #'ty-stx))]
+       (match ty
+         [(Fun: (list arrs ...))
+          (make-Fun
+           (for/list ([arr (in-list arrs)])
+             (Arrow-update
+              arr
+              dom
+              (lambda (doms)
+                (match (car doms)
+                  [(Name/simple: n)
+                   #:when (free-identifier=? n st-name)
+                   (void)]
+                  [(App: (Name/simple: rator) vars)
+                   #:when (free-identifier=? rator st-name)
+                   (void)]
+                  [(Univ:) (void)]
+                  [(or (Name/simple: (app syntax-e n)) n)
+                   (tc-error/fields
+                    "type mismatch in the first parameter of the function for prop:procedure"
+                    "expected"
+                    (syntax-e st-name)
+                    "got"
+                    n
+                    #:stx (st-proc-ty-property #'ty-stx))])
+           
+                (cdr doms)))))]
+         [_
+          (tc-error/fields "type mismatch"
+                           "expected"
+                           "Procedure"
+                           "given"
+                           ty
+                           #:stx #'ty-stx)])]
+      [_
+       (tc-error/stx proc-ty-stx
+                     "expected: a nonnegative integer literal or an annotated lambda")])))
 
 ;; extract the type annotation of prop:procedure value
 (define/cond-contract (extract-proc-ty proc-ty-stx desc fld-names st-name)
@@ -550,7 +632,6 @@
                    #:maker [maker #f]
                    #:extra-maker [extra-maker #f]
                    #:mutable [mutable #f]
-                   #:type-only [type-only #f]
                    #:prefab? [prefab? #f]
                    #:proc-ty-stx [proc-ty-stx #f]
                    #:properties [properties empty])
@@ -616,7 +697,7 @@
          (define desc
            (struct-desc parent-fields types tvars mutable parent-mutable))
          (parsed-struct (make-Prefab key (append parent-fields types))
-                        names desc (struct-info-property nm/par) #f)]
+                        names desc (struct-info-property nm/par))]
         [else
          (define parent-mutable
            ;; Only valid as long as typed structs must be
@@ -634,7 +715,7 @@
                                                 (extend-tvars tvars
                                                               (extract-proc-ty proc-ty-stx desc fld-names type-name)))))
 
-         (parsed-struct sty names desc (struct-info-property nm/par) type-only)]))
+         (parsed-struct sty names desc (struct-info-property nm/par))]))
 
 ;; register a struct type
 ;; convenience function for built-in structs

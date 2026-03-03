@@ -10,11 +10,13 @@
          "text-delegate.rkt"
          "text-first-line.rkt"
          "text-line-numbers.rkt"
+         "text-indent-guides.rkt"
          "text-misc.rkt"
          "text-normalize-paste.rkt"
          "text-port.rkt"
          "text-search.rkt"
          "text-inline-overview.rkt"
+         "text-max-width-paragraph.rkt"
          "text-sig.rkt"
          "srcloc-snip.rkt"
          "sig.rkt")
@@ -43,10 +45,12 @@
           text-first-line^
           text-inline-overview^
           text-line-numbers^
+          text-indent-guides^
           text-misc^
           text-normalize-paste^
           text-port^
-          text-search^)
+          text-search^
+          text-max-width-paragraph^)
 
   (link text-ascii-art@
         text-autocomplete@
@@ -54,8 +58,10 @@
         text-column-guide@
         text-delegate@
         text-first-line@
+        text-max-width-paragraph@
         text-inline-overview@
         text-line-numbers@
+        text-indent-guides@
         text-misc@
         text-normalize-paste@
         text-port@
@@ -85,7 +91,9 @@
     text-first-line^
     text-inline-overview^
     text-line-numbers^
+    text-indent-guides^
     text-misc^
+    text-max-width-paragraph^
     text-normalize-paste^
     text-port^
     text-search^)

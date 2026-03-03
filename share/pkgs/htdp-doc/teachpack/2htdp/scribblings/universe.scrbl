@@ -929,7 +929,7 @@ A typical program does not use all three of these functions. Furthermore,
  collection of all these functions is your @tech{world} program.
 
 @centerline{An extended example is available in
- @link["http://www.ccs.neu.edu/home/matthias/HtDP2e/"]{How to Design Programs/2e}.}
+ @link["https://htdp.org"]{How to Design Programs/2e}.}
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "world2" #:tag-prefix "universe"]{The World is not Enough}
@@ -1344,7 +1344,7 @@ optional handlers:
 }
 
 @defform/none[#:literals (on-tick)
-              (on-tick tick-expr rate-expr)
+              (on-tick tick-expr rate-expr limit-expr)
               #:contracts
               ([tick-expr (-> (unsyntax @tech{UniverseState}) (or/c (unsyntax @tech{UniverseState}) bundle?))]
                [rate-expr (and/c real? positive?)]
@@ -2018,12 +2018,12 @@ Finally, here is the third function, which renders the state as an image:
 
 ; String -> WorldState
 ; create and hook up a world with the @racket[LOCALHOST] server
-(define (create-world name)
+(define (create-world a-name)
   (big-bang WORLD0
    (on-receive receive)
-   (to-draw    (draw n))
+   (to-draw    (draw a-name))
    (on-tick    move)
-   (name       name)
+   (name       a-name)
    (register   LOCALHOST)))
 ))
 

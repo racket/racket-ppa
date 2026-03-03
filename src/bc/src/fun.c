@@ -113,6 +113,7 @@ static Scheme_Object *extract_one_cc_mark (int argc, Scheme_Object *argv[]);
 static Scheme_Object *call_with_immediate_cc_mark (int argc, Scheme_Object *argv[]);
 static Scheme_Object *void_func (int argc, Scheme_Object *argv[]);
 static Scheme_Object *void_p (int argc, Scheme_Object *argv[]);
+static Scheme_Object *black_box (int argc, Scheme_Object *argv[]);
 static Scheme_Object *dynamic_wind (int argc, Scheme_Object *argv[]);
 static Scheme_Object *time_apply(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_milliseconds(int argc, Scheme_Object **argv);
@@ -466,7 +467,10 @@ scheme_init_fun (Scheme_Startup_Env *env)
   SCHEME_PRIM_PROC_FLAGS(scheme_void_proc) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_OMITABLE);
   scheme_addto_prim_instance("void", scheme_void_proc, env);
 
-  
+  scheme_addto_prim_instance("black-box",
+                             scheme_make_noncm_prim(black_box, "black-box", 1, 1),
+                             env);
+
   REGISTER_SO(scheme_void_p_proc);
   scheme_void_p_proc = scheme_make_folding_prim(void_p, "void?", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(scheme_void_p_proc) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
@@ -759,6 +763,10 @@ scheme_init_unsafe_fun (Scheme_Startup_Env *env)
   ADD_PRIM_W_ARITY("unsafe-call-with-composable-continuation/no-wind", unsafe_call_with_control_no_dws, 2, 2, env);
 
   ADD_PRIM_W_ARITY("unsafe-root-continuation-prompt-tag", unsafe_root_continuation_prompt_tag, 0, 0, env);
+
+  scheme_addto_prim_instance("unsafe-make-struct-type-property/guard-calls-no-arguments",
+                             scheme_unsafe_make_struct_type_property_proc,
+                             env);
 }
 
 void
@@ -2381,6 +2389,12 @@ static Scheme_Object *
 void_p (int argc, Scheme_Object *argv[])
 {
   return SAME_OBJ(argv[0], scheme_void) ? scheme_true : scheme_false;
+}
+
+static Scheme_Object *
+black_box (int argc, Scheme_Object *argv[])
+{
+  return argv[0];
 }
 
 Scheme_Object *
@@ -5109,12 +5123,27 @@ static Scheme_Dynamic_Wind *clone_dyn_wind(Scheme_Dynamic_Wind *dw,
   if (keep_tail)
     tail = dw;
   if (first) {
-    prev->prev = tail;
-    if (tail)
-      cnt += tail->depth + 1;
-    for (dw = first; dw != tail; dw = dw->prev) {
-      dw->depth = --cnt;
+    int d_depth, d_len;
+
+    if (prev->prev) {
+      d_depth = prev->prev->depth;
+      d_len = prev->prev->actual_len;
+    } else {
+      d_depth = -1;
+      d_len = 0;
     }
+
+    prev->prev = tail;
+
+    d_depth -= (tail ? tail->depth : -1);
+    d_len -= (tail ? tail->actual_len : 0);
+    if ((d_depth != 0) || (d_len != 0)) {
+      for (dw = first; dw != tail; dw = dw->prev) {
+        dw->depth -= d_depth;
+        dw->actual_len -= d_len;
+      }
+    }
+
     return first;
   } else
     return tail;
@@ -5461,7 +5490,8 @@ static MZ_MARK_STACK_TYPE exec_dyn_wind_pres(Scheme_Dynamic_Wind_List *dwl,
                                              MZ_MARK_STACK_TYPE copied_cms,
                                              int clear_cm_caches,
                                              Scheme_Object **_sub_conts,
-                                             int skip_dws)
+                                             int skip_dws,
+                                             int skip_winds)
 {
   Scheme_Thread *p = scheme_current_thread;
   int old_cac = scheme_continuation_application_count;
@@ -5472,7 +5502,7 @@ static MZ_MARK_STACK_TYPE exec_dyn_wind_pres(Scheme_Dynamic_Wind_List *dwl,
     if (dwl->dw->pre) {
       p->next_meta = dwl->meta_depth + dwl->dw->next_meta;
       if (dwl->meta_depth > 0) {
-        if (!skip_dws)
+        if (!skip_dws && (skip_winds <= 0))
           scheme_apply_dw_in_meta(dwl->dw, 0, dwl->meta_depth, cont);
       } else {
         /* Restore the needed part of the mark stack for this
@@ -5486,7 +5516,7 @@ static MZ_MARK_STACK_TYPE exec_dyn_wind_pres(Scheme_Dynamic_Wind_List *dwl,
                            dwl->dw->envss.cont_mark_pos);
         copied_cms = MZ_CONT_MARK_STACK;
 
-        if (!skip_dws)
+        if (!skip_dws && (skip_winds <= 0))
           pre(dwl->dw->data);
 
         if (!cont->composable) {
@@ -5496,6 +5526,8 @@ static MZ_MARK_STACK_TYPE exec_dyn_wind_pres(Scheme_Dynamic_Wind_List *dwl,
           }
         }
       }
+      if (skip_winds > 0)
+        --skip_winds;
       p = scheme_current_thread;
     }
 
@@ -6076,7 +6108,7 @@ static void restore_continuation(Scheme_Cont *cont, Scheme_Thread *p, int for_pr
         meta_depth += dw->next_meta;
       }
       copied_cms = exec_dyn_wind_pres(dwl, dwl_len, cont, copied_cms, clear_cm_caches, &sub_conts,
-                                      cont->skip_dws);
+                                      cont->skip_dws, cont->skip_winds);
       p = scheme_current_thread;
       p->next_meta = cont->next_meta;      
     }
@@ -7300,6 +7332,7 @@ static Scheme_Object *call_with_prompt (int in_argc, Scheme_Object *in_argv[])
       prompt_dw->next_meta = p->next_meta;
       prompt_dw->prev = p->dw;
       prompt_dw->depth = p->dw->depth + 1;
+      prompt_dw->actual_len = p->dw->actual_len;
     }
 
     p->next_meta = 0;
@@ -7572,6 +7605,7 @@ Scheme_Object *scheme_compose_continuation(Scheme_Cont *cont, int num_rands, Sch
   }
   cont->value = value;
   cont->common_dw_depth = -1;
+  cont->skip_winds = 0;
 
   mc = scheme_current_thread->meta_continuation;
   if (mc && mc->pseudo && mc->meta_tail_pos == MZ_CONT_MARK_POS) {
@@ -9657,10 +9691,13 @@ Scheme_Object *scheme_dynamic_wind(void (*pre)(void *),
   dw->pre = pre;
   dw->post = post;
   dw->prev = p->dw;
-  if (dw->prev)
+  if (dw->prev) {
     dw->depth = dw->prev->depth + 1;
-  else
+    dw->actual_len = dw->prev->actual_len + 1;
+  } else {
     dw->depth = 0;
+    dw->actual_len = 1;
+  }
   dw->next_meta = p->next_meta;
 
   p->next_meta = 0;

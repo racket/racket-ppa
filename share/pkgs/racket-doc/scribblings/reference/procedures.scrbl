@@ -7,7 +7,7 @@
 @racket[v] is a procedure, @racket[#f] otherwise.}
 
 
-@defproc[(apply [proc procedure?] 
+@defproc[(apply [proc procedure?]
                 [v any/c] ... [lst list?]
                 [#:<kw> kw-arg any/c] ...) any]{
 
@@ -131,8 +131,8 @@ supplied keyword arguments in the @racket[#:<kw> kw-arg] sequence,
 where @racket[#:<kw>] stands for any keyword.
 
 The given @racket[kw-lst] must be sorted using @racket[keyword<?].  No
-keyword can appear twice in @racket[kw-lst] or in both
-@racket[kw-list] and as a @racket[#:<kw>], otherwise, the
+keyword can appear twice in @racket[kw-lst] or both in
+@racket[kw-lst] and as a @racket[#:<kw>], otherwise, the
 @exnraise[exn:fail:contract]. The given @racket[kw-val-lst] must have
 the same length as @racket[kw-lst], otherwise, the
 @exnraise[exn:fail:contract]. The given @racket[proc] must accept all
@@ -312,7 +312,7 @@ list is also in the second list.
 }
 
 @defproc[(make-keyword-procedure
-          [proc (((listof keyword?) list?) () #:rest list? . ->* . any)]
+          [proc ((listof keyword?) list? any/c ... . -> . any)]
           [plain-proc procedure? (lambda args (apply proc null null args))])
          procedure?]{
 
@@ -335,7 +335,12 @@ the first two arguments, but that correspondence is in no way
 enforced.
 
 The result of @racket[procedure-arity] and @racket[object-name] on the
-new procedure is the same as for @racket[plain-proc]. See also
+new procedure is the same as for @racket[plain-proc], if
+@racket[plain-proc] is provided. Otherwise, the result of
+@racket[object-name] is the same as for @racket[proc],
+but the result of @racket[procedure-arity] is derived from that of
+@racket[proc] by reducing its arity by 2 (i.e., without the two prefix
+arguments that handle keyword arguments). See also
 @racket[procedure-reduce-keyword-arity] and @racket[procedure-rename].
 
 @examples[
@@ -351,7 +356,7 @@ new procedure is the same as for @racket[plain-proc]. See also
  (define show2
    (make-keyword-procedure (lambda (kws kw-args . rest)
                              (list kws kw-args rest))
-                           (lambda args 
+                           (lambda args
                              (list->vector args)))))
 (show2 1)
 (show2 #:init 0 1 2 3 #:extra 4)
@@ -382,7 +387,7 @@ must require no more keywords than the ones listed in
  (define orig-show
    (make-keyword-procedure (lambda (kws kw-args . rest)
                              (list kws kw-args rest))))
- (define show (procedure-reduce-keyword-arity 
+ (define show (procedure-reduce-keyword-arity
                orig-show 3 '(#:init) '(#:extra #:init))))
 (show #:init 0 1 2 3 #:extra 4)
 (eval:error (show 1))
@@ -454,7 +459,7 @@ redundant and disallowed).
 
 @examples[
 (struct annotated-proc (base note)
-  #:property prop:procedure 
+  #:property prop:procedure
              (struct-field-index base))
 (define plus1 (annotated-proc
                 (lambda (x) (+ x 1))
@@ -489,9 +494,9 @@ is disallowed).
 @mz-examples[
 (struct fish (weight color)
   #:mutable
-  #:property 
-  prop:procedure  
-  (lambda (f n) 
+  #:property
+  prop:procedure
+  (lambda (f n)
     (let ([w (fish-weight f)])
       (set-fish-weight! f (+ n w)))))
 (define wanda (fish 12 'red))
@@ -614,18 +619,12 @@ implemented in a lower-level language. Not all procedures of
 distinction between primitives and other procedures may be useful to
 other low-level code.
 
-The distinction between primitives and other procedures may also be
-useful for adjusting exception messages through parameters such as
-@racket[error-primitive-name->symbol-handler], but the notion of
-``primitive'' for those handlers and the notion for
-@racket[primitive?] do not coincide completely.
-
 @defproc[(primitive? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is a primitive procedure,
 @racket[#f] otherwise.}
 
-@defproc[(primitive-closure? [v any/c]) boolean]{
+@defproc[(primitive-closure? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is internally implemented as a
 primitive closure rather than a simple primitive procedure,
@@ -651,15 +650,34 @@ applied.}
 Returns @racket[v].
 }
 
-@defproc[(const [v any]) procedure?]{
+@defproc[(const [v any/c]) procedure?]{
 
 Returns a procedure that accepts any arguments (including keyword
 arguments) and returns @racket[v].
 
 @mz-examples[#:eval fun-eval
-((const 'foo) 1 2 3)
 ((const 'foo))
+((const 'foo) 1 2 3)
+((const 'foo) 'a 'b #:c 'c)
 ]}
+
+@defproc[(const* [v any/c] ...) procedure?]{
+
+Similar to @racket[const], except it returns @racket[v]s.
+
+@mz-examples[#:eval fun-eval
+((const*))
+((const*) 1 2 3)
+((const*) 'a 'b #:c 'c)
+((const* 'foo))
+((const* 'foo) 1 2 3)
+((const* 'foo) 'a 'b #:c 'c)
+((const* 'foo 'foo))
+((const* 'foo 'foo) 1 2 3)
+((const* 'foo 'foo) 'a 'b #:c 'c)
+]
+
+@history[#:added "8.7.0.5"]}
 
 @deftogether[(@defform[(thunk  body ...+)]
               @defform[(thunk* body ...+)])]{
@@ -729,7 +747,7 @@ Combines calls to each function with @racket[or].  Equivalent to
 }
 
 @defproc*[([(curry [proc procedure?]) procedure?]
-           [(curry [proc procedure?] [v any/c] ...+) any/c])]{
+           [(curry [proc procedure?] [v any/c] ...+) any])]{
 
 The result of @racket[(curry proc)] is a procedure that is a curried
 version of @racket[proc]. When
@@ -786,7 +804,7 @@ have been supplied.
 @history[#:changed "7.0.0.7" @elem{Added support for keyword arguments.}]}
 
 @defproc*[([(curryr [proc procedure?]) procedure?]
-           [(curryr [proc procedure?] [v any/c] ...+) any/c])]{
+           [(curryr [proc procedure?] [v any/c] ...+) any])]{
 
 Like @racket[curry], except that the arguments are collected in the
 opposite direction: the first step collects the rightmost group of

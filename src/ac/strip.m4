@@ -12,14 +12,17 @@ try_archive_conftest()
 ICP_STRIP_FLAG=""
 
 if test "${enable_strip}" = "yes" ; then
-  AC_CHECK_TOOL([STRIP], [strip])
-  # Used to add -S flag, but not all `strip' variants support it:
+  AC_CHECK_TOOL([STRIP], [strip], [:])
   STRIP_DEBUG="${STRIP}"
   if test "${INSTALL_LIBS_ENABLE}" = "install" ; then
     check_strip_dash_s=yes
   fi
+  # Note that `check_strip_dash_s` is set to "yes" by default
   if test "${strip_needs_dash_s}" = "yes" ; then
     check_strip_dash_s=yes
+  fi
+  if test "${STRIP}" = ":"; then
+    check_strip_dash_s=no
   fi
   if test "${check_strip_dash_s}" = "yes" ; then
     # Can only support library stripping if something like "-S" is available:

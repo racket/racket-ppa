@@ -2,8 +2,11 @@
 (require "../lib.zuo"
          "../worksp/gendef.zuo"
          "../mac/codesign.zuo"
+         "../worksp/mingw-ms.zuo"
          (only-in "../start/build.zuo"
-                  [targets-at starter-targets-at]))
+                  [targets-at starter-targets-at])
+         (only-in zuo/c
+                  [.c->.o orig:.c->.o]))
 
 (provide-targets targets-at)
 
@@ -28,6 +31,7 @@
   (define provided-racket? (not (equal? (or (lookup 'RACKET) "") "")))
   (define cify-mode (or (lookup 'ENABLE_CIFY) "auto"))
   (define gracket? (not (equal? (lookup 'MAKE_GRACKET) "no")))
+  (define cross? provided-racket?)
 
   (define mac? (equal? (lookup 'OSX) "t"))
   (define macx? (or mac? (glob-match? "*-DXONX*" (lookup 'CPPFLAGS))))
@@ -66,6 +70,8 @@
                                       (string-upcase (or (lookup 'MMM_INSTALLED)
                                                          "BC"))))
 
+  (define wxvariant-def (~a (or (lookup 'WXVARIANT) "wx_xt") "=1"))
+
   (define rktio-dir (at-dir "rktio"))
   (define librktio.a+rktio_config.h (setup-rktio (at-source "../rktio") rktio-dir config))
   (define librktio.a (list-ref librktio.a+rktio_config.h 0))
@@ -103,10 +109,15 @@
   (define starter-targets (starter-targets-at at-dir config windows?))
   (define starter (find-target "starter" starter-targets))
 
-  (define mzdyncgc.o (at-dir (if windows? "mzdyn.obj" (.c->.o "mzdyn.c"))))
-  (define mzdyn3m.o (at-dir (if windows? "mzdyn3m.obj" (.c->.o "mzdyn3m.c"))))
+  (define mzdyncgc.o (at-dir (if windows? "mzdyn.obj" (orig:.c->.o "mzdyn.c"))))
+  (define mzdyn3m.o (at-dir (if windows? "mzdyn3m.obj" (orig:.c->.o "mzdyn3m.c"))))
   (define mzdyncgc.exp (at-dir "mzdyn.exp"))
   (define mzdyn3m.exp (at-dir "mzdyn3m.exp"))
+
+  (define foreigncgc.o
+    (at-dir (.c->.o "src/foreign.c")))
+  (define foreign3m.o
+    (at-dir (.c->.o "xsrc/foreign.c")))
 
   (define src-names/no-startup-or-third-party
     '("salloc.c"
@@ -189,12 +200,17 @@
          src-names))
   (define startup.o (car cgc-objs))
 
+  (define cgc-all-objs
+    (append
+     cgc-objs
+     (if foreign? (list foreigncgc.o) '())))
+
   ;; See "phase1/cstartup.inc" below for information on phase1
   ;; versus phase2 of the build
   (define startup1.o (at-dir (.c->.o "src/startup1.c")))
-  (define cgc-obj1s
+  (define cgc-all-obj1s
     (cons startup1.o
-          (cdr cgc-objs)))
+          (cdr cgc-all-objs)))
 
   (define 3m-src-names
     (cons "startup.c"
@@ -210,7 +226,8 @@
      (map (lambda (name)
             (at-dir "src" (.c->.o (file-name-from-path name))))
           third-party-src-names)
-     3m-objs))
+     3m-objs
+     (if foreign? (list foreign3m.o) '())))
 
   (define sgc.o
     (at-dir (.c->.o "sgc/sgc.c")))
@@ -232,11 +249,6 @@
   (define grmain3m.o
     (at-dir (.c->.o "xsrc/grmain.c")))
   
-  (define foreigncgc.o
-    (at-dir (.c->.o "src/foreign.c")))
-  (define foreign3m.o
-    (at-dir (.c->.o "xsrc/foreign.c")))
-
   (define libffi.a
     (and libffi?
          (find-target (.a "ffi") libffi-targets)))
@@ -340,6 +352,23 @@
   (define com_glue.o (at-dir (.c->.o "src/com_glue.c")))
   (define mzobj3m.cxx (at-dir "xsrc/mzobj.cxx"))
 
+  (define src-schemexm.h (at-source "src/schemexm.h"))
+  (define src-schemex.h (at-source "src/schemex.h"))
+  (define src-schemex.inc (at-source "src/schemex.inc"))
+  (define src-schexn.h (at-source "src/schexn.h"))
+  (define src-racket.exp (at-source "include/racket.exp"))
+  (define src-mzwin.def (at-source "include/mzwin.def"))
+  (define src-gmzwin.def (at-source "include/gmzwin.def"))
+  (define src-racket3m.exp (at-source "include/racket3m.exp"))
+  (define src-mzwin3m.def  (at-source "include/mzwin3m.def"))
+  (define src-schemef.h (at-source "src/schemef.h"))
+  (define src-makex (at-source "src/makex.rkt"))
+  (define makex-deps (list src-makex src-schemef.h))
+  (define (makex path flag)
+    (shell/wait "racket" (string->shell src-makex) flag
+                "<" (string->shell src-schemef.h)
+                ">" (string->shell path)))
+  
   (define mzconfig.h (if msvc?
                          (at-source "../worksp/mzconfig.h")
                          (at-dir "mzconfig.h")))
@@ -357,15 +386,6 @@
                          common-headers
                          (list (at-source "../mzcom/com_glue.h")
                                (at-source "../mzcom/resource.h"))))
-
-  ;; These headers have only preprocessor definitions, so they're not
-  ;; picked up in ".sdep" files:
-  (define quiet-deps
-    (list
-     (at-source "../version/racket_version.h")
-     (at-source "sconfig.h")
-     mzconfig.h
-     (at-source "src/schcpt.h")))
 
   (define rktio-headers
     (list (at-source "src/schrktio.h")
@@ -392,6 +412,20 @@
      (at-source "src/lightning/arm/fp-vfp.h") (at-source "src/lightning/arm/fp-swf.h")
      (at-source "src/future.h") (at-source "src/jit_ts.c") (at-source "src/jit_ts_protos.h")))
 
+  ;; These headers have only preprocessor definitions, so they're not
+  ;; picked up in ".sdep" files:
+  (define quiet-deps
+    (append
+     (list
+      (at-source "../version/racket_version.h")
+      (at-source "sconfig.h")
+      mzconfig.h
+      (at-source "src/schcpt.h"))
+     ;; mostly preprocessor definitions, at least; this creates
+     ;; too many dependencies, but that's better than too few,
+     ;; and we don't work on BC enough for it to matter anymore:
+     jit-headers))
+
   (define windows-libs '("WS2_32.lib" "Shell32.lib" "User32.lib" "Winmm.lib"
                                       "RpCrt4.lib" "Ole32.lib" "Advapi32.lib"))
   (define MemoryModule.o (at-dir (.c->.o "MemoryModule.c")))
@@ -414,7 +448,6 @@
      (config-include (hash-set* config
                                 'CFLAGS (build-shell
                                          (hash-ref config 'CFLAGS "")
-                                         (hash-ref config 'CPPFLAGS "")
                                          (hash-ref config 'COMPFLAGS "")
                                          (hash-ref config 'PROFFLAGS "")
                                          (hash-ref config 'OPTIONS "")
@@ -442,8 +475,8 @@
          (define auto-bc-targets
            (configured-targets-at (hash
                                    'configure (at-source "configure")
-                                   'inputs (list (at-source "Mf-config.in"))
-                                   'outputs (list (at-dir "local/Mf-config"))
+                                   'inputs (list (at-source "Makefile.in"))
+                                   'outputs (list (at-dir "local/Makefile"))
                                    'vars (hash))))
          (define auto-racket (find-target "racketcgc" auto-bc-targets))
          (build auto-racket)
@@ -549,13 +582,11 @@
 
   (define cgc-link-inputs ; omits libracketcgc.a
     (append
-     (if foreign? (list foreigncgc.o) '())
      (list libracketgc.a librktio.a)
      (if libffi? (list libffi.a) '())))
 
   (define 3m-link-inputs
     (append
-     (if foreign? (list foreign3m.o) '())
      (list librktio.a)
      (if libffi? (list libffi.a) '())))
 
@@ -610,11 +641,24 @@
       (rm* (at-dir "src/startup.o"))
       (rm* (at-dir "xsrc/startup.c"))))
 
+  (define (setup-prepare-to-here?)
+    (and (equal? (lookup 'MAKE_COPYTREE) "copytree")
+         (not cross?)
+         (not (in-builtpkgs-distro?))))
+
   (define the-targets
     (append
      (make-targets
       `([:target build ,(if 3m-default? '(3m) '(cgc)) ,void]
-        
+
+        [:target build-and-prepare ()
+                 ,(lambda (token)
+                    (build/dep (find-target "build" the-targets) token)
+                    (when (setup-prepare-to-here?)
+                      (define racket (if 3m-default? racket3m racketcgc))
+                      (raco-setup-prepare-to-here config racket at-dir (make-at-dir
+                                                                        (at-source "../..")))))]
+
         [:target 3m (,racket3m ,@(if gracket? (list gracket3m) '())
                                ,@(if windows? (list mzcom3m.exe) '())
                                ,@(if mac? (list framework3m) '())
@@ -633,7 +677,8 @@
 
         ;; Phase2 "cstartup.inc" generation as a compiled form of "startup.inc"
         [:target ,phase2/cstartup.inc (,(at-source "src/startup.inc")
-                                       ,(input-data-target 'cify cify-mode))
+                                       ,(input-data-target 'cify cify-mode)
+                                       ,(input-data-target 'version (racket-version)))
                  ,(lambda (path token)
                     (unless provided-racket?
                       (build/no-dep (find-target racketcgc1 the-targets) token))
@@ -642,6 +687,12 @@
                                     [(equal? cify-mode "yes") #t]
                                     [(equal? cify-mode "no") #f]
                                     [provided-racket? #f]
+				    [(eq? windows-arch 'arm64)
+				     ;; The cified expander on Arm64 triggers frequent C stack
+				     ;; overflows, which is especially bad for RacketCGC, but
+				     ;; generally causes trouble. It doesn't seem work sorting out
+				     ;; this problem, so just don't use cify there.
+				     #f]
                                     [else
                                      (define p (process (if provided-racket?
                                                             (get-host-racket)
@@ -832,7 +883,8 @@
            (lambda (cgc? libracket.dll libracket.a libracket.def link-inputs objs)
              `[:target (,libracket.dll ,libracket.def) (,@(if cgc? (list libmzgcxxxxxxx.dll) (list newgc.o))
                                                         ,libracket.a ,mzsj86.o ,@mzsj86a-objs
-                                                        ,@link-inputs)
+                                                        ,@link-inputs
+                                                        ,@mingw-to-ms-link-libraries-deps)
                        ,(lambda (path token)
                           (mkdir-p (path-only path))
                           (c-link path
@@ -869,16 +921,19 @@
                                                                  "-Wl,--no-whole-archive"
                                                                  "-static-libgcc"
                                                                  (map string->shell
-                                                                      (map target->path
-                                                                           (filter (lambda (p)
-                                                                                     (not (equal? p libracketgc.a)))
-                                                                                   link-inputs))))))))])
+                                                                      (append
+                                                                       (map target->path
+                                                                            (filter (lambda (p)
+                                                                                      (not (equal? p libracketgc.a)))
+                                                                                    link-inputs))
+                                                                       (make-mingw-to-ms-link-libraries
+                                                                        (hash-ref config 'MACH) (at-dir) config))))))))])
            (list #t #t #f)
            (list libracketcgc1xxxxxxx.dll libracketcgcxxxxxxx.dll libracket3mxxxxxxx.dll)
            (list libracketcgc1.a libracketcgc.a libracket3m.a)
            (list libracketcgc1.def libracketcgc.def libracket3m.def)
            (list cgc-link-inputs cgc-link-inputs 3m-link-inputs)
-           (list cgc-obj1s cgc-objs 3m-all-objs))
+           (list cgc-all-obj1s cgc-all-objs 3m-all-objs))
 
         ;; Windows DLL import libraries
         ,@(map
@@ -953,7 +1008,7 @@
                                     objs)
                                 (shell-subst-value config 'AR)))])
            (list libracketcgc1.a libracketcgc.a libracket3m.a)
-           (list cgc-obj1s cgc-objs (list* newgc.o 3m-all-objs)))
+           (list cgc-all-obj1s cgc-all-objs (list* newgc.o 3m-all-objs)))
 
         ;; SGC (CGC garbage collector)
         [:target ,libracketgc.a (,@libracketgc-link-objs)
@@ -1106,7 +1161,6 @@
                                                                       "-DSGC_EXPORTS")
                                                            'CFLAGS (build-shell
                                                                     (hash-ref config 'CFLAGS "")
-                                                                    (hash-ref config 'CPPFLAGS "")
                                                                     (hash-ref config 'COMPFLAGS "")
                                                                     (hash-ref config 'PROFFLAGS "")
                                                                     (hash-ref config 'OPTIONS "")))
@@ -1169,7 +1223,6 @@
                                                                       "-DSGC_EXPORTS")
                                                            'CFLAGS (build-shell
                                                                     (hash-ref config 'CFLAGS "")
-                                                                    (hash-ref config 'CPPFLAGS "")
                                                                     (hash-ref config 'COMPFLAGS "")
                                                                     (hash-ref config 'PROFFLAGS "")
                                                                     (hash-ref config 'MZOPTIONS "")
@@ -1187,6 +1240,7 @@
                                        ,(at-source "../start/cmdl_to_argv.inc")
                                        ,(at-source "../start/config.inc")
                                        ,(at-source "../start/self_exe.inc")
+                                       ,(at-source "../ChezScheme/c/self-exe.c")
                                        ,(at-source "../start/delayed.inc")
                                        ,(at-source "../start/embedded_dll.inc")
                                        ,@(if msvc? (list bc_suffix.h) '()))
@@ -1201,7 +1255,7 @@
                (list maincgc1.o maincgc.o grmaincgc.o)
                (list (at-source "main.c") (at-source "main.c") (at-source "gracket/grmain.c"))
                (list #f #f #t)
-               (list '("DLL_3M_SUFFIX=\"1\"") '() '()))
+               (list '("DLL_3M_SUFFIX=\"1\"") '() (list wxvariant-def)))
 
         ;; FFI compiled for CGC
         [:target ,foreigncgc.o (,(at-source "foreign/foreign.c")
@@ -1252,7 +1306,8 @@
                             ,@quiet-deps)
                            ,(lambda (path token)
                               (xform path main.c 'no-precomp token
-                                     (make-directory-defs gracket?)))])
+                                     (build-shell (make-directory-defs gracket?)
+                                                  (~a "-D" wxvariant-def))))])
                (list (at-source "main.c") (at-source "gracket/grmain.c"))
                (list #f #t))
 
@@ -1289,9 +1344,13 @@
                                config))]
 
         ;; Windows file-suffix-selection helper
-        [:target ,bc_suffix.h (,(input-data-target 'bc-suffix 3m-cap-installed-suffix))
+        [:target ,bc_suffix.h (,(input-data-target 'bc-suffix 3m-cap-installed-suffix)
+			       ,(input-data-target 'spsl-suffix (hash-ref config 'SPLS_SUFFIX "")))
                  ,(lambda (path token)
-                    (display-to-file (~a "#define COMPILED_PATH_AS_" 3m-cap-installed-suffix)
+                    (display-to-file (~a (~a "#define COMPILED_PATH_AS_" 3m-cap-installed-suffix)
+                                         "\n"
+                                         (~a "#define SPLS_SUFFIX \"" (hash-ref config 'SPLS_SUFFIX "") "\"")
+                                         "\n")
                                      bc_suffix.h
                                      :truncate))]
 
@@ -1304,6 +1363,10 @@
                               (c-compile path
                                          (at-source "dynsrc/mzdyn.c")
                                          (let* ([config (mz-config config)]
+                                                [config (let ([plain-cc (or (lookup 'PLAIN_CC) "")])
+                                                          (if (equal? "" plain-cc)
+                                                              config
+                                                              (hash-set config 'CC (shell-subst plain-cc config))))]
                                                 [config (config-merge config
                                                                       'CFLAGS
                                                                       (or (lookup 'DYN_CFLAGS) ""))])
@@ -1408,6 +1471,27 @@
                     (c-compile path
                                (at-source "../mzcom/com_glue.c")
                                (mz-config config)))]
+
+        [:target exports (,src-schemex.h ,src-schemexm.h ,src-schemex.inc
+                                         ,src-racket.exp ,src-mzwin.def ,src-gmzwin.def
+                                         ,src-racket3m.exp ,src-mzwin3m.def)
+                 ,void]
+        [:target ,src-schemex.h ,makex-deps
+                 ,(lambda (path token) (makex path ""))]
+        [:target ,src-schemexm.h ,makex-deps
+                 ,(lambda (path token) (makex path "--list"))]
+        [:target ,src-schemex.inc ,makex-deps
+                 ,(lambda (path token) (makex path "--assign"))]
+        [:target ,src-racket.exp ,makex-deps
+                 ,(lambda (path token) (makex path "--exports"))]        
+        [:target ,src-racket3m.exp ,makex-deps
+                 ,(lambda (path token) (makex path "--exports --precisegc"))]
+        [:target ,src-mzwin.def ,makex-deps
+                 ,(lambda (path token) (makex path "--winex"))]
+        [:target ,src-mzwin3m.def ,makex-deps
+                 ,(lambda (path token) (makex path "--winex --precisegc"))]
+        [:target ,src-gmzwin.def ,makex-deps
+                 ,(lambda (path token) (makex path "--winex --gwinex"))]
 
         ;; Install targets, implemented by the `install` function below
         [:target install (,(if 3m-default? 'install-3m 'install-cgc)) ,void]
@@ -1574,7 +1658,11 @@
                   [windows?
                    (set-collects-path racket dest-exe "../collects" "../etc")]
                   [mac?
-                   (set-collects-path racket dest-exe "../../../../collects" "../../../../etc")
+                   (cond
+                     [(equal? (lookup 'INSTALL_ORIG_TREE) "yes")
+                      (set-collects-path racket dest-exe "../../../../collects" "../../../../etc")]
+                     [else
+                      (set-collects-path racket dest-exe collects-path configdir)])
                    (install_name_tool "-change"
                                       (~a "@executable_path/Racket.framework/Versions/" version fw-suffix "/Racket")
                                       (~a (get-framework-prefix #t) "Racket.framework/Versions/" version fw-suffix "/Racket")
@@ -1742,7 +1830,10 @@
                            ;; Otherwise, prefer to use the installed executable:
                            (dest-racket-exe 3m?)]))
        (define copytree-racket (and provided-racket? (get-host-racket)))
-       (maybe-copytree config dest-exe copytree-racket at-dir)
+       (define copytree-config (if (setup-prepare-to-here?)
+                                   (hash-set config 'copytree-prepared-setup-files #t)
+                                   config))
+       (maybe-copytree copytree-config dest-exe copytree-racket at-dir)
        (run-raco-setup config dest-exe copytree-racket '())
        (maybe-libzo-move config dest-exe copytree-racket at-dir)
        (maybe-destdir-fix config dest-exe copytree-racket at-dir)

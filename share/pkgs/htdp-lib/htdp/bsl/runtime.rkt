@@ -14,7 +14,8 @@
          racket/snip
          racket/class
          (only-in test-engine/test-markup get-rewritten-error-message-parameter render-value-parameter)
-         (only-in test-engine/syntax report-signature-violation!)
+         (only-in test-engine/syntax report-signature-violation! test)
+         (only-in test-engine/test-engine initialize-test-object! test-object-copy current-test-object test-object=?)
          (only-in deinprogramm/signature/signature
                   signature? signature-name
                   signature-violation-proc)
@@ -30,7 +31,8 @@
    tracing? ; unclear if this should be here
    true/false/empty-as-ids?
    abbreviate-cons-as-list?
-   use-function-output-syntax?))
+   use-function-output-syntax?
+   output-function-instead-of-lambda?))
 
 (define insert-newlines (make-parameter #t))
 
@@ -42,14 +44,17 @@
                        #f ; tracing?
                        #f ; true/false/empty-as-ids?
                        (and (memq 'abbreviate-cons-as-list options) #t)
-                       (and (memq 'use-function-output-syntax options) #t)))
+                       (and (memq 'use-function-output-syntax options) #t)
+                       (and (memq 'output-function-instead-of-lambda options) #t)))
 
 (define (configure options)
   (configure/settings (options->sl-runtime-settings options)))
 
 (define (configure/settings settings)
+  (read-decimal-as-inexact #f)
   ;; Set print-convert options:
   (booleans-as-true/false (sl-runtime-settings-true/false/empty-as-ids? settings))
+  (hash-table-constructor-with-lists #t)
   (print-boolean-long-form #t)
   [constructor-style-printing
    (case (sl-runtime-settings-printing-style settings)
@@ -63,6 +68,13 @@
    (let ([ph (current-print-convert-hook)])
      (lambda (val basic sub)
        (cond
+         [(and (sl-runtime-settings-output-function-instead-of-lambda? settings)
+               (procedure? val))
+          (cond
+            ((object-name val)
+             => (lambda (name)
+                  (string->symbol (format "function:~a" name))))
+            (else 'function))]
          [(and (not (sl-runtime-settings-true/false/empty-as-ids? settings)) (equal? val '())) ''()]
          [(equal? val set!-result) '(void)]
          [(signature? val)
@@ -75,10 +87,11 @@
      (and (sl-runtime-settings-use-function-output-syntax? settings)
           (procedure? x)
           (object-name x))))
+  ;; The ISL case -- sl-runtime-settings-output-function-instead-of-lambda? --
+  ;; is already covered by the current-print-convert-hook above.
   (named/undefined-handler
    (lambda (x)
-     (string->symbol
-      (format "function:~a" (object-name x)))))
+     (object-name x)))
 
   ; sharing done by print-convert
   (show-sharing (sl-runtime-settings-show-sharing? settings))
@@ -179,8 +192,30 @@
            [(quasiquote) (pretty-write val port)])))))
 
   (signature-violation-proc
-   (lambda (obj signature message blame)
-     (report-signature-violation! obj signature message blame))))
+   (lambda (obj signature message blame-srcloc)
+     (report-signature-violation! obj signature message blame-srcloc)))
+
+    (let ((interaction? #f))
+    (current-read-interaction
+     (let ((old-read-interaction (current-read-interaction)))
+       (lambda args
+         ; we've entered the REPL, so test once
+         (set! interaction? #t)
+         (apply old-read-interaction args))))
+
+    ; in the repl, re-run tests / display results if anything has changed
+    (current-eval
+     (let ((old-eval (current-eval)))
+       (lambda args
+         (when interaction?
+           (initialize-test-object!))
+         (let ((test-object (test-object-copy (current-test-object))))
+           (dynamic-wind
+             void
+             (lambda () (apply old-eval args))
+             (lambda ()
+               (when (and interaction? (not (test-object=? test-object (current-test-object))))
+                 (test))))))))))
 
 (define (sl-render-value/format value port width)
   (parameterize ([print-value-columns (if (eq? width 'infinity)

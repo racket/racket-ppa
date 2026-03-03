@@ -1,13 +1,13 @@
 #lang racket/base
-(require scribble/doclang
-         scribble/core
-         (except-in scribble/base author title)
-         scribble/acmart
-         scribble/latex-prefix
+(require (for-syntax racket/base
+                     syntax/parse)
          racket/list
-         "../private/defaults.rkt"
-         (for-syntax racket/base
-                     syntax/parse))
+         scribble/acmart
+         scribble/core
+         scribble/doclang
+         scribble/latex-prefix
+         (except-in scribble/base author title)
+         "../private/defaults.rkt")
 (provide (except-out (all-from-out scribble/doclang) #%module-begin)
          (all-from-out scribble/acmart)
          (all-from-out scribble/base)
@@ -26,14 +26,17 @@
            [nonacm? #f]
            [timestamp? #f]
            [author-draft? #f]
-           [acmthm? #f])
+           [acmthm? #f]
+           [balance? #t]
+           [pbalance? #f]
+           [urlbreakonhyphens? #t])
        (let loop ([stuff #'body])
          (syntax-parse stuff
            #:datum-literals (manuscript acmsmall acmlarge acmtog sigconf siggraph sigplan sigchi
                                         sigchi-a dtrap pacmcgit tiot tdsci review screen natbib
                                         anonymous authorversion 9pt 10pt 11pt 12pt nonacm timestamp
-                                        authordraft acmthm)
-           
+                                        authordraft acmthm balance pbalance urlbreakonhyphens)
+
            ;; Skip intraline whitespace to find options:
            [(ws . body)
             #:when (and (string? (syntax-e #'ws))
@@ -135,6 +138,34 @@
            [((acmthm #f) . body)
             (set! acmthm? "acmthm=false")
             (loop #'body)]
+
+           [((balance #t) . body)
+            (set! balance? "balance=true")
+            (loop #'body)]
+           [((balance #f) . body)
+            (set! balance? "balance=false")
+            (loop #'body)]
+           [(balance . body)
+            (set! balance? "balance=true")
+            (loop #'body)]
+           [((pbalance #t) . body)
+            (set! pbalance? "pbalance=true")
+            (loop #'body)]
+           [((pbalance #f) . body)
+            (set! pbalance? "pbalance=false")
+            (loop #'body)]
+           [(pbalance . body)
+            (set! pbalance? "pbalance=false")
+            (loop #'body)]
+           [((urlbreakonhyphens #t) . body)
+            (set! urlbreakonhyphens? "urlbreakonhyphens=true")
+            (loop #'body)]
+           [((urlbreakonhyphens #f) . body)
+            (set! urlbreakonhyphens? "urlbreakonhyphens=false")
+            (loop #'body)]
+           [(urlbreakonhyphens . body)
+            (set! urlbreakonhyphens? "urlbreakonhyphens=true")
+            (loop #'body)]
 	   
            ; format options
            [((~and fmt
@@ -160,21 +191,19 @@
                                                #,authorversion? #,font-size #,nonacm? #,timestamp?
                                                #,author-draft? #,acmthm? #,format?) () . body)])))]))
 
-(define ((post-process . opts) doc)  
-  (let ([options
-         (if (ormap values opts)
-             (format "[~a]" (apply string-append (add-between (filter values opts) ", ")))
-             "")])
-    (add-acmart-styles 
-     (add-defaults doc
-                   (string->bytes/utf-8
-                    (format "\\documentclass~a{acmart}\n~a"
-                            options
-                            unicode-encoding-packages))
-                   (scribble-file "acmart/style.tex")
-                   (list (scribble-file "acmart/acmart.cls"))
-                   #f
-                   #:replacements (hash "scribble-load-replace.tex" (scribble-file "acmart/acmart-load.tex"))))))
+(define ((post-process . opts) doc)
+  (define options
+    (if (ormap values opts)
+        (format "[~a]" (apply string-append (add-between (filter values opts) ", ")))
+        ""))
+  (add-acmart-styles
+   (add-defaults
+    doc
+    (string->bytes/utf-8 (format "\\documentclass~a{acmart}\n~a" options unicode-encoding-packages))
+    (scribble-file "acmart/style.tex")
+    (list (scribble-file "acmart/acmart.cls"))
+    #f
+    #:replacements (hash "scribble-load-replace.tex" (scribble-file "acmart/acmart-load.tex")))))
 
 (define (add-acmart-styles doc)
   (struct-copy part doc

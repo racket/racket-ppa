@@ -1,20 +1,22 @@
 #lang racket/base
 
-(require syntax/parse racket/match
-         "../utils/utils.rkt"
+(require (for-template racket/base
+                       racket/unsafe/ops)
+         racket/match
+         syntax/parse
          "../types/abbrev.rkt"
-         "../types/utils.rkt"
          "../types/type-table.rkt"
-         "utils.rkt"
+         "../types/utils.rkt"
+         "../utils/utils.rkt"
          "logging.rkt"
-         (for-template racket/base racket/unsafe/ops))
+         "utils.rkt")
 
 (provide list-opt-expr)
 
 (define-syntax-class known-length-list-expr
   #:attributes (opt len)
   (pattern (~and e :opt-expr)
-           #:attr tys (match (type-of #'e)
+           #:attr tys (match (maybe-type-of #'e)
                         [(tc-result1: (List: es)) es]
                         [_ #f])
            #:when (attribute tys)

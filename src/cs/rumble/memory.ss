@@ -44,6 +44,7 @@
 (define gc-counter 1)
 (define log-collect-generation-radix 2)
 (define collect-generation-radix-mask (sub1 (bitwise-arithmetic-shift 1 log-collect-generation-radix)))
+(define peak-mem (bytes-allocated))
 
 ;; Some allocation patterns create a lot of overhead (i.e., wasted
 ;; pages in the allocator), so we need to detect that and force a GC.
@@ -61,11 +62,17 @@
 ;; and control layer may be in uninterrupted mode, so don't
 ;; do anything that might use "control.ss" (especially in logging).
 (define (collect/report g)
+  ;; If you get "$collect-rendezvous: cannot return to the collect-request-handler", then
+  ;; probably something here is trying to raise an exception. To get more information try
+  ;; uncommenting the exception-handler line below, and then move its last close parenthesis
+  ;; to the end of the enclosing function.
+  #;(guard (x [else (if (condition? x) (display-condition x) (#%write x)) (#%newline) (#%flush-output-port)]))
   (let ([this-counter (if g (bitwise-arithmetic-shift-left 1 (* log-collect-generation-radix g)) gc-counter)]
         [pre-allocated (bytes-allocated)]
         [pre-allocated+overhead (current-memory-bytes)]
-        [pre-time (real-time)] 
+        [pre-time (current-inexact-milliseconds)]
         [pre-cpu-time (cpu-time)])
+    (set! peak-mem (max peak-mem pre-allocated))
     (if (> (add1 this-counter) (bitwise-arithmetic-shift-left 1 (* log-collect-generation-radix (sub1 (collect-maximum-generation)))))
         (set! gc-counter 1)
         (set! gc-counter (add1 this-counter)))
@@ -108,7 +115,8 @@
                       (let ([domains (weaken-accounting-domains domains)])
                         ;; Accounting collection:
                         (let ([counts (collect gen 1 gen (weaken-accounting-roots roots))])
-                          (lambda () (k counts domains))))])))]
+                          (lambda ()
+                            (call-with-accounting-domains k counts domains))))])))]
                [(and request-incremental?
                      (fx= gen (sub1 (collect-maximum-generation))))
                 ;; "Incremental" mode by not promoting to the maximum generation
@@ -130,7 +138,7 @@
           (set! request-incremental? #f))
         (let ([post-allocated (bytes-allocated)]
               [post-allocated+overhead (current-memory-bytes)]
-              [post-time (real-time)]
+              [post-time (current-inexact-milliseconds)]
               [post-cpu-time (cpu-time)])
           (when (= gen (collect-maximum-generation))
             ;; Trigger a major GC when memory use is a certain factor of current use.
@@ -159,7 +167,7 @@
           (garbage-collect-notify gen
                                   pre-allocated pre-allocated+overhead pre-time pre-cpu-time
                                   post-allocated post-allocated+overhead post-time post-cpu-time
-                                  (real-time) (cpu-time)))
+                                  (current-inexact-milliseconds) (cpu-time)))
         (when (and (= req-gen (collect-maximum-generation))
                    (currently-in-engine?))
           ;; This `set-timer` doesn't necessarily penalize the right thread,
@@ -202,6 +210,7 @@
      [(not mode) (bytes-allocated)]
      [(eq? mode 'cumulative) (with-interrupts-disabled
                               (+ (bytes-deallocated) (bytes-allocated)))]
+     [(eq? mode 'peak) peak-mem]
      ;; must be a custodian; hook is reposnsible for complaining if not
      [else (custodian-memory-use mode (bytes-allocated))])]))
 
@@ -224,8 +233,9 @@
       ;; Watch out for radiply growing memory use that isn't captured
       ;; fast enough by regularly scheduled event checking because it's
       ;; allocated in large chunks
-      (when (>= (bytes-allocated) trigger-major-gc-allocated)
-        (set-timer 1)))))
+      (when (>= (bytes-allocated 0) trigger-major-gc-allocated)
+        (when (eqv? (place-thread-category) PLACE-MAIN-THREAD)
+          (set-timer 1))))))
 
 (define (set-incremental-collection-enabled! on?)
   (set! disable-incremental? (not on?)))
@@ -251,6 +261,15 @@
     (if (null? domains)
         '()
         (weak-cons (car domains) (loop (cdr domains))))))
+
+;; Filter any domain (and associated count) that went to `#!bwp` during collection
+(define (call-with-accounting-domains k counts domains)
+  (let loop ([counts counts] [domains domains] [r-counts '()] [r-domains '()])
+    (cond
+      [(null? counts) (k (reverse r-counts) (reverse r-domains))]
+      [(eq? #!bwp (car domains)) (loop (cdr counts) (cdr domains) r-counts r-domains)]
+      [else (loop (cdr counts) (cdr domains)
+                  (cons (car counts) r-counts) (cons (car domains) r-domains))])))
 
 ;; ----------------------------------------
 
@@ -573,9 +592,12 @@
 ;; accommodates a limitation of the traditional Racket implementation
 (define (run-one-collect-callback v save sel)
   (let ([protocol (#%vector-ref v 0)]
-        [proc (cpointer-address (#%vector-ref v 1))]
+        [proc (ftype-pointer-address (cptr->fptr 'collect-callback (#%vector-ref v 1)))]
         [ptr (lambda (i)
-               (cpointer*-address (#%vector-ref v (fx+ 2 i))))]
+               (let ([n (#%vector-ref v (fx+ 2 i))])
+                 (if (integer? n)
+                     n
+                     (ftype-pointer-address (cptr->fptr 'collect-callback n)))))]
         [val (lambda (i)
                (#%vector-ref v (fx+ 2 i)))])
     (case protocol

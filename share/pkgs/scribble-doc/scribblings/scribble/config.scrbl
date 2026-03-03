@@ -353,7 +353,14 @@ The style classes:
 
   [@spacer @spacer]
 
-  [@css{SSubSubSubSection} @elem{Deeply nested subsection (below @tt{<h5>}).}]
+  [@css{SsectionLevel1} @elem{@tt{<section>} tag enclosing the part introduced by @racket[title].}]
+  [@css{SsectionLevel2} @elem{@tt{<section>} tag enclosing a part introduced by @racket[section].}]
+  [@css{SsectionLevel3} @elem{@tt{<section>} tag enclosing a part introduced by @racket[subsection].}]
+  [@css{SsectionLevel4} @elem{@tt{<section>} tag enclosing a part introduced by @racket[subsubsection].}]
+
+  [@spacer @spacer]
+  
+  [@css{SSubSubSubSection} @elem{Deeply nested subsection heading (below @tt{<h4>}).}]
 
   [@spacer @spacer]
 
@@ -401,8 +408,11 @@ The style classes:
   [@css{badlink} @elem{Broken cross-reference.}]
   [@css{plainlink} @elem{Hyperlink without an underline.}])
 
-In addition, the @css{SIEHidden} style class is built in to all
-Scribble HTML output to hide an element on Internet Explorer 6.
+In addition, the @tt{<section>} tags are given @tt{id}s of the form @tt{id="section <n>"},
+where @tt{<n>} is the section or subsection or subsubsection number. For example, the second
+Scribble @racket[section] has an html @tt{<section>} tag with an @tt{id} of @tt{"section 2"},
+and the first Scribble @racket[subsection] of the second Scribble @racket[section] has an
+html @tt{<section>} tag with an @tt{id} of @tt{"section 2.1"}.
 
 @; ------------------------------------------------------------
 
@@ -625,7 +635,11 @@ style:
         second-level section, etc., where the last variant is used for
         all sections that are deeper than four levels. The first
         argument corresponds to the optional argument to
-        @ltx{section}, which is used for the table of contents.}
+        @ltx{section}, which is used for the table of contents. Furthermore,
+        @ltx{SNextTitlePlain} is called before each of these to
+        register a plain-text version of the title suitable for use
+        in table-of-contents metadata, such as in PDF. The default versions
+        of these macros use that plain text via @ltx{STexOrPDFTitle}.}
 
  @item{@ltxd[1]{Ssectionstar}, @ltxd[1]{Ssubsectionstar},
         @ltxd[1]{Ssubsubsectionstar}, @ltxd[1]{Ssubsubsubsectionstar},
@@ -649,6 +663,13 @@ style:
        @ltxd[0]{Sincpart} --- like the section commands, but used for
        in place of @ltxd[2]{Ssection}, @ltxd[1]{Ssectionstar}, @|etc|
        for a part with the @racket['grouper] style property.}
+
+ @item{@ltxd[1]{SNextTitlePlain}, @ltxd[1]{STexOrPDFTitle} --- Used to
+       record and/or access a plain-text version of a title. The
+       @ltx{STexOrPDFTitle} macro expands to either its given text of
+       the recorded plain text, depending on how it is used, similar
+       to using @ltx{texorpdfstring} for the optional argument to
+       @ltx{section}.}
 
  @item{@ltxe{SInsetFlow} environment --- for a @racket[nested-flow]
        with the @racket['inset] style name.}

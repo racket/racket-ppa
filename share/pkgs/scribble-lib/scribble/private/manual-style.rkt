@@ -22,10 +22,11 @@
          itemize
          aux-elem
          code-inset)
-(provide/contract [filebox (((or/c core:element? string?)) () #:rest (listof pre-flow?) . ->* . block?)])
+(provide (contract-out
+          [filebox (((or/c core:element? string?)) () #:rest (listof pre-flow?) . ->* . block?)]))
 
 (define styling-f/c
-  (() () #:rest (listof pre-content?) . ->* . element?))
+  (-> pre-content? ... element?))
 (define-syntax-rule (provide-styling id ...)
   (provide/contract [id styling-f/c] ...))
 (provide-styling racketmodfont racketoutput
@@ -53,34 +54,32 @@
 
 (provide void-const
          undefined-const)
-(provide/contract
- [PLaneT element?]
- [hash-lang (-> element?)]
- [etc element?]
- [inset-flow (() () #:rest (listof pre-content?) . ->* . nested-flow?)]
- [litchar (() () #:rest (listof string?) . ->* . element?)]
- [t (() () #:rest (listof pre-content?) . ->* . paragraph?)]
- [exec (() () #:rest (listof content?) . ->* . element?)]
- [commandline (() () #:rest (listof content?) . ->* . paragraph?)]
- [menuitem (string? string? . -> . element?)])
+(provide (contract-out [PLaneT element?]
+                       [hash-lang (-> element?)]
+                       [etc element?]
+                       [inset-flow (() () #:rest (listof pre-content?) . ->* . nested-flow?)]
+                       [litchar (() () #:rest (listof string?) . ->* . element?)]
+                       [t (() () #:rest (listof pre-content?) . ->* . paragraph?)]
+                       [exec (() () #:rest (listof content?) . ->* . element?)]
+                       [commandline (() () #:rest (listof content?) . ->* . paragraph?)]
+                       [menuitem (string? string? . -> . element?)]))
 
 (define PLaneT (make-element "planetName" '("PLaneT")))
 
 (define etc (make-element #f (list "etc" ._)))
 
 (define (litchar . strs)
-  (let ([s (string-append* (map (lambda (s) (regexp-replace* "\n" s " "))
-                                strs))])
-    (if (regexp-match? #rx"^ *$" s)
-      (make-element input-background-color (list (hspace (string-length s))))
-      (let ([^spaces (car (regexp-match-positions #rx"^ *" s))]
-            [$spaces (car (regexp-match-positions #rx" *$" s))])
-        (make-element
-         input-background-color
-         (list (hspace (cdr ^spaces))
-               (make-element input-color
-                             (list (substring s (cdr ^spaces) (car $spaces))))
-               (hspace (- (cdr $spaces) (car $spaces)))))))))
+  (define s (string-append* (map (lambda (s) (regexp-replace* "\n" s " ")) strs)))
+  (cond
+    [(regexp-match? #rx"^ *$" s)
+     (make-element input-background-color (list (hspace (string-length s))))]
+    [else
+     (define ^spaces (car (regexp-match-positions #rx"^ *" s)))
+     (define $spaces (car (regexp-match-positions #rx" *$" s)))
+     (make-element input-background-color
+                   (list (hspace (cdr ^spaces))
+                         (make-element input-color (list (substring s (cdr ^spaces) (car $spaces))))
+                         (hspace (- (cdr $spaces) (car $spaces)))))]))
 
 (define (onscreen . str)
   (make-element 'sf (decode-content str)))
@@ -89,8 +88,8 @@
 (define (defterm . str)
   (make-element 'italic (decode-content str)))
 (define (idefterm . str)
-  (let ([c (decode-content str)])
-    (make-element 'italic c)))
+  (define c (decode-content str))
+  (make-element 'italic c))
 (define (racketfont . str)
   (apply tt str))
 (define (racketplainfont . str)
@@ -118,21 +117,22 @@
 (define (filepath . str)
   (make-element 'tt (append (list "\"") (decode-content str) (list "\""))))
 (define (indexed-file . str)
-  (let* ([f (apply filepath str)]
-         [s (element->string f)])
-    (index* (list (datum-intern-literal
-                   (clean-up-index-string
-                    (substring s 1 (sub1 (string-length s))))))
-            (list f)
-            f)))
+  (define f (apply filepath str))
+  (define s (element->string f))
+  (index* (list (datum-intern-literal
+                 (clean-up-index-string
+                  (substring s 1 (sub1 (string-length s))))))
+          (list f)
+          f))
 (define (exec . str)
-  (if (andmap string? str)
-    (make-element 'tt str)
-    (make-element #f (map (lambda (s)
-                            (if (string? s)
-                              (make-element 'tt (list s))
-                              s))
-                          str))))
+  (let loop ([str str])
+    (cond
+      [(string? str) (make-element 'tt (list str))]
+      [(list? str) (if (andmap string? str)
+                       (make-element 'tt str)
+                       (map loop str))]
+      [else str])))
+
 (define (Flag . str)
   (make-element 'no-break
                 (list (make-element 'tt (cons "-" (decode-content str))))))
@@ -148,9 +148,9 @@
 (define (envvar . str)
   (make-element 'tt (decode-content str)))
 (define (indexed-envvar . str)
-  (let* ([f (apply envvar str)]
-         [s (element->string f)])
-    (index* (list s) (list f) f)))
+  (define f (apply envvar str))
+  (define s (element->string f))
+  (index* (list s) (list f) f))
 (define (procedure . str)
   (make-element result-color `("#<procedure:" ,@(decode-content str) ">")))
 
@@ -178,9 +178,9 @@
                                         s))))
 
 (define (pidefterm . s)
-  (let ([c (apply defterm s)])
-    (index (string-append (content->string (element-content c)) "s")
-           c)))
+  (define c (apply defterm s))
+  (index (string-append (content->string (element-content c)) "s")
+         c))
 
 (define (hash-lang)
   (make-link-element
@@ -208,37 +208,37 @@
   (apply hyperlink url #:style (if style (make-style style null) plain) str))
 
 (define (math . s)
-  (let ([c (decode-content s)])
-    (make-element
-     #f
-     (append-map
-      (lambda (i)
-        (let loop ([i i])
-          (cond
-            [(string? i)
-             (cond
-               [(regexp-match #px"^(.*)_([a-zA-Z0-9]+)(.*)$" i)
-                => (lambda (m)
-                     (append (loop (cadr m))
-                             (list (make-element 'subscript
-                                                 (loop (caddr m))))
-                             (loop (cadddr m))))]
-               [(regexp-match #px"^(.*)\\^([a-zA-Z0-9]+)(.*)$" i)
-                => (lambda (m)
-                     (append (loop (cadr m))
-                             (list (make-element 'superscript
-                                                 (loop (caddr m))))
-                             (loop (cadddr m))))]
-               [(regexp-match #px"^(.*)([()0-9{}\\[\\]\u03C0])(.*)$" i)
-                => (lambda (m)
-                     (append (loop (cadr m))
-                             (list (caddr m))
-                             (loop (cadddr m))))]
-               [else
-                (list (make-element 'italic (list i)))])]
-            [(eq? i 'rsquo) (list 'prime)]
-            [else (list i)])))
-      c))))
+  (define c (decode-content s))
+  (make-element
+   #f
+   (append-map
+    (lambda (i)
+      (let loop ([i i])
+        (cond
+          [(string? i)
+           (cond
+             [(regexp-match #px"^(.*)_([a-z\\-A-Z0-9]+)(.*)$" i)
+              => (lambda (m)
+                   (append (loop (cadr m))
+                           (list (make-element 'subscript
+                                               (loop (caddr m))))
+                           (loop (cadddr m))))]
+             [(regexp-match #px"^(.*)\\^([a-z\\-A-Z0-9]+)(.*)$" i)
+              => (lambda (m)
+                   (append (loop (cadr m))
+                           (list (make-element 'superscript
+                                               (loop (caddr m))))
+                           (loop (cadddr m))))]
+             [(regexp-match #px"^(.*)([()0-9{}\\[\\]\u03C0])(.*)$" i)
+              => (lambda (m)
+                   (append (loop (cadr m))
+                           (list (caddr m))
+                           (loop (cadddr m))))]
+             [else
+              (list (make-element 'italic (list i)))])]
+          [(eq? i 'rsquo) (list 'prime)]
+          [else (list i)])))
+    c)))
 
 (define (filebox filename . inside)
   (make-nested-flow 

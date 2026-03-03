@@ -51,7 +51,7 @@
   (cond
     [(not (and (integer? i-val) (exact? i-val)))
      (tc-error/expr #:stx expr "expected exact integer for ~a index, but got ~a" name i-val)]
-    [(< i-val 0)
+    [(negative? i-val)
      (tc-error/expr #:stx expr "index ~a too small for ~a ~a" i-val name type)]
     [(not (< i-val i-bound))
      (tc-error/expr #:stx expr "index ~a too large for ~a ~a" i-val name type)]))
@@ -83,7 +83,7 @@
     [(valid-index? i-val i-bound)
      (define val-t (list-ref es-t i-val))
      (tc-expr/check val-e (ret val-t))
-     (add-typeof-expr op (ret (-> vec-t -Fixnum val-t -Void)))
+     (add-typeof-expr op (ret (-> vec-t -Fixnum val-t -Void :T+ #t)))
      (ret -Void)]
     [(not i-val)
      (define val-res (single-value val-e))
@@ -91,7 +91,7 @@
        (check-below val-res (ret es-type)))
      (define val-t
        (match val-res [(tc-result1: t) t]))
-     (add-typeof-expr op (ret (-> vec-t -Fixnum val-t -Void)))
+     (add-typeof-expr op (ret (-> vec-t -Fixnum val-t -Void :T+ #t)))
      (ret -Void)]
     [else
      (single-value val-e)
@@ -203,7 +203,7 @@
                       t))
                   (define return-ty
                     (?make-HV arg-tys))
-                  (add-typeof-expr #'op (ret (->* arg-tys return-ty)))
+                  (add-typeof-expr #'op (ret (->* arg-tys return-ty :T+ #t)))
                   (ret return-ty)]
                  [(tc-result1: (app resolve (Is-a: (?match-HV ts))))
                   (cond
@@ -214,7 +214,7 @@
                         (tc-expr/check/t e (ret t))))
                     (define return-ty
                       (?make-HV arg-tys))
-                    (add-typeof-expr #'op (ret (->* arg-tys return-ty)))
+                    (add-typeof-expr #'op (ret (->* arg-tys return-ty :T+ #t)))
                     (ret return-ty -true-propset)]
                    [else
                     (tc-error/expr
@@ -236,6 +236,6 @@
                       (tc-hv-elem e)))
                   (define return-ty
                     (?make-HV arg-tys))
-                  (add-typeof-expr #'op (ret (->* arg-tys return-ty)))
+                  (add-typeof-expr #'op (ret (->* arg-tys return-ty :T+ #t)))
                   (ret return-ty)])]))))]))
   (values (make-tc-app-hetero-vector 'immutable) (make-tc-app-hetero-vector 'mutable))))

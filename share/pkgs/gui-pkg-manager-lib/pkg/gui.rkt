@@ -83,11 +83,13 @@
   
   (define (disallow-close)
     (set! allow-close? #f)
-    (send close enable #f))
+    (send close enable #f)
+    (send by-source-panel enable #f))
   
   (define (allow-close)
     (set! allow-close? #t)
-    (send close enable #t))
+    (send close enable #t)
+    (send by-source-panel enable #t))
 
   (define by-source-panel
     (new by-source-panel% 
@@ -121,9 +123,21 @@
 (define (make-pkg-gui #:wrap-terminal-action 
                       [wrap-terminal-action (lambda (thunk) (thunk))]
                       #:initial-tab [initial-tab 'by-source])
+  (define allow-close? #t)
 
   (define frame
-    (new pkg-gui-frame%
+    (new (class pkg-gui-frame%
+           (define/augment (can-close?)
+             (or allow-close?
+                 (= (message-box/custom (string-constant install-pkg-dialog-title)
+                                        (string-constant install-pkg-generic-action-in-progress)
+                                        (string-constant install-pkg-continue-generic-action)
+                                        (string-constant install-pkg-abort-generic-action)
+                                        #f
+                                        this
+                                        '(default=1))
+                    2)))
+           (super-new))
          [label (string-constant install-pkg-title)]
          [width 800]
          [height 600]))
@@ -168,7 +182,9 @@
                (λ (cust parent) (wrap-terminal-action thunk))))
     (set! terminal t)
     (send sel-tab enable #f)
+    (set! allow-close? #f)
     (yield (send t can-close-evt))
+    (set! allow-close? #t)
     (send sel-tab enable #t))
 
   (new by-source-panel% 

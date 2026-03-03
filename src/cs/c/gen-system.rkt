@@ -1,12 +1,13 @@
 (module gen-system '#%kernel
   
-  ;; Command-line argument: <dest-file> <target-machine> <kernel-target-machine> <cross-target-machine> <srcdir> <slsp-suffix>
+  ;; Command-line argument: <dest-file> <target-machine> <kernel-target-machine> <cross-target-machine> <srcdir> <slsp-suffix> <macosx-or-other>
 
   (define-values (target-machine) (string->symbol (vector-ref (current-command-line-arguments) 1)))
   (define-values (machine) (string->symbol (vector-ref (current-command-line-arguments) 2)))
   (define-values (cross-target-machine) (vector-ref (current-command-line-arguments) 3))
   (define-values (srcdir) (vector-ref (current-command-line-arguments) 4))
   (define-values (slsp-suffix) (vector-ref (current-command-line-arguments) 5))
+  (define-values (macosx?) (equal? "macosx" (vector-ref (current-command-line-arguments) 6)))
 
   (define-values (definitions)
     (call-with-input-file
@@ -61,14 +62,14 @@
           (if (matches? e '(string->utf8 _))
               (string->bytes/utf-8 (cadr e))
               (if (matches? e '(if unix-style-macos? _ _))
-                  (if (eq? (system-type) 'macosx)
+                  (if macosx?
                       (parse-expr (cadddr e))
                       (parse-expr (caddr e)))
-                  (if (matches? e '(if unix-link-shared? _ _))
+                  (if (matches? e 'unix-link)
                       ;; Currently assuming shared-library mode is not a cross compile:
                       (if (eq? (system-type 'link) 'shared)
-                          (parse-expr (caddr e))
-                          (parse-expr (cadddr e)))
+                          'shared
+                          'static)
                       (error 'parse-expr "could not parse ~e" e)))))))
 
   (define-values (matches?)
@@ -126,6 +127,12 @@
                         (if (eq? arch 'ppc)
                             32
                             64)))
+          'so-find (if (equal? slsp-suffix "")
+                       (if (eq? os 'unix)
+                           'system
+                           'natipkg)
+                       (string->symbol (substring slsp-suffix 1)))
+          'platform lib-subpath
           'gc 'cs
           'vm 'chez-scheme
           'link link

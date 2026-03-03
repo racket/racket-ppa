@@ -23,6 +23,10 @@
 #include <ctype.h>
 #include <math.h>
 
+#if defined(__GNU__) /* Hurd */
+#include <sys/resource.h>
+#endif
+
 /* locally defined functions */
 static INT s_errno(void);
 static IBOOL s_addr_in_heap(uptr x);
@@ -58,7 +62,7 @@ static void s_showalloc(IBOOL show_dump, const char *outfn);
 static ptr s_system(const char *s);
 static ptr s_process(char *s, IBOOL stderrp);
 static I32 s_chdir(const char *inpath);
-#ifdef GETWD
+#if defined(GETWD) || defined(__GNU__) /* Hurd */
 static char *s_getwd(void);
 #endif
 static ptr s_set_code_byte(ptr p, ptr n, ptr x);
@@ -709,14 +713,28 @@ static ptr s_system(const char *s) {
   INT status;
 #ifdef PTHREADS
   ptr tc = get_thread_context();
+  char *s_arg = NULL;
 #endif
 
 #ifdef PTHREADS
-  if (DISABLECOUNT(tc) == FIX(0)) deactivate_thread(tc);
+  if (DISABLECOUNT(tc) == FIX(0)) {
+    /* copy `s` in case a GC happens */
+    uptr len = strlen(s) + 1;
+    s_arg = malloc(len);
+    if (s_arg == NULL)
+      S_error("system", "malloc failed");
+    memcpy(s_arg, s, len);
+    deactivate_thread(tc);
+    s = s_arg;
+  } else
+    s_arg = NULL;
 #endif
   status = SYSTEM(s);
 #ifdef PTHREADS
-  if (DISABLECOUNT(tc) == FIX(0)) reactivate_thread(tc);
+  if (DISABLECOUNT(tc) == FIX(0)) {
+    reactivate_thread(tc);
+    free(s_arg);
+  }
 #endif
 
   if ((status == -1) && (errno != 0)) {
@@ -731,8 +749,8 @@ static ptr s_system(const char *s) {
 #ifdef WIN32
   return Sinteger(status);
 #else
-  if WIFEXITED(status) return Sinteger(WEXITSTATUS(status));
-  if WIFSIGNALED(status) return Sinteger(-WTERMSIG(status));
+  if (WIFEXITED(status)) return Sinteger(WEXITSTATUS(status));
+  if (WIFSIGNALED(status)) return Sinteger(-WTERMSIG(status));
   S_error("system", "cannot determine subprocess exit status");
   return 0 /* not reached */;
 #endif /* WIN32 */
@@ -881,7 +899,18 @@ static ptr s_process(char *s, IBOOL stderrp) {
         CLOSE(0); if (dup(tofds[0]) != 0) _exit(1);
         CLOSE(1); if (dup(fromfds[1]) != 1) _exit(1);
         CLOSE(2); if (dup(stderrp ? errfds[1] : 1) != 2) _exit(1);
+#ifndef __GNU__ /* Hurd */
         {INT i; for (i = 3; i < NOFILE; i++) (void)CLOSE(i);}
+#else /* __GNU__ Hurd: no NOFILE */
+        {
+          INT i;
+          struct rlimit rlim;
+          getrlimit(RLIMIT_NOFILE, &rlim);
+          for (i = 3; i < rlim.rlim_cur; i++) {
+            (void)CLOSE(i);
+          }
+        }
+#endif /* __GNU__ Hurd */
         execl("/bin/sh", "/bin/sh", "-c", s, NULL);
         _exit(1) /* only if execl fails */;
         /*NOTREACHED*/
@@ -926,6 +955,22 @@ static I32 s_chdir(const char *inpath) {
 #ifdef GETWD
 static char *s_getwd() {
   return GETWD(TO_VOIDP(&BVIT(S_bytevector(PATH_MAX), 0)));
+}
+#elif defined(__GNU__) /* Hurd: no PATH_MAX */
+static char *s_getwd() {
+  char *path;
+  size_t len;
+  ptr bv;
+  path = getcwd(NULL, 0);
+  if (NULL == path) {
+    return NULL;
+  } else {
+    len = strlen(path);
+    bv = S_bytevector(len);
+    memcpy(TO_VOIDP(&BVIT(bv, 0)), path, len);
+    free(path);
+    return TO_VOIDP(&BVIT(bv, 0));
+  }
 }
 #endif /* GETWD */
 
@@ -1418,13 +1463,25 @@ static double s_pow(double x, double y) {
   } else
     return pow(x, y);
 }
-#elif defined(MACOSX)
-/* intel macosx delivers precise results for integer inputs, e.g.,
- * 10.0^21.0, only with long double version of pow */
+#elif (machine_type == machine_type_i3osx || machine_type == machine_type_ti3osx)
+/* intel macosx delivers accurate results for integer inputs, e.g.,
+ * 10.0^21.0, only with long double version of pow; it's not clear
+ * whether that has been true for x86_64 as opposed to i386, but as
+ * of macOS 10.15 (Catalina), pow seems ok for x86_64 */
 static double s_pow(double x, double y) { return powl(x, y); }
-#else /* i3fb/ti3fb */
+#else /* i3fb/ti3fb/i3osx/ti3osx */
 static double s_pow(double x, double y) { return pow(x, y); }
-#endif /* i3fb/ti3fb */
+#endif /* i3fb/ti3fb/i3osx/ti3osx */
+
+#ifdef __MINGW32__
+/* asinh() and atanh() sometimes get zero sign wrong */
+# define CHECK_ASINTAN_ZERO(x, e) ((x == 0.0) \
+                                   ? (signbit(x) ? -0.0 : 0.0)  \
+                                   : e)
+/* see also "mingw.zuo" */
+#else
+# define CHECK_ASINTAN_ZERO(x, e) e
+#endif
 
 static double s_sqrt(double x) { return sqrt(x); }
 
@@ -1459,11 +1516,11 @@ static double s_trunc(double x) { return trunc(x); }
 static double s_hypot(double x, double y) { return HYPOT(x, y); }
 
 #ifdef ARCHYPERBOLIC
-static double s_asinh(double x) { return asinh(x); }
+static double s_asinh(double x) { return CHECK_ASINTAN_ZERO(x, asinh(x)); }
 
 static double s_acosh(double x) { return acosh(x); }
 
-static double s_atanh(double x) { return atanh(x); }
+static double s_atanh(double x) { return CHECK_ASINTAN_ZERO(x, atanh(x)); }
 #endif /* ARCHHYPERBOLIC */
 
 #ifdef LOG1P
@@ -1513,19 +1570,20 @@ static void s_putenv(char *name, char *value) {
 
 #ifdef PTHREADS
 /* backdoor thread is for testing thread creation by Sactivate_thread */
-#define display(s) { const char *S = (s); if (WRITE(1, S, (unsigned int)strlen(S))) {} }
-static s_thread_rv_t s_backdoor_thread_start(void *p) {
-  display("backdoor thread started\n")
+#define display(s) do { const char *S = (s); if (WRITE(1, S, (unsigned int)strlen(S))) {} } while(0)
+static s_thread_rv_t s_backdoor_thread_start(void *p_in) {
+  ptr p = TO_PTR(p_in);
+  display("backdoor thread started\n");
   (void) Sactivate_thread();
-  display("thread activated\n")
-  Scall0((ptr)Sunbox(TO_PTR(p)));
+  display("thread activated\n");
+  Scall0(Sboxp(p) ? Sunbox(p) : p);
   (void) Sdeactivate_thread();
-  display("thread deactivated\n")
+  display("thread deactivated\n");
   (void) Sactivate_thread();
-  display("thread reactivated\n")
-  Scall0((ptr)Sunbox(TO_PTR(p)));
+  display("thread reactivated\n");
+  Scall0(Sboxp(p) ? Sunbox(p) : p);
   Sdestroy_thread();
-  display("thread destroyed\n")
+  display("thread destroyed\n");
   s_thread_return;
 }
 
@@ -1569,6 +1627,10 @@ static ptr s_mutex_acquire_noblock(ptr m_p) {
 
 static void s_mutex_release(ptr m) {
   S_mutex_release(TO_VOIDP(m));
+}
+
+static IBOOL s_mutex_is_owner(ptr m) {
+  return S_mutex_is_owner(TO_VOIDP(m));
 }
 
 static void s_condition_broadcast(ptr c_p) {
@@ -1672,6 +1734,7 @@ void S_prim5_init(void) {
     Sforeign_symbol("(cs)mutex_acquire", (void *)s_mutex_acquire);
     Sforeign_symbol("(cs)mutex_release", (void *)s_mutex_release);
     Sforeign_symbol("(cs)mutex_acquire_noblock", (void *)s_mutex_acquire_noblock);
+    Sforeign_symbol("(cs)mutex_is_owner", (void *)s_mutex_is_owner);
     Sforeign_symbol("(cs)make_condition", (void *)S_make_condition);
     Sforeign_symbol("(cs)condition_free", (void *)s_condition_free);
     Sforeign_symbol("(cs)condition_broadcast", (void *)s_condition_broadcast);
@@ -1765,6 +1828,7 @@ void S_prim5_init(void) {
     Sforeign_symbol("(cs)put_byte", (void*)S_put_byte);
     Sforeign_symbol("(cs)get_fd_pos", (void*)S_get_fd_pos);
     Sforeign_symbol("(cs)set_fd_pos", (void*)S_set_fd_pos);
+    Sforeign_symbol("(cs)fd_can_set_position", (void*)S_fd_can_set_pos);
     Sforeign_symbol("(cs)get_fd_non_blocking", (void*)S_get_fd_non_blocking);
     Sforeign_symbol("(cs)set_fd_non_blocking", (void*)S_set_fd_non_blocking);
     Sforeign_symbol("(cs)get_fd_length", (void*)S_get_fd_length);
@@ -1817,7 +1881,7 @@ void S_prim5_init(void) {
     Sforeign_symbol("(cs)s_rational", (void *)S_rational);
     Sforeign_symbol("(cs)sub", (void *)S_sub);
     Sforeign_symbol("(cs)rem", (void *)S_rem);
-#ifdef GETWD
+#if defined(GETWD) || defined(__GNU__) /* Hurd */
     Sforeign_symbol("(cs)s_getwd", (void *)s_getwd);
 #endif
     Sforeign_symbol("(cs)s_chdir", (void *)s_chdir);
@@ -2207,6 +2271,50 @@ static void s_iconv_close(uptr cd) {
   ICONV_CLOSE((iconv_t)cd);
 }
 
+#ifdef DISTRUST_ICONV_PROGRESS
+# define ICONV_FROM iconv_fixup
+static size_t iconv_fixup(iconv_t cd, char **src, size_t *srcleft, char **dst, size_t *dstleft) {
+  size_t r;
+  char *orig_src = *src, *orig_dst = *dst;
+  size_t orig_srcleft = *srcleft, orig_dstleft = *dstleft, srcuntried = 0;
+
+  while (1) {
+    r = ICONV((iconv_t)cd, src, srcleft, dst, dstleft);
+    if ((r == (size_t)-1)
+        && (errno == E2BIG)
+        && ((*srcleft < orig_srcleft) || (*dstleft < orig_dstleft))) {
+      /* Avoid a macOS (as of 14.2.1 and 14.3.1) iconv bug in this
+         case, where we don't trust that consumed input characters are
+         reflected in the output pointer. Reverting progress should be
+         ok for a correct iconv, too, since a -1 result means that no
+         irreversible progress was made. */
+      *src = orig_src;
+      *dst = orig_dst;
+      *srcleft = orig_srcleft;
+      *dstleft = orig_dstleft;
+
+      /* We need to make progress, if possible, to satify normal iconv
+         behavior and "io.ss" expectations. Try converting fewer
+         characters. */
+      if (orig_srcleft > sizeof(string_char)) {
+        size_t try_chars = (orig_srcleft / sizeof(string_char)) / 2;
+        srcuntried += orig_srcleft - (try_chars * sizeof(string_char));
+        orig_srcleft = try_chars * sizeof(string_char);
+        *srcleft = orig_srcleft;
+      } else
+        break;
+    } else
+      break;
+  }
+
+  *srcleft += srcuntried;
+
+  return r;
+}
+#else
+# define ICONV_FROM ICONV
+#endif
+
 #define ICONV_BUFSIZ 400
 
 static ptr s_iconv_from_string(uptr cd, ptr in, uptr i, uptr iend, ptr out, uptr o, uptr oend) {
@@ -2232,7 +2340,8 @@ static ptr s_iconv_from_string(uptr cd, ptr in, uptr i, uptr iend, ptr out, uptr
     under Windows, the iconv dll might have been linked against a different C runtime
     and might therefore set a different errno */
   errno = 0;
-  ICONV((iconv_t)cd, (ICONV_INBUF_TYPE)&inbuf, &inbytesleft, &outbuf, &outbytesleft);
+  ICONV_FROM((iconv_t)cd, (ICONV_INBUF_TYPE)&inbuf, &inbytesleft, &outbuf, &outbytesleft);
+
   new_i = i + inmax - inbytesleft / sizeof(string_char);
   new_o = oend - outbytesleft;
   if (new_i != i || new_o != o) return Scons(Sinteger(new_i), Sinteger(new_o));

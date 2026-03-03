@@ -7,9 +7,11 @@
 
 (define (pg-custom-type typeid name [base-type #f]
                         #:recv [recv-convert values]
-                        #:send [send-convert values])
-  (make-custom-type typeid name base-type recv-convert send-convert))
+                        #:send [send-convert values]
+                        #:array [array-typeid #f])
+  (make-custom-type typeid name base-type recv-convert send-convert array-typeid))
 
+(provide postgresql-connection<%>)
 (provide/contract
  [pg-custom-type?
   (-> any/c boolean?)]
@@ -18,7 +20,8 @@
         symbol?]
        [(or/c #f symbol? exact-nonnegative-integer?)
         #:recv (or/c #f (procedure-arity-includes/c 1))
-        #:send (or/c #f (procedure-arity-includes/c 1))]
+        #:send (or/c #f (procedure-arity-includes/c 1))
+        #:array (or/c #f exact-nonnegative-integer?)]
        any)]
  [struct pg-box ([ne point?] [sw point?])]
  [struct pg-circle ([center point?] [radius (and/c real? (not/c negative?))])]

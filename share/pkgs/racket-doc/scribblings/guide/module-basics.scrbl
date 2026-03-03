@@ -163,7 +163,7 @@ collection-based module path:
  @item{First, if the unquoted path contains no @litchar{/}, then
        @racket[require] automatically adds a @filepath{/main} to the
        reference. For example, @racket[(require
-       @#,racketmodname[slideshow])] is equivalent to @racket[(require
+       @#,racketmodname[slideshow #:indirect])] is equivalent to @racket[(require
        slideshow/main)].}
 
  @item{Second, @racket[require] implicitly adds a @filepath{.rkt}
@@ -203,10 +203,10 @@ A @deftech{package} is a set of libraries that are installed through
 the Racket package manager (or included as pre-installed in a Racket
 distribution). For example, the @racketmodname[racket/gui] library is
 provided by the @filepath{gui} package, while
-@racketmodname[parser-tools/lex] is provided by the
+@racketmodname[parser-tools/lex #:indirect] is provided by the
 @filepath{parser-tools} library.@margin-note{More precisely,
-@racketmodname[racket/gui] is provided by @filepath{gui-lib},
-@racketmodname[parser-tools/lex] is provided by
+@racketmodname[racket/gui #:indirect] is provided by @filepath{gui-lib},
+@racketmodname[parser-tools/lex #:indirect] is provided by
 @filepath{parser-tools-lib}, and the @filepath{gui} and
 @filepath{parser-tools} packages extend @filepath{gui-lib} and
 @filepath{parser-tools-lib} with documentation.}
@@ -238,7 +238,7 @@ your Racket configuration.
 
 Some libraries are meant to be used across multiple projects, so that
 keeping the library source in a directory with its uses does not make
-sense. In that case, the best option is add a new
+sense. In that case, the best option is to add a new
 @tech{collection}. After the library is in a collection, it can be
 referenced with an unquoted path, just like libraries that are
 included with the Racket distribution.
@@ -378,7 +378,7 @@ some situations:
        confusion through multiple instantiations.}
 
  @item{When @seclink["exe" #:doc '(lib
-       "scribblings/raco/raco.scrbl")]{@exec{raco exec}} plus
+       "scribblings/raco/raco.scrbl")]{@exec{raco exe}} plus
        @seclink["exe-dist" #:doc '(lib
        "scribblings/raco/raco.scrbl")]{@exec{raco distribute}} are
        used to create an executable to run on a different machine, the

@@ -1,5 +1,5 @@
 #lang at-exp racket/base
-(require scribble/core scribble/manual scribble/bnf
+(require scribble/core scribble/manual scribble/bnf scribble/decode
          racket/list racket/string)
 
 ;; If you edit this table, please try to avoid making the table wider
@@ -25,7 +25,7 @@
             |  Atom{}             Match Atom 0 or more times                      #px
   Atom     ::= (Regexp)           Match sub-expression Regexp and report          #co 11
             |  [Rng]              Match any character in Rng                      #co 2
-            |  [^Rng]             Match any character not in Rng                  #co 12
+            |  [^Crng]            Match any character not in Crng                 #co 12
             |  .                  Match any (except newline in multi mode)        #co 13
             |  ^                  Match start (or after newline in multi mode)    #co 14
             |  $                  Match end (or before newline in multi mode)     #co 15
@@ -43,11 +43,14 @@
             |  \B                 Match where _\b_ does not                       #px 18
             |  \p{Property}       Match (UTF-8 encoded) in Property               #px 19
             |  \P{Property}       Match (UTF-8 encoded) not in Property           #px 20
+            |  \X                 Match (UTF-8 encoded) grapheme cluster          #px
   Literal  :== Any character except _(_, _)_, _*_, _+_, _?_, _[_, _._, _^_, _\_, or _|_                #rx
   Literal  :== Any character except _(_, _)_, _*_, _+_, _?_, _[_, _]_, _{_, _}_, _._, _^_, _\_, or _|_ #px
             |  \Aliteral                Match Aliteral                            #ot 21
   Aliteral :== Any character                                                      #rx
   Aliteral :== Any character except _a_-_z_, _A_-_Z_, _0_-_9_                     #px
+  Crng     ::= Rng                Crng contains everything in Rng                 #co
+            |  ^Crng              Crng contains _^_ and everything in Crng        #co 37
   Rng      ::= ]                  Rng contains _]_ only                           #co 27
             |  -                  Rng contains _-_ only                           #co 28
             |  Mrng               Rng contains everything in Mrng                 #co
@@ -177,7 +180,7 @@
                                          (element #f " ")
                                          (element #f (regexp-replace* #rx"`" Y " "))))]
     [(#rx"^$") null]
-    [else (list s)]))
+    [else (decode-string s)]))
 
 (define (lit-ize l)
   (map (lambda (i) (if (string? i) (litchar i) i)) l))
@@ -296,12 +299,14 @@
   \B : <0,0>
 
   \p{Property} : <1,6>
-  \P{Property} : <1,6>})
+  \P{Property} : <1,6>
+
+  \X : <1,+inf.0>})
 
 (define (subscripts i)
   (regexp-case i
     [(#rx"^(.*)_(.)(.*)$" X S Y)
-     `(,@(subscripts X) ,(element 'subscript (list S)) ,@(subscripts Y))]
+     `(,@(subscripts X) ,(element 'subscript (fixup-ids S)) ,@(subscripts Y))]
     [(#rx"^(.*)([nm])([012]?)(.*)$" X V N Y)
      `(,@(subscripts X)
        ,(element 'italic (list V)) ,(element 'subscript (list N))

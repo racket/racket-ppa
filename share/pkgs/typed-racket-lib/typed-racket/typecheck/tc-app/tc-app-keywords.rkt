@@ -52,9 +52,10 @@
                      #'kw-arg-list #'pos-args expected))
 
       (define (tc/app-poly-fun vars arrow fail)
-        (match-define (and ar (Arrow: dom #f kw-formals rng)) arrow)
-        ;; if the types of the keyword arguments have type variables, stop.
-        (unless (set-empty? (fv/list kw-formals))
+        (match-define (and ar (Arrow: dom rst kw-formals rng)) arrow)
+        ;; if the types of the keyword arguments have type variables or rst is
+        ;; set, stop.
+        (unless (or (set-empty? (fv/list kw-formals)) (not rst))
           (fail))
         (match (stx-map single-value #'pos-args)
            [(list (tc-result1: argtys-t) ...)
@@ -125,19 +126,19 @@
 
 (define (tc-keywords form arrows kws kw-args pos-args expected)
   (match arrows
-    [(list (and a (Arrow: dom (and rst (not (? RestDots?))) ktys rng)))
+    [(list (and a (Arrow: dom (and rst (not (? RestDots?))) ktys rng rng-T+)))
      (tc-keywords/internal a kws kw-args #t)
-     (tc/funapp (car (syntax-e form)) kw-args
-                (->* dom rst rng)
+     (tc/funapp (car (syntax-e form)) pos-args
+                (->* dom rst rng :T+ rng-T+)
                 (stx-map tc-expr pos-args) expected)]
-    [(list (and a (Arrow: doms (and rsts (not (? RestDots?))) _ rngs)) ...)
+    [(list (and a (Arrow: doms (and rsts (not (? RestDots?))) _ rngs rngs-T+)) ...)
      (let ([new-arrows
             (for/list ([a (in-list arrows)]
                        ;; find all the arrows where the keywords match
                        #:when (tc-keywords/internal a kws kw-args #f))
               (match a
-                [(Arrow: dom (and rst (not (? RestDots?))) ktys rng)
-                 (make-Arrow dom rst '() rng)]))])
+                [(Arrow: dom (and rst (not (? RestDots?))) ktys rng rng-T+)
+                 (make-Arrow dom rst '() rng rng-T+)]))])
        (if (null? new-arrows)
            (domain-mismatches
             (car (syntax-e form)) (cdr (syntax-e form))
@@ -148,7 +149,7 @@
             (lambda (dom)
               (string-append "No function domains matched in function application:\n"
                              dom)))
-           (tc/funapp (car (syntax-e form)) kw-args
+           (tc/funapp (car (syntax-e form)) pos-args
                       (make-Fun new-arrows)
                       (stx-map tc-expr pos-args) expected)))]))
 

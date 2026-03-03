@@ -13,7 +13,7 @@
   (U Comment P-I))
 
 (define-type XExpr
-  (U XML-Misc Cdata Positive-Index
+  (U XML-Misc Cdata Pcdata Positive-Index
      Number String Symbol
      (Pair Symbol (Pair (Listof XExpr-Attribute) (Listof XExpr)))
      (Pair Symbol (Listof XExpr))))
@@ -25,8 +25,8 @@
     [offset : Exact-Nonnegative-Integer])
    #:type-name Location]
   [#:struct source
-   ([start : Location]
-    [stop  : Location])
+   ([start : (U Location Symbol False)]
+    [stop  : (U Location Symbol False)])
    #:type-name Source]
   [#:struct external-dtd
    ([system : String])

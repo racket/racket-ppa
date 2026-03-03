@@ -12,6 +12,7 @@
          macro-debugger/view/prefs
          images/compile-time
          (for-syntax racket/base images/icons/tool)
+         string-constants
          ;; FIXME:
          drracket/private/syncheck/local-member-names
          drracket/private/eval-helpers-and-pref-init)
@@ -77,14 +78,14 @@
 
     (define/public (shutdown)
       (when (pref:close-on-reset-console?)
-        (for ([(frame flags) (in-hash stepper-frames)])
-          (unless (memq 'no-obsolete flags)
-            (send frame show #f)))))
+        (for ([(frame flags) (in-hash stepper-frames)]
+              #:unless (memq 'no-obsolete flags))
+          (send frame show #f))))
 
     (super-new)))
 
 
-(define macro-stepper-button-label "Macro Stepper")
+(define macro-stepper-button-label (string-constant macro-stepper))
 
 (define macro-debugger-bitmap (compiled-bitmap (macro-stepper-icon)))
 (define small-macro-debugger-bitmap (compiled-bitmap (small-macro-stepper-icon)))
@@ -151,7 +152,7 @@
           (let ([lang-menu (get-language-menu)])
             (new separator-menu-item% (parent lang-menu))
             (new menu-item%
-                 (label "Macro Stepper")
+                 (label (string-constant macro-stepper))
                  (parent lang-menu)
                  (callback (lambda _ (run-macro-stepper))))))
 
@@ -165,21 +166,21 @@
           (enable/disable-stuff (allow-macro-stepper?)))
 
         (define/public (allow-macro-stepper?)
-          (let ([lang
-                 (drracket:language-configuration:language-settings-language
-                  (send (get-definitions-text) get-next-settings))])
-            (send lang capability-value 'macro-stepper:enabled)))
+          (define lang
+            (drracket:language-configuration:language-settings-language (send (get-definitions-text)
+                                                                              get-next-settings)))
+          (send lang capability-value 'macro-stepper:enabled))
 
         (define/private (enable/disable-stuff enable?)
-          (if enable?
-              (begin (send macro-debug-menu-item enable #t)
-                     (unless (send macro-debug-button is-shown?)
-                       (send macro-debug-panel
-                             add-child macro-debug-button)))
-              (begin (send macro-debug-menu-item enable #f)
-                     (when (send macro-debug-button is-shown?)
-                       (send macro-debug-panel
-                             delete-child macro-debug-button)))))
+          (cond
+            [enable?
+             (send macro-debug-menu-item enable #t)
+             (unless (send macro-debug-button is-shown?)
+               (send macro-debug-panel add-child macro-debug-button))]
+            [else
+             (send macro-debug-menu-item enable #f)
+             (when (send macro-debug-button is-shown?)
+               (send macro-debug-panel delete-child macro-debug-button))]))
 
         (send (get-button-panel) change-children
               (lambda (_)
@@ -222,8 +223,8 @@
           (define director
             (parameterize ((current-eventspace drracket-eventspace)
                            (current-custodian drracket-custodian))
-              (let ([filename (send definitions-text get-filename/untitled-name)])
-                (new drracket-macro-stepper-director% (filename filename)))))
+              (define filename (send definitions-text get-filename/untitled-name))
+              (new drracket-macro-stepper-director% (filename filename))))
           (send interactions-text set-macro-stepper-director director)
 
           (define (the-module-name-resolver . args)
@@ -284,14 +285,13 @@
             (send the-tab set-breakables old-break-thread old-custodian)
             (send the-tab enable-evaluation)
             ;; do this with some lag ... not great, but should be okay.
-            (let ([err-port (send (send the-tab get-error-report-text) get-err-port)])
-              (thread
-               (λ ()
-                  (flush-output err-port)
-                  (queue-callback
-                   (λ ()
-                      (unless (= 0 (send (send the-tab get-error-report-text) last-position))
-                        (show-error-report/tab))))))))
+            (define err-port (send (send the-tab get-error-report-text) get-err-port))
+            (thread (λ ()
+                      (flush-output err-port)
+                      (queue-callback
+                       (λ ()
+                         (unless (= 0 (send (send the-tab get-error-report-text) last-position))
+                           (show-error-report/tab)))))))
           (define (kill-termination)
             (unless normal-termination?
               (parameterize ([current-eventspace drs-eventspace])
@@ -346,24 +346,21 @@
         ;; sets and restores some state of the definitions text
         ;; so that edits to the definitions text work out.
         (define/private (with-lock/edit-sequence definitions-text thnk)
-          (let* ([locked? (send definitions-text is-locked?)])
-            (send definitions-text begin-edit-sequence)
-            (send definitions-text lock #f)
-            (thnk)
-            (send definitions-text end-edit-sequence)
-            (send definitions-text lock locked?)))
+          (define locked? (send definitions-text is-locked?))
+          (send definitions-text begin-edit-sequence)
+          (send definitions-text lock #f)
+          (thnk)
+          (send definitions-text end-edit-sequence)
+          (send definitions-text lock locked?))
 
         (define/private (expand+trace expr)
           (define (handle-macro-limit c)
             (define option
               (message-box/custom
-               "Macro stepper"
-               (string-append "Macro expansion has taken a suspiciously large number of steps.\n"
-                              "\n"
-                              "Click Stop to stop macro expansion and see the steps taken "
-                              "so far, or click Continue to let it run a bit longer.")
-               "Continue"
-               "Stop"
+               (string-constant macro-stepper)
+               (string-constant macro-stepper-warning-message)
+               (string-constant macro-stepper-continue)
+               (string-constant macro-stepper-stop)
                #f
                (get-top-level-window)))
             (case option
@@ -407,11 +404,10 @@
         (define/private (notify-macro-stepper-of-change)
           (unless modified-since-macro-stepper?
             (set! modified-since-macro-stepper? #f)
-            (let ([win (get-top-level-window)])
-              ;; should only be #f when win is #f
-              (when (is-a? win drracket:unit:frame<%>)
-                (send (send win get-interactions-text)
-                      obsolete-macro-stepper)))))
+            (define win (get-top-level-window))
+            ;; should only be #f when win is #f
+            (when (is-a? win drracket:unit:frame<%>)
+              (send (send win get-interactions-text) obsolete-macro-stepper))))
 
         ;; Catch program changes and mark macro stepper obsolete.
         (define/augment (on-insert x y)
@@ -462,12 +458,12 @@
             "macro stepper"
             (lambda (obj evt)
               (when (is-a? obj editor<%>)
-                (let ([canvas (send obj get-canvas)])
-                  (when canvas
-                    (let ([frame (send canvas get-top-level-window)])
-                      (when (is-a? frame frame/supports-macro-stepper<%>)
-                        (when (send frame allow-macro-stepper?)
-                          (send frame run-macro-stepper)))))))))
+                (define canvas (send obj get-canvas))
+                (when canvas
+                  (define frame (send canvas get-top-level-window))
+                  (when (and (is-a? frame frame/supports-macro-stepper<%>)
+                             (send frame allow-macro-stepper?))
+                    (send frame run-macro-stepper))))))
       (send keymap map-function "c:c;c:m" "macro stepper"))
 
     (add-macro-stepper-key-bindings (drracket:rep:get-drs-bindings-keymap))

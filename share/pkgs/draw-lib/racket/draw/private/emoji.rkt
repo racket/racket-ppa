@@ -10,7 +10,7 @@
          "../unsafe/cairo.rkt"
          "emoji-sequences.rkt")
 
-;; On Mac OS, Pango+Cairo doesn't handle emoji, so we implement emoji
+;; On Mac OS, Pango+Cairo doesn't handle emoji modifiers, so we implement emoji
 ;; rendering directly with CoreText primitives. Emoji modifiers are
 ;; supported when rendering text in "combined" mode, but not when
 ;; rendering charcter-by-character (since a modifier is a Unicode code
@@ -31,26 +31,33 @@
     [else #f]))
 
 ;; Returns #f or (cons start end) for the first emoji sequence in `s`
-(define (find-emoji-sequence s)
+(define (find-emoji-sequence s start)
   (cond
     [emoji-sequences
      (define len (string-length s))
-     (let loop ([i 0])
+     (let loop ([i start])
        (cond
          [(= i len) #f]
          [else
-          (let table-loop ([table emoji-sequences] [j i])
-            (define v (hash-ref table (char->integer (string-ref s j)) #f))
-            (cond
-              [(not v) (loop (add1 i))]
-              [(eq? v #t) (cons i (add1 j))]
-              [else
-               (define new-j (add1 j))
-               (or (cond
-                     [(= new-j len) #f]
-                     [else (table-loop v (add1 j))])
-                   (and (hash-ref table #f #f)
-                        (cons i new-j)))]))]))]
+          (or (let table-loop ([table emoji-sequences] [j i])
+                (define v (hash-ref table (char->integer (string-ref s j)) #f))
+                (cond
+                  [(not v) #f]
+                  [(eq? v #t) (cons i (add1 j))]
+                  [else
+                   (define new-j (add1 j))
+                   (or (cond
+                         [(= new-j len) #f]
+                         [else (table-loop v new-j)])
+                       ;; The following two cases are dedundant for
+                       ;; characters in the middle of the search range,
+                       ;; but only one for an end-of-string and the other
+                       ; for start-of-start
+                       (and (hash-ref v #f #f)
+                            (cons i new-j))
+                       (and (hash-ref table #f #f)
+                            (cons i j)))]))
+              (loop (add1 i)))]))]
     [else #f]))
 
 (define-values (emoji-extent draw-emoji)
@@ -85,6 +92,8 @@
                                             [d _CGFloat]
                                             [tx _CGFloat]
                                             [ty _CGFloat]))
+        (define-cstruct _CGPoint ([x _CGFloat]
+                                  [y _CGFloat]))
 
         (define-cpointer-type _CGFontRef)
         (define-cg CGFontCreateWithFontName (_fun _NSString -> _CGFontRef)
@@ -103,6 +112,7 @@
         (define-cg CGContextScaleCTM (_fun _CGContextRef _CGFloat _CGFloat -> _void))
         (define-cg CGContextConcatCTM (_fun _CGContextRef _CGAffineTransform -> _void))
 
+        (define-cg CGContextGetTextPosition (_fun _CGContextRef -> _CGPoint))
         (define-cg CGContextSetTextPosition (_fun _CGContextRef _CGFloat _CGFloat -> _void))
 
         (define-cpointer-type _CTLineRef)
@@ -211,6 +221,7 @@
                (define cg (cairo_quartz_get_cg_context_with_clip cr))
 
                ;; Set CG transformation to match Cairo plus displacement for glyph
+               (define pos (CGContextGetTextPosition cg))
                (CGContextSaveGState cg)
                (CGContextConcatCTM cg tm)
                (CGContextTranslateCTM cg
@@ -226,6 +237,7 @@
 
                ;; Go back to Cairo mode for the CG
                (CGContextRestoreGState cg)
+               (CGContextSetTextPosition cg (CGPoint-x pos) (CGPoint-y pos))
                (cairo_quartz_finish_cg_context_with_clip cr)
                (cairo_surface_mark_dirty s)])))
 
@@ -237,37 +249,74 @@
          void)])]
     [else (values void void)]))
 
-;; This submodule parses "emoji-sequences.txt" from Unicode
-;; to implement "emoji-sequences.rkt"
+;; This submodule parses "emoji-sequences.txt", "emoji-zwj-sequences.txt",
+;; "emoji-variation-sequences.txt", and "emoji-data.txt" from Unicode
+;; to implement "emoji-sequences.rkt".
 (module extract-emoji-sequences racket/base
   (require racket/pretty)
 
+  (define emoji-presentation (make-hasheqv))
+  (call-with-input-file*
+   "emoji-data.txt"
+   (lambda (i)
+     (let loop ()
+       (define l (read-line i))
+       (unless (eof-object? l)
+         (cond
+           [(regexp-match #px"^([0-9A-F]+)[.][.]([0-9A-F]+) +; Emoji_Presentation" l)
+            => (lambda (m)
+                 (for ([i (in-range (string->number (cadr m) 16)
+                                    (add1 (string->number (caddr m) 16)))])
+                   (hash-set! emoji-presentation i #t)))]
+           [(regexp-match #px"^([0-9A-F]+) +; Emoji_Presentation" l)
+            => (lambda (m)
+                 (hash-set! emoji-presentation (string->number (cadr m) 16) #t))])
+         (loop)))))
+
   (define table (make-hasheqv))
-  
-  (let loop ()
-    (define l (read-line))
-    (unless (eof-object? l)
-      (cond
-        [(regexp-match #px"^([0-9A-F]+)[.][.]([0-9A-F]+)" l)
-         => (lambda (m)
-              (for ([i (in-range (string->number (cadr m) 16)
-                                 (add1 (string->number (caddr m) 16)))])
-                (define t (hash-ref table i (lambda () (make-hasheqv))))
-                (hash-set! table i t)
-                (hash-set! t #f #t)))]
-        [(regexp-match? #px"^([0-9A-F]+)" l)
-         (let loop ([l l] [table table])
-           (cond
-             [(regexp-match-positions #px"^[0-9A-F]+" l)
-              => (lambda (m)
-                   (define i (string->number (substring l (caar m) (cdar m)) 16))
-                   (define t (hash-ref table i (lambda () (make-hasheqv))))
-                   (hash-set! table i t)
-                   (loop (substring l (cdar m)) t))]
-             [(regexp-match-positions #px"^\\s" l)
-              (loop (substring l 1) table)]
-             [else (hash-set! table #f #t)]))])
-      (loop)))
+
+  (define (hash-add! ht k v)
+    (when (hash-ref ht k #f)
+      (unless (equal? (hash-ref ht k #f) v)
+        (error "collision building table" k ht)))
+    (hash-set! ht k v))
+
+  (define (parse-sequences i)
+    (let loop ()
+      (define l (read-line i))
+      (unless (eof-object? l)
+        (cond
+          [(regexp-match #px"^([0-9A-F]+)[.][.]([0-9A-F]+)" l)
+           => (lambda (m)
+                (for ([i (in-range (string->number (cadr m) 16)
+                                   (add1 (string->number (caddr m) 16)))])
+                  (define t (hash-ref table i (lambda () (make-hasheqv))))
+                  (hash-set! table i t)
+                  (hash-set! t #f #t)))]
+          [(regexp-match? #px"^([0-9A-F]+)" l)
+           (let loop ([l l] [table table] [prev #f])
+             (cond
+               [(regexp-match-positions #px"^[0-9A-F]+" l)
+                => (lambda (m)
+                     (define i (string->number (substring l (caar m) (cdar m)) 16))
+                     (define t (hash-ref table i (lambda () (make-hasheqv))))
+                     (hash-add! table i t)
+                     (loop (substring l (cdar m)) t (or prev i))
+                     (when (and (= i #xFE0F)
+                                (or (and prev
+                                         (prev . >= . #x1f000))
+                                    (hash-ref emoji-presentation prev #f)))
+                       ;; treat U+FE0F as optional after Emoji_Presentation characters
+                       (for ([(k v) (in-hash t)])
+                         (hash-add! table k v))))]
+               [(regexp-match-positions #px"^\\s" l)
+                (loop (substring l 1) table prev)]
+               [else (hash-set! table #f #t)]))])
+        (loop))))
+
+  (call-with-input-file "emoji-sequences.txt" parse-sequences)
+  (call-with-input-file "emoji-zwj-sequences.txt" parse-sequences)
+  (call-with-input-file "emoji-variation-sequences.txt" parse-sequences)
 
   (let simplify ([table table])
     (for ([(k v) (in-hash table)])

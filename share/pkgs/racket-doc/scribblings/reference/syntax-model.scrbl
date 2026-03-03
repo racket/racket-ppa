@@ -951,6 +951,17 @@ module is attached to a namespace through
 are transitively attached, but instances are attached only at
 phases at or below the namespace's @tech{base phase}.
 
+When a module is instantiated at a phase other than 0, any syntax
+literals in the module are shifted by the instantiation phase. When a
+module is imported with @racket[for-label], then provided bindings
+from multiple phases are all mapped to the @tech{label phase level},
+and they are unaffected by further phase shifting of a syntax object
+with those bindings. When a syntax object is shifted into the label
+phase level, however, only bindings in phase level 0 become bindings
+in the label phase level, and further phase shifting can adjust which
+of the original phase levels is shifted into the label phase; see
+@racket[syntax-shift-phase-level].
+
 @;------------------------------------------------------------------------
 @subsection[#:tag "macro-introduced-bindings"]{Macro-Introduced Bindings}
 
@@ -1249,7 +1260,8 @@ and only if no module-level binding is @racket[set!]ed.
             #%plain-lambda case-lambda begin
             set! quote-syntax quote with-continuation-mark
             #%plain-app
-            cons list make-struct-type make-struct-type-property
+            cons list hasheq make-struct-type make-struct-type-property
+            make-parameter
             gensym string->uninterned-symbol #%variable-reference
 	    variable-reference-from-unsafe?)
 [cross-module (module id module-path
@@ -1267,9 +1279,11 @@ and only if no module-level binding is @racket[set!]ed.
                 (case-lambda (formals expr ...+) ...)
                 (#%plain-app cons cross-expr ...+)
                 (#%plain-app list cross-expr ...+)
+                (#%plain-app hasheq cross-expr ...+)
                 (#%plain-app make-struct-type cross-expr ...+)
                 (#%plain-app make-struct-type-property
                              cross-expr ...+)
+                (#%plain-app make-parameter cross-expr ...+)
                 (#%plain-app gensym)
                 (#%plain-app gensym string)
                 (#%plain-app string->uninterned-symbol string)
@@ -1288,7 +1302,9 @@ module imports only from other cross-phase persistent modules, the only relevant
 expansion steps are the implicit introduction of
 @racket[#%plain-module-begin], implicit introduction of @racket[#%plain-app],
 and implicit introduction and/or expansion of @racket[#%datum].
-@history[#:changed "7.5.0.12" @elem{Allow @racket[(#%plain-app variable-reference-from-unsafe? (#%variable-reference))].}]
+
+@history[#:changed "7.5.0.12" @elem{Allow @racket[(#%plain-app variable-reference-from-unsafe? (#%variable-reference))].}
+         #:changed "8.15.0.4" @elem{Allow @racket[(#%plain-app hasheq cross-expr ...+)] and @racket[(#%plain-app make-parameter cross-expr ...+)].}]
 
 @;----------------------------------------
 

@@ -16,7 +16,7 @@
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
   ;; The actual config and viewer units are determined by a parameter
-  ;;  in "param.rkt". This somewhat strange technqiue allows the units
+  ;;  in "param.rkt". This somewhat strange technique allows the units
   ;;  to be changed as this module is loaded in a new namespace; see
   ;;  "slides-to-picts.rkt". Such namespace games are not necessary if
   ;;  talks are written as units and linked to the core.rkt unit.
@@ -48,7 +48,7 @@
 			       (integer? n)
 			       (n . >= . 0)))
 
-  (define elem/c (flat-rec-contract elem/c (or/c string? pict? (listof elem/c))))
+  (define elem/c (flat-rec-contract elem/c (or/c string? pict-convertible? (listof elem/c))))
   (define item-contract (() (#:bullet pict?
                              #:aspect aspect?
                              #:width real?
@@ -119,7 +119,7 @@
 	   para/c para/r para*/c para*/r page-para/c page-para/r page-para*/c page-para*/r
 	   font-size gap-size current-gap-size current-font-size current-line-sep line-sep title-size
            commentary-on-slide-font-size
-	   main-font current-main-font with-font current-title-color
+	   main-font current-main-font current-tt-font current-tt-font-size with-font current-title-color
 	   red green blue purple orange size-in-pixels
 	   bullet o-bullet
 	   margin get-margin set-margin! 

@@ -35,7 +35,9 @@
               version-10.15-or-later?
               version-11.0-or-later?
               version-12.0-or-later?
-              version-13.0-or-later?)
+              version-13.0-or-later?
+              version-14.0-or-later?
+              version-26.0-or-later?)
  with-autorelease
  call-with-autorelease
  define-mz)
@@ -116,3 +118,7 @@
   (NSAppKitVersionNumber . >= . 2100))
 (define (version-13.0-or-later?) ; Ventura
   (NSAppKitVersionNumber . >= . 2200))
+(define (version-14.0-or-later?) ; Sonoma
+  (NSAppKitVersionNumber . >= . 2400))
+(define (version-26.0-or-later?) ; Tahoe
+  (NSAppKitVersionNumber . >= . 2600))

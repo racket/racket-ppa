@@ -1,3 +1,33 @@
+9.0
+- improve expected type propagation with keyword argument functions
+8.18
+- Bug fixes and type updates.
+8.17
+- Add support for treelists.
+- Support `#:do` and `#:splice` in `for` forms.
+8.16
+- Add `case-λ` as an alias for `case-lambda`
+- Bug fixes and type updates. 
+8.15
+- Bug fixes and type updates. 
+8.14
+- Bug fixes and type updates. 
+8.13
+- Fix failure to typecheck some arguments in the presence of keywords.
+  This can lead to new type errors in the missing checks.
+8.12
+- Bug fixes and type updates.
+8.11
+- Bug fixes and type updates.
+8.10
+- Bug fixes and type updates.
+8.9
+- Improvements to shallow check generation.
+- Bug fixes and type updates.
+8.8
+- Bug fixes and type updates.
+8.7
+- Add Shallow and Optional variants of Typed Racket. See RFC 4 for details.
 8.6
 - Bug fixes and type updates.
 8.5

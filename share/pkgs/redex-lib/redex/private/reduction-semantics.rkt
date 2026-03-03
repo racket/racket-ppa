@@ -34,6 +34,7 @@
                      "binding-forms-compiler.rkt"
                      syntax/boundmap
                      syntax/id-table
+                     racket/sequence
                      racket/base
                      racket/list
                      syntax/parse
@@ -75,7 +76,6 @@
                                                                       (syntax-e #'form-name)
                                                                       #t x))
                            (syntax->list (syntax (pattern ...))))]
-                     [(cp-x ...) (generate-temporaries #'(pattern ...))]
                      [make-matcher make-matcher])
          (with-syntax ([(mtch-procs ...)
                         (for/list ([names/ellipses
@@ -129,7 +129,7 @@
                 ((car rhss) (car match)))
               (loop (cdr ps) (cdr cps) (cdr rhss)))))))
 
-(define-syntaxes (redex-let redex-let*)
+(define-syntaxes (redex-let redex-let* redex-define)
   (let ()
     (define-syntax-class binding
       #:description "binding clause"
@@ -145,6 +145,54 @@
                "duplicate pattern variable"
                #:with (lhs ...) #'(b.lhs ...)
                #:with (rhs ...) #'(b.rhs ...)))
+
+    (define (redex-define stx)
+      (syntax-case stx ()
+        [(form-name lang pattern rhs)
+         (begin
+           ;; modified from term-matcher
+           (unless (identifier? #'lang)
+             (raise-syntax-error (syntax-e #'form-name)
+                                 "expected an identifier in the language position" stx #'lang))
+           (with-syntax ([(syncheck-expr side-conditions-rewritten (names ...) (names...* ...))
+                          (rewrite-side-conditions/check-errs #'lang
+                                                              (syntax-e #'form-name)
+                                                              #t #'pattern)])
+             ;; modified from rewrite-side-conditions.rkt:bind-pattern-names
+             (define known (make-free-identifier-mapping))
+             (define (get-id stx)
+               (syntax-case stx ()
+                 [(x . y) (get-id #'x)]
+                 [x (identifier? #'x) #'x]))
+             (define lookup-exprs
+               #'((lookup-binding (mtch-bindings match) 'names) ...))
+             ;; filter out duplicate bindings
+             (define/with-syntax ((names/nodup names...*/nodup lookup-exprs/nodup) ...)
+               (for/list ([name (in-syntax #'(names ...))]
+                          [name...* (in-syntax #'(names...* ...))]
+                          [lookup-expr (in-syntax lookup-exprs)]
+                          #:unless (free-identifier-mapping-get
+                                    known
+                                    (get-id name...*)
+                                    (λ () #f)))
+                 (free-identifier-mapping-put!
+                  known
+                  (get-id name...*)
+                  #t)
+                 (list name name...* lookup-expr)))
+             (with-syntax ([(fresh-names/nodup ...) (generate-temporaries (syntax->list #'(names/nodup ...)))])
+               ;; modified from term-matcher
+               #`(begin
+                   syncheck-expr
+                   (define-values (fresh-names/nodup ...)
+                     ((term-match/single/proc
+                       'form-name
+                       lang
+                       '(pattern)
+                       (list (compile-pattern lang `side-conditions-rewritten #t))
+                       (list (λ (match) (values lookup-exprs/nodup ...))))
+                      rhs))
+                   (term-define/error-name redex-define names...*/nodup fresh-names/nodup) ...))))]))
     
     (define (redex-let stx)
       (define-values (form-name nts)
@@ -176,7 +224,7 @@
                               #'term-match/single/proc) 
               rhs))]))
     
-    (values redex-let redex-let*)))
+    (values redex-let redex-let* redex-define)))
 
 (define-syntax (compatible-closure stx)
   (syntax-case stx ()
@@ -2890,6 +2938,8 @@
   (cond
     [(reduction-relation? x) (reduction-relation->rule-names x)]
     [(IO-judgment-form? x) (runtime-judgment-form-rule-names x)]))
+(define (judgment-form->rule-names x)
+  (runtime-judgment-form-rule-names x))
 
 
 ;                                                                               
@@ -3383,6 +3433,7 @@
 (provide (rename-out [-reduction-relation reduction-relation])
          ::=
          reduction-relation->rule-names
+         judgment-form->rule-names
          reduction-relation/IO-jf->rule-names
          reduction-relation/IO-jf-lang
          extend-reduction-relation
@@ -3425,6 +3476,7 @@
          term-match/single
          redex-let 
          redex-let*
+         redex-define
          redex-enum
          redex-index
          make-bindings bindings-table bindings?

@@ -116,16 +116,20 @@
   (define bad-kws (set-intersect used-kws satisfying-disallowed-kws))
   (syntax-case stx (=)
     [(form lang #:satisfying (mf-id . args) = res property . kw-args)
-     (unless (set-empty? bad-kws)
-       (raise-syntax-error 'redex-check (format "~s cannot be used with #:satisfying" (car (set->list bad-kws))) stx))
-     (redex-check/mf stx #'form #'lang #'mf-id #'args #'res #'property #'kw-args)]
+     (begin
+       (unless (set-empty? bad-kws)
+         (raise-syntax-error 'redex-check (format "~s cannot be used with #:satisfying" (car (set->list bad-kws))) stx))
+       (redex-check/mf stx #'form #'lang #'mf-id #'args #'res #'property #'kw-args))]
     [(form lang #:satisfying (jform-id . pats) property . kw-args)
-     (unless (set-empty? bad-kws)
-       (raise-syntax-error 'redex-check (format "~s cannot be used with #:satisfying" (car (set->list bad-kws))) stx))
-     (syntax-property
-      (redex-check/jf stx #'form #'lang #'jform-id #'pats #'property #'kw-args)
-      'disappeared-use
-      (syntax-local-introduce #'jform-id))]
+     (begin
+       (unless (set-empty? bad-kws)
+         (raise-syntax-error 'redex-check (format "~s cannot be used with #:satisfying" (car (set->list bad-kws))) stx))
+       (when (keyword? (syntax-e #'property))
+         (raise-syntax-error 'redex-check "expected a property" stx #'property))
+       (syntax-property
+        (redex-check/jf stx #'form #'lang #'jform-id #'pats #'property #'kw-args)
+        'disappeared-use
+        (syntax-local-introduce #'jform-id)))]
     [(form lang #:satisfying . rest)
      (raise-syntax-error 'redex-check "#:satisfying expected judgment form or metafunction syntax followed by a property" stx #'rest)]
     [(form lang pat #:enum biggest-e property . kw-args)
@@ -303,11 +307,11 @@
                        keep-going?)]
                    [else
                     #`(check-one
-                       (default-generator #,lang `pattern)
+                       (default-generator #,lang `pattern att)
                        property att ret (and print? show) (or fix (λ (x) x)) term-match
                        keep-going?)])])))))))
 
-(define (default-generator lang pat)
+(define (default-generator lang pat total-attempts)
   (define ad-hoc-generator ((compile lang 'redex-check) pat))
   (define enum (pat-enumerator (compiled-lang-enum-table lang)
                                pat
@@ -319,12 +323,7 @@
      (define in-bounds (if (finite-enum? enum)
                            (λ (x) (modulo x (enum-count enum)))
                            (λ (x) x)))
-     (define start-time (current-inexact-milliseconds))
-     (define interleave-start-attempt #f)
-     (define interleave-time (+ start-time (* 1000 10))) ;; 10 seconds later
-     (define pure-random-start-attempt #f)
-     (define pure-random-time (+ start-time (* 1000 60 10))) ;; 10 minutes later
-     
+     (define random-start (min 500 (ceiling (/ total-attempts 2))))
      (λ (_size _attempt _retries)
        (define (enum-ith/fallback enum n)
          (define val (enum-ith enum n))
@@ -335,25 +334,12 @@
              ;; when the enumerator properly handles (x_!_1 ...) patterns,
              ;; then remove enum-ith/fallback and just use enum-ith
              (ad-hoc-generator _size _attempt _retries)))
-       (define now (current-inexact-milliseconds))
        (cond
-         [(<= now interleave-time)
+         [(< _attempt random-start)
           (enum-ith/fallback enum (in-bounds (- _attempt 1)))]
-         [(<= now pure-random-time)
-          (unless interleave-start-attempt (set! interleave-start-attempt _attempt))
-          (define interleave-attempt (- _attempt interleave-start-attempt))
-          (cond
-            [(odd? interleave-attempt) 
-             (ad-hoc-generator _size (/ (- interleave-attempt 1) 2) _retries)]
-            [else
-             (define enum-id (in-bounds (+ interleave-start-attempt (/ interleave-attempt 2) -1)))
-             (enum-ith/fallback enum enum-id)])]
          [else
-          (unless pure-random-start-attempt (set! pure-random-start-attempt _attempt))
           (ad-hoc-generator _size
-                            (+ (- _attempt pure-random-start-attempt)
-                               (quotient (- pure-random-start-attempt pure-random-start-attempt)
-                                         2))
+                            (- _attempt random-start)
                             _retries)]))]
     [else
      ad-hoc-generator]))

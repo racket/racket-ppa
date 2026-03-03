@@ -1,21 +1,24 @@
 #lang racket/base
-(require scribble/doclang
-         scribble/core
+(require (for-syntax racket/base
+                     racket/list
+                     racket/stxparam-exptime)
+         file/unzip
+         net/ftp
          racket/file
+         racket/path
+         racket/port
+         racket/stxparam
+         scribble/core
+         scribble/decode
+         scribble/doclang
+         scribble/html-properties
+         scribble/latex-prefix
+         scribble/latex-properties
+         setup/collects
+         (only-in net/url string->url get-pure-port)
          (except-in scribble/base author)
          (prefix-in s/b: scribble/base)
-         scribble/decode
-         "../private/defaults.rkt"
-         setup/collects
-         scribble/html-properties
-         scribble/latex-properties
-         scribble/latex-prefix
-         racket/stxparam
-         net/ftp
-         file/gunzip
-         (for-syntax racket/base
-                     racket/list
-                     racket/stxparam-exptime))
+         "../private/defaults.rkt")
 
 (module test racket/base)
 
@@ -64,49 +67,34 @@
 (unless (or (not (path? cls-file))
             (file-exists? cls-file))
   (log-error (format "File not found: ~a" cls-file))
-  (define site "ftp.springernature.com")
-  (define path "cs-proceeding/llncs")
   (define file "llncs2e.zip")
-  (unless (directory-exists? (find-system-path 'addon-dir))
-    (make-directory (find-system-path 'addon-dir)))
-  (log-error (format "Downloading via ftp://~a/~a/~a..." site path file))
-  (define c (ftp-establish-connection site 21 "anonymous" "user@racket-lang.org"))
-  (ftp-cd c path)
-  (make-directory* (find-system-path 'temp-dir))
-  (ftp-download-file c (find-system-path 'temp-dir) file)
-  (ftp-close-connection c)
+  (define cls-file-name (file-name-from-path cls-file))
   (define z (build-path (find-system-path 'temp-dir) file))
-  ;; Poor man's unzip (replace it when we have an `unzip' library):
+  (cond
+    [#f
+     ;; old site
+     (define site "ftp.springernature.com")
+     (define path "cs-proceeding/llncs")
+     (unless (directory-exists? (find-system-path 'addon-dir))
+       (make-directory (find-system-path 'addon-dir)))
+     (log-error (format "Downloading via ftp://~a/~a/~a..." site path file))
+     (define c (ftp-establish-connection site 21 "anonymous" "user@racket-lang.org"))
+     (ftp-cd c path)
+     (make-directory* (find-system-path 'temp-dir))
+     (ftp-download-file c (find-system-path 'temp-dir) file)
+     (ftp-close-connection c)]
+    [else
+     (define site "https://resource-cms.springernature.com/springer-cms/rest/v1/content/19238648/data/v8")
+     (log-error (format "Downloading via ~a..." site))
+     (define i (get-pure-port (string->url site) #:redirections 5))
+     (call-with-output-file* z #:exists 'truncate (lambda (o) (copy-port i o)))
+     (close-input-port i)])
   (define i (open-input-file z))
-  (define (skip n) (file-position i (+ (file-position i) n)))
-  (define (get n) 
-    (define s (read-bytes n i))
-    (unless (and (bytes? s) (= n (bytes-length s)))
-      (error "unexpected end of file"))
-    s)
-  (let loop ()
-    (cond
-     [(equal? #"PK\3\4" (get 4))
-      ;; local file header
-      (skip 2)
-      (define data-desc? (bitwise-bit-set? (bytes-ref (get 1) 0) 3))
-      (skip 11)
-      (define sz (integer-bytes->integer (get 4) #f #f))
-      (skip 4)
-      (define name-sz (integer-bytes->integer (get 2) #f #f))
-      (define extra-sz (integer-bytes->integer (get 2) #f #f))
-      (define name (bytes->string/utf-8 (get name-sz) #\?))
-      (skip extra-sz)
-      (if (equal? name "llncs.cls")
-          (call-with-output-file cls-file
-            (lambda (o)
-              (inflate i o)))
-          (begin
-            (skip sz)
-            (when data-desc?
-              skip 12)
-            (loop)))]
-     [else (error "didn't find file in archive")]))
+  (define zipdir (read-zip-directory i))
+  (unless (zip-directory-contains? zipdir (path->bytes cls-file-name))
+    (error 'lncs "cannot find ~a in archive" cls-file))
+  (parameterize ([current-directory (path-only cls-file)])
+    (unzip-entry i zipdir (path->bytes cls-file-name)))
   (close-input-port i)
   (delete-file z))
 

@@ -18,6 +18,7 @@
 
 #include "system.h"
 #include <objbase.h>
+#include <psapi.h>
 #include <io.h>
 #include <sys/stat.h>
 
@@ -47,6 +48,36 @@ void *S_ntdlopen(const char *path) {
   void *r = (void *)LoadLibraryW(pathw);
   free(pathw);
   return r;
+}
+
+HMODULE *S_enum_process_modules(void) {
+    DWORD cur_num_bytes = 1024;
+    DWORD req_num_bytes;
+    HMODULE *modules = malloc(cur_num_bytes);
+
+    if (!modules)
+        return NULL;
+
+    for (;;) {
+        if (!EnumProcessModules(GetCurrentProcess(), modules, cur_num_bytes, &req_num_bytes))
+            return NULL;
+        req_num_bytes += sizeof *modules; // for sentinel NULL value
+        if (req_num_bytes <= cur_num_bytes)
+            break;
+        HMODULE *new_mod = realloc(modules, req_num_bytes);
+        if (!new_mod) {
+            free(modules);
+            return NULL;
+        }
+
+        modules = new_mod;
+        cur_num_bytes = req_num_bytes;
+    }
+
+    const size_t numel = req_num_bytes/sizeof *modules;
+    modules[numel - 1] = NULL;
+
+    return modules;
 }
 
 void *S_ntdlsym(void *h, const char *s) {
@@ -412,7 +443,20 @@ int S_windows_rmdir(const char *pathname) {
 
 int S_windows_stat64(const char *pathname, struct STATBUF *buffer) {
   wchar_t wpathname[PATH_MAX];
-  if (MultiByteToWideChar(CP_UTF8,0,pathname,-1,wpathname,PATH_MAX) == 0)
+  int len = MultiByteToWideChar(CP_UTF8,0,pathname,-1,wpathname,PATH_MAX);
+
+# ifdef __MINGW32__
+  /* MinGW _wstat64 does not want path separators at the end, except for 
+     a drive: */
+  while ((len > 2)
+	 && ((wpathname[len-2] == '/')
+	     || (wpathname[len-2] == '\\'))
+	 && (wpathname[len-3] != ':')) {
+    wpathname[(--len)-1] = 0;
+  }
+# endif
+
+  if (len == 0)
     return _stat64(pathname, buffer);
   else
     return _wstat64(wpathname, buffer);

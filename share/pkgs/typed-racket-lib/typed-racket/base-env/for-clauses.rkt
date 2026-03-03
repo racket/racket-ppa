@@ -25,8 +25,8 @@
            #:with (expand* ...) (list (quasisyntax/loc #'c
                                         ((v.ann-name ...) seq-expr.e))
                                       #'#:when #''#t))
-  (pattern (~seq (~and kw (~or #:when #:unless #:break #:final)) guard:expr)
-           #:with (expand ...) (list #'kw #'guard)
+  (pattern (~seq (~and kw (~or #:when #:unless #:break #:final #:do #:splice)) expr:expr)
+           #:with (expand ...) (list #'kw #'expr)
            #:with (expand* ...) #'(expand ...)))
 
 (define-syntax-class for-clauses
@@ -35,7 +35,7 @@
   (pattern (:for-clause ...)))
 
 (define-syntax-class accumulator-binding
-  #:description "accumumulator binding"
+  #:description "accumulator binding"
   #:attributes (ann-name init ty)
   (pattern (:optionally-annotated-name init:expr)))
 
@@ -44,6 +44,6 @@
   (pattern (~seq #:result result-expr:expr)))
 
 (define-syntax-class accumulator-bindings
-  #:description "accumumulator bindings"
+  #:description "accumulator bindings"
   #:attributes ((ann-name 1) (init 1) (ty 1) result)
   (pattern (:accumulator-binding ... (~optional result:result-clause))))

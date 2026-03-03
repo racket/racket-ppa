@@ -70,6 +70,19 @@
          (apply or/sc new-scs)
          sc)]
       [else sc])]
+    [(shallow-or/sc: scs ...)
+     (match scs
+      [(list) none/sc]
+      [(list sc) sc]
+      [(? (λ (l) (member any/sc l))) any/sc]
+      [(? (λ (l) (member none/sc l)))
+       (apply shallow-or/sc (remove* (list none/sc) scs))]
+      [(? (λ (l) (ormap (match-lambda [(shallow-or/sc: _ ...) #true] [_ #false]) l)))
+       (define new-scs (flatten-or/sc scs flat-sc?))
+       (if new-scs
+         (apply shallow-or/sc new-scs)
+         sc)]
+      [else sc])]
 
     ;; and/sc cases
     [(and/sc: scs ...)
@@ -79,6 +92,14 @@
       [(? (λ (l) (member none/sc l))) none/sc]
       [(? (λ (l) (member any/sc l)))
        (apply and/sc (remove* (list any/sc) scs))]
+      [else sc])]
+    [(shallow-and/sc: scs ...)
+     (match scs
+      [(list) any/sc]
+      [(list sc) sc]
+      [(? (λ (l) (member none/sc l))) none/sc]
+      [(? (λ (l) (member any/sc l)))
+       (apply shallow-and/sc (remove* (list any/sc) scs))]
       [else sc])]
 
 
@@ -90,7 +111,7 @@
         ;; All results must have the same range
         (unless (equal? (set-count (list->set ranges)) 1)
           (fail))
-        (define sorted-args (sort args (λ (l1 l2) (< (length l1) (length l2)))))
+        (define sorted-args (sort args < #:key length))
         (define shortest-args (first sorted-args))
         (define longest-args (last sorted-args))
         ;; The number of arguments must increase by 1 with no gaps
@@ -134,7 +155,8 @@
     (for/fold ([acc '()])
               ([sc (in-list scs)])
       (match sc
-        [(or/sc: inner-scs ...)
+        [(or (or/sc: inner-scs ...)
+             (shallow-or/sc: inner-scs ...))
          #:when (eq?*/f inner-scs flat-sc?)
          (set-box! flattened-any? #true)
          (set-union acc inner-scs)]
@@ -170,7 +192,8 @@
     [(arr/sc: args rest (list (any/sc:) ...))
      (arr/sc args rest #f)]
     [(none/sc:) any/sc]
-    [(or/sc: (? flat-sc?) ...)
+    [(or (or/sc: (? flat-sc?) ...)
+         (shallow-or/sc: (? flat-sc?) ...))
      #:when (not is-weak-side?)
      any/sc]
     [(? flat-sc?)
@@ -242,7 +265,8 @@
 ;;  for optimizing the sub-contracts of the given `sc`.
 (define ((make-update-side flat-sc?) sc side)
   (match sc
-   [(or/sc: scs ...)
+   [(or (shallow-or/sc: scs ...)
+        (or/sc: scs ...))
     #:when (not (andmap flat-sc? scs))
     (weaken-side side)]
    [_
@@ -317,11 +341,11 @@
   (let loop ((to-look-at reachable))
     (unless (zero? (free-id-table-count to-look-at))
       (define new-table (make-free-id-table))
-      (for ([(id _) (in-free-id-table to-look-at)])
-        (for ([(id _) (in-free-id-table (free-id-table-ref main-table id))])
-          (unless (free-id-table-ref seen id #f)
-            (free-id-table-set! seen id #t)
-            (free-id-table-set! new-table id #t))))
+      (for* ([(id _) (in-free-id-table to-look-at)]
+             [(id _) (in-free-id-table (free-id-table-ref main-table id))]
+             #:unless (free-id-table-ref seen id #f))
+        (free-id-table-set! seen id #t)
+        (free-id-table-set! new-table id #t))
       (loop new-table)))
 
   ;; Determine if the recursive name is referenced in the static contract
@@ -379,9 +403,9 @@
 
 ;; If we trust a specific side then we drop all contracts protecting that side.
 (define (optimize sc #:trusted-positive [trusted-positive #f] #:trusted-negative [trusted-negative #f] #:recursive-kinds [recursive-kinds #f])
-  (define flat-sc?
-    (let ([sc->kind (make-sc->kind recursive-kinds)])
-      (λ (sc) (eq? 'flat (sc->kind sc)))))
+  (define sc->kind (make-sc->kind recursive-kinds))
+  (define (flat-sc? sc)
+    (eq? 'flat (sc->kind sc)))
   (define trusted-side-reduce (make-trusted-side-reduce flat-sc?))
   (define update-side (make-update-side flat-sc?))
 

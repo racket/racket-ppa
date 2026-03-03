@@ -65,7 +65,8 @@
  get-color-from-user
  key-symbol-to-menu-key
  needs-grow-box-spacer?
- graphical-system-type)
+ graphical-system-type
+ tab-panel-available?)
 
 (define (find-graphical-system-path what)
   (case what
@@ -91,11 +92,13 @@
 
 (define _GtkSettings (_cpointer 'GtkSettings))
 (define-gtk gtk_settings_get_default (_fun -> _GtkSettings))
-(define-gobj g_object_get/int (_fun _GtkSettings _string (r : (_ptr o _int)) (_pointer = #f) 
+(define-gobj g_object_get/int (_fun #:varargs-after 2
+                                    _GtkSettings _string (r : (_ptr o _int)) (_pointer = #f)
 				    -> _void
 				    -> r)
   #:c-id g_object_get)
-(define-gobj g_object_get/string (_fun _GtkSettings _string (r : (_ptr o _pointer)) (_pointer = #f)
+(define-gobj g_object_get/string (_fun #:varargs-after 2
+                                       _GtkSettings _string (r : (_ptr o _pointer)) (_pointer = #f)
 				       -> _void
 				       -> r)
   #:c-id g_object_get)
@@ -175,9 +178,12 @@
 (define/top (make-gl-bitmap [exact-positive-integer? w]
                             [exact-positive-integer? h]
                             [gl-config% c])
-  (let ([bm (make-object x11-bitmap% w h #f)])
-    (create-and-install-gl-context bm c)
-    bm))
+  (define bm
+    (cond
+     [wayland? (make-object cairo-bitmap% w h #f)]
+     [else (make-object x11-bitmap% w h #f)]))
+  (create-and-install-gl-context bm c)
+  bm)
 
 (define (check-for-break) #f)
 
@@ -195,3 +201,5 @@
   ;; in that case we want to return #f.
   (< (luminance (get-label-background-color))
      (luminance (get-label-foreground-color))))
+
+(define (tab-panel-available?) #t)

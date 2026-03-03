@@ -8,14 +8,15 @@
          racket/list)
 
 (provide doc-prefix)
-(provide/contract
- [spacer element?]
- [to-flow (content? . -> . flow?)]
- [flow-spacer flow?]
- [flow-spacer/n (-> exact-nonnegative-integer? flow?)]
- [flow-empty-line flow?]
- [make-table-if-necessary ((or/c style? string?) list? . -> . (list/c (or/c omitable-paragraph? table?)))]
- [current-display-width (parameter/c exact-nonnegative-integer?)])
+(provide (contract-out
+          [spacer element?]
+          [to-flow (content? . -> . flow?)]
+          [flow-spacer flow?]
+          [flow-spacer/n (-> exact-nonnegative-integer? flow?)]
+          [flow-empty-line flow?]
+          [make-table-if-necessary
+           ((or/c style? string?) list? . -> . (list/c (or/c omitable-paragraph? table?)))]
+          [current-display-width (parameter/c exact-nonnegative-integer?)]))
 
 (define spacer (hspace 1))
 
@@ -26,11 +27,12 @@
 (define flow-empty-line (to-flow (tt 'nbsp)))
 
 (define (make-table-if-necessary style content)
-  (if (= 1 (length content))
-    (let ([paras (append-map flow-paragraphs (car content))])
-      (if (andmap paragraph? paras)
-        (list (make-omitable-paragraph (append-map paragraph-content paras)))
-        (list (make-table style content))))
-    (list (make-table style content))))
+  (cond
+    [(= 1 (length content))
+     (define paras (append-map flow-paragraphs (car content)))
+     (if (andmap paragraph? paras)
+         (list (make-omitable-paragraph (append-map paragraph-content paras)))
+         (list (make-table style content)))]
+    [else (list (make-table style content))]))
 
 (define current-display-width (make-parameter 65))

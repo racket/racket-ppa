@@ -4,6 +4,7 @@
          "reduce.rkt"
          (except-in redex/reduction-semantics plug)
          racket/runtime-path)
+(module+ test (require rackunit))
 
 (provide (all-defined-out))
 
@@ -81,15 +82,18 @@
 (define fix-prog
   (match-lambda
     [`(<> ,s ,_ ,e)
-     (match-let ([`([,xs ,vs] ...) (remove-duplicates s #:key first)])
-       `(<> ,(map list xs (map (fix-expr xs) vs)) [] ,((fix-expr xs) e)))]))
+     (parameterize ([consistent-dw-hash (make-hash)])
+       (match-let ([`([,xs ,vs] ...) (remove-duplicates s #:key first)])
+         `(<> ,(map list xs (map (fix-expr xs) vs)) [] ,((fix-expr xs) e))))]))
 
-(define (fix-expr top-vars) 
+(define (fix-expr top-vars)
   (define rewrite
     (compose drop-duplicate-binders
              proper-wcms
              proper-conts
+             proper-wcms
              consistent-dws
+             proper-wcms
              (curry close top-vars '())))
   ; Must call proper-wcm after proper-conts because the latter
   ; exposes opportunities to the former.
@@ -116,12 +120,15 @@
   ; It might work to make proper-conts work in more contexts,
   ; but it's easier to iterate the rules to a fixed point (and
   ; there may be more dependencies that require iteration anyway).
+  ;
+  ; Also, close and consistent-dws can both also introduce incorrect
+  ; wcms, so call proper-wcms after calling each of them as well.
   (λ (e)
     (let loop ([e e])
       (define e’ (rewrite e))
       (if (equal? e e’) e (loop e’)))))
 
-(struct error (cause) #:transparent)
+(struct error-raised (cause) #:transparent)
 (struct answer (output result) #:transparent)
 (struct bad-test (reason) #:transparent)
 (struct timeout ())
@@ -132,8 +139,8 @@
         (timeout? impl-behavior)
         (let ([model-behavior (timeout-warn 30 (model-eval prog) (pretty-write prog))])
           (or (timeout? model-behavior)
-              (if (error? impl-behavior)
-                  (error? model-behavior)
+              (if (error-raised? impl-behavior)
+                  (error-raised? model-behavior)
                   (and (answer? model-behavior)
                        (equal? impl-behavior model-behavior))))))))
 
@@ -151,8 +158,7 @@
                  (λ () (letrec ,s ,e))))])
             (if (exn:fail? previous-error)
                 (raise previous-error)
-                result))]
-    [e e]))
+                result))]))
 
 (define-runtime-module-path model-impl "model-impl.rkt")
 
@@ -174,10 +180,10 @@
                            [(exn:fail (regexp "%: expected argument of type <non-procedure>") _)
                             (bad-test "procedure as tag")]
                            [(exn:fail m _)
-                            (error m)])])
+                            (error-raised m)])])
           (parameterize ([current-output-port output])
             (eval test ns))))
-      (if (or (error? result) (bad-test? result))
+      (if (or (error-raised? result) (bad-test? result))
           result
           (answer (get-output-string output) 
                   (show result))))))
@@ -211,7 +217,7 @@
            (answer
             (apply string-append (map (curry format "~v") output))
             (show result))
-           (error p))])))
+           (error-raised p))])))
 
 (define (with-timeout thunk timeout on-timeout)
   (let ([c (make-channel)])
@@ -271,7 +277,7 @@
      `(cont ,(close top-vars '() v)
             ,(close top-vars '() E))]
     [`(cont ,E)
-     `(comp ,(close top-vars '() E))]
+     `(cont ,(close top-vars '() E))]
     [(? list?)
      (map (curry close top-vars loc-vars) expr)]
     [_ expr]))
@@ -284,15 +290,16 @@
      (map drop-duplicate-binders es)]
     [e e]))
 
+(define consistent-dw-hash (make-parameter #f))
 (define (consistent-dws p)
-  (define pre-post
-    (let ([h (make-hash)])
-      (λ (id pre post)
-        (match (hash-ref h id #f)
-          [#f
-           (hash-set! h id (list pre post))
-           (list pre post)]
-          [x x]))))
+  (define h (consistent-dw-hash))
+  (unless h (error 'consistent-dws "expected consistent-dw-hash to be set"))
+  (define (pre-post id pre post)
+    (match (hash-ref h id #f)
+      [#f
+       (hash-set! h id (list pre post))
+       (list pre post)]
+      [x x]))
   (let recur ([x p] [excluded '()])
     (match x
       [`(dw ,x ,e1 ,e2 ,e3)
@@ -556,3 +563,211 @@
     (list-ref xs (random (length xs)))))
 
 (define test-prg (make-pseudo-random-generator))
+
+
+;                                          
+;                                          
+;                                          
+;                                          
+;         ;;;          ;;;         ;;;     
+;         ;;;                      ;;;     
+;   ;;;;  ;;; ;;  ;;; ;;;; ;;; ;;  ;;;  ;;;
+;  ;;; ;; ;;;;;;; ;;;;;;;; ;;;;;;; ;;; ;;; 
+;  ;;;    ;;; ;;; ;;;  ;;; ;;; ;;; ;;;;;;  
+;   ;;;;  ;;; ;;; ;;;  ;;; ;;; ;;; ;;;;;;  
+;     ;;; ;;; ;;; ;;;  ;;; ;;; ;;; ;;;;;;; 
+;  ;; ;;; ;;; ;;; ;;;  ;;; ;;; ;;; ;;; ;;; 
+;   ;;;;  ;;; ;;; ;;;  ;;; ;;; ;;; ;;;  ;;;
+;                                          
+;                                          
+;                                          
+;                                          
+
+
+;; given a `p` such that `same-behavior?` returns #f (ie a counterexample),
+;; the shrink function will attempt to find a smaller one by repeatedly
+;; applying the function `shrink-rule` everywhere inside the term that
+;; it can. redex-check doesn't currently have support for shrinkers, so
+;; this is just left on the side to be used when a counterexample is found.
+
+(define (shrink p #:looks-buggy? [looks-buggy? (λ (x) (not (same-behavior? x)))])
+  (cond
+    [(looks-buggy? p)
+     (let known-buggy-loop ([p p])
+       ;; p is known to have a bug
+       (let shrunk-candidates-loop ([shrunk-ps (shrink/fixed-candidates p)])
+         (cond
+           [(null? shrunk-ps)
+            ;; none of the candidates were buggy, so `p`
+            ;; is a shrunken as we can make it
+            p]
+           [else
+            (define candidate-p (car shrunk-ps))
+            ;; candidate-p is a shrunk version of `p`
+            (cond
+              [(looks-buggy? candidate-p)
+               ;; greedily take the first buggy-looking
+               ;; candidate and try to shrink it further
+               (known-buggy-loop candidate-p)]
+              [else
+               ;; keep looking at the shrunken candidates
+               (shrunk-candidates-loop (cdr shrunk-ps))])])))]
+    [else
+     (raise-argument-error 'shrink
+                           "a term that looks buggy"
+                           p)]))
+
+;; shrink/fixed-candidates : p -> (listof p)
+(define (shrink/fixed-candidates p)
+  (match p
+    [`(<> ,s ,o ,e)
+     (define orig-size (size p))
+     (define shrunk-es (shrink-candidates e))
+     (define shrunk-ps '())
+     (for ([shrunk-e (in-list shrunk-es)])
+       (define shrunk-p (fix-prog `(<> ,s ,o ,shrunk-e)))
+       (when (< (size shrunk-p) orig-size)
+         ;; this `<` guards against a shrinking
+         ;; being simply a renaming
+         (set! shrunk-ps (cons shrunk-p shrunk-ps))))
+     shrunk-ps]))
+
+;; shrink-candidates : e -> (listof e)
+(define (shrink-candidates orig-e)
+  (define candidates '())
+
+  (define (build-candidate path shrunk-to)
+    (let loop ([e orig-e][path path])
+      (cond
+        [(null? path) shrunk-to]
+        [else
+         (define i (car path))
+         (append (take e i)
+                 (list (loop (list-ref e i)
+                             (cdr path)))
+                 (drop e (+ i 1)))])))
+
+  (let loop ([e orig-e] [path '()])
+    (define shrunken (shrink-rule e))
+    (set! candidates (append (for/list ([shrunk-to (in-list shrunken)])
+                               (build-candidate (reverse path) shrunk-to))
+                             candidates))
+    (match e
+      [`(wcm ,w ,e)
+       `(wcm ,w ,(loop e (cons 2 path)))]
+      [`(% ,e1 ,e2 ,e3)
+       `(% ,(loop e1 (cons 1 path))
+           ,(loop e2 (cons 2 path))
+           ,(loop e3 (cons 3 path)))]
+      [`(set! ,x ,e)
+       `(set! ,x ,(loop e (cons 2 path)))]
+      [`(if ,e1 ,e2 ,e3)
+       `(if ,(loop e1 (cons 1 path))
+            ,(loop e2 (cons 2 path))
+            ,(loop e3 (cons 3 path)))]
+      [`(dw ,x ,e1 ,e2 ,e3)
+       `(dw ,x
+            ,(loop e1 (cons 2 path))
+            ,(loop e2 (cons 3 path))
+            ,(loop e3 (cons 4 path)))]
+      [`(list ,es ...)
+       `(list ,@(for/list ([e (in-list es)]
+                           [i (in-naturals)])
+                  (loop e (cons (+ i 1) path))))]
+      [`(λ (,x ...) ,e) `(λ (,@x) ,(loop e (cons 2 path)))]
+      [`(cont ,v ,e) `(cont ,(loop v (cons 1 path))
+                            ,(loop e (cons 2 path)))]
+      [`(comp ,e) `(comp ,(loop e (cons 1 path)))]
+      [`(,f ,x ...)
+       `(,(loop f (cons 0 path))
+         ,@(for/list ([x (in-list x)]
+                      [i (in-naturals)])
+             (loop x (cons (+ i 1) path))))]
+      [_ e]))
+
+  candidates)
+
+(define (size e)
+  (let loop ([e e])
+    (match e
+      [(? list?)
+       (+ 3
+          (length e)
+          (for/sum ([e (in-list e)])
+            (loop e)))]
+      [(? symbol?) 2]
+      [_ 1])))
+
+(define (shrink-rule e)
+  (match e
+    [`(wcm () ,e) (list e)]
+    [`(wcm ,bindings ,e)
+     (for/list ([i (in-range (length bindings))])
+       `(wcm ,(remove-ith bindings i) ,e))]
+    [`(% ,e1 ,e2 ,e3) (those-with-holes-or-all (list e1 e2 e3))]
+    [`(set! ,x ,e) (list e)]
+    [`(if ,e1 ,e2 ,e3) (those-with-holes-or-all (list e1 e2 e3))]
+    [`(dw ,x ,e1 ,e2 ,e3) (those-with-holes-or-all (list e1 e2 e3))]
+    [`(list ,es ...) (those-with-holes-or-all es)]
+    [`(λ (,x ...) ,e) (list e)]
+    [`(cont ,v ,e) (those-with-holes-or-all (list v e))]
+    [`(comp ,e) (list e)]
+    [`(,f ,x ...)
+     (those-with-holes-or-all (cons f x))]
+    [(? x?) (list 0)]
+    [_ '()]))
+
+(define (remove-ith l i)
+  (append (take l i)
+          (drop l (+ i 1))))
+(module+ test
+  (check-equal? (remove-ith (list #f) 0) '())
+  (check-equal? (remove-ith (list 0 1 2) 0) (list 1 2))
+  (check-equal? (remove-ith (list 0 1 2) 1) (list 0 2))
+  (check-equal? (remove-ith (list 0 1 2) 2) (list 0 1)))
+
+(define (those-with-holes-or-all lst)
+  (cond
+    [(has-hole? lst)
+     (for/list ([e (in-list lst)]
+                #:when (has-hole? e))
+       e)]
+    [else lst]))
+
+(define (has-hole? e)
+  (let loop ([e e])
+    (cond
+      [(redex-match? grammar hole e) #t]
+      [(list? e) (for/or ([e (in-list e)])
+                   (loop e))]
+      [else #f])))
+
+(module+ test
+  (define (test-shrink-candidates p)
+    (define candidates (set))
+    (define first-call? #t)
+    (shrink p
+            #:looks-buggy?
+            (λ (x)
+              (cond
+                [first-call?
+                 (set! first-call? #f)
+                 #t]
+                [else
+                 (set! candidates (set-add candidates x))
+                 #f])))
+    candidates)
+
+  (check-equal? (test-shrink-candidates `(<> () () 1))
+                (set))
+  (check-equal? (test-shrink-candidates `(<> () () (+ 1 2)))
+                (set `(<> () () +)
+                     `(<> () () 1)
+                     `(<> () () 2)))
+  (check-equal? (test-shrink-candidates `(<> () () ((1 2) (3 4))))
+                (set `(<> () () (1 2))
+                     `(<> () () (3 4))
+                     `(<> () () (1 (3 4)))
+                     `(<> () () (2 (3 4)))
+                     `(<> () () ((1 2) 3))
+                     `(<> () () ((1 2) 4)))))

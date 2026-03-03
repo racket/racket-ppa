@@ -320,7 +320,7 @@
        0))
 
 (define (prompt-width ee)
-  (string-length (eestate-prompt ee)))
+  (string-length (regexp-replace* #rx"\033\\[[0-9;]*m" (eestate-prompt ee) "")))
 
 (define (str->nsr ee str)
   ;; we can't just divide by the screen width, because a double-wide
@@ -341,7 +341,7 @@
     (define ln (list-ref (entry-lns entry) row))
     (cond
       [(ln-unicell? ln)
-       (fxquotient (fx+ (string-length (eestate-prompt ee)) col) (screen-cols))]
+       (fxquotient (fx+ (prompt-width ee) col) (screen-cols))]
       [else
        (define str (ln-str ln))
        (let loop ([i 0] [col col] [offset 0] [prompt-len (prompt-width ee)])
@@ -364,7 +364,7 @@
     (define ln (list-ref (entry-lns entry) row))
     (cond
       [(ln-unicell? ln)
-       (fxremainder (fx+ col (string-length (eestate-prompt ee))) (screen-cols))]
+       (fxremainder (fx+ col (prompt-width ee)) (screen-cols))]
       [else
        (define str (ln-str ln))
        (let loop ([i 0] [col col] [prompt-len (prompt-width ee)])
@@ -1619,16 +1619,19 @@
                      (make-string n #\space)
                      (lns->str lns row))))]))
 
-  (define (indent ee entry [auto? #f])
+  (define (indent ee entry [auto? #f] [reverse? #f])
     (define-values (obj offset offset->pos) (editor-object entry
                                                            (entry-row entry)
                                                            (entry-col entry)))
-    (define amt ((current-expeditor-indenter) obj offset auto?))
+    (define amt (let ([f (current-expeditor-indenter)])
+                  (if (procedure-arity-includes? f 4)
+                      (f obj offset auto? reverse?)
+                      (f obj offset auto?))))
     (define row (entry-row entry))
     (define lns (entry-lns entry))
     (define ln (list-ref lns row))
     (define nsr (ln-nsr ln))
-    (define (finish n)
+    (define (finish n amt)
       (indent-row! ee entry row n)
       (move-bol ee entry)
       (let ([just-row? (fx= (ln-nsr ln) nsr)])
@@ -1637,22 +1640,24 @@
                            ; avoid clear-eol/eos if inserting and either at end of entry or
                            ; rewriting just the current row
                            (or (fx< n 0) (and (not eoe?) (not just-row?)))
-                           row (fxmax (fx+ (entry-col entry) n) 0))))
+                           row amt)))
     (cond
       [(not amt)
-       (let* ([n (fx- (calc-indent ee entry row) (current-indent lns row))])
+       (define amt (calc-indent ee entry row))
+       (let* ([n (fx- amt (current-indent lns row))])
          (unless (fx= n 0)
-           (finish n)))]
+           (finish n amt)))]
       [else
        (define row (entry-row entry))
        (define cur-amt (current-indent lns row))
        (cond
          [(equal? amt '(0 "")) (void)]
          [(number? amt)
-          (finish (- amt cur-amt))]
+          (finish (- amt cur-amt) amt)]
          [else
           (finish (- (string-length (cadr amt))
-                     (car amt)))])]))
+                     (car amt))
+                  (+ (- cur-amt (car amt)) (string-length (cadr amt))))])]))
 
   (define (indent-all ee entry)
     (let* ([lns (entry-lns entry)]
@@ -1751,7 +1756,9 @@
                         (values prefix
                                 (sort (foldl (lambda (x suffix*)
                                                (cond
-                                                 [(completion prefix (symbol->string x))
+                                                 [(completion prefix (if (string? x)
+                                                                         x
+                                                                         (symbol->string x)))
                                                   => (lambda (suffix) (cons suffix suffix*))]
                                                  [else suffix*]))
                                              '()

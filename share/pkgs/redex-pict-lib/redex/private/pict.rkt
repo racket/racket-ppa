@@ -93,7 +93,6 @@
          metafunction-cases
          judgment-form-cases
          judgment-form-show-rule-names
-         compact-vertical-min-width
          extend-language-show-union
          extend-language-show-extended-order
          set-arrow-pict!
@@ -106,7 +105,14 @@
          rule-pict-info->side-condition-pict
 
          linebreaks sc-linebreaks
-         string->bracketed-label)
+         string->bracketed-label
+         compact-vertical-min-width)
+
+;; this isn't used by redex, but it is referred to
+;; by libraries on the pkg build server so export it
+;; in a minimal way
+(define compact-vertical-min-width (make-parameter 0))
+
 
 
 ;                                                                             
@@ -326,8 +332,6 @@
                rps)
           (blank 0 (reduction-relation-rule-separation)))))))
 
-(define compact-vertical-min-width (make-parameter 0))
-
 (define rule-picts->pict/vertical 
   (make-vertical-style vr-append))
 
@@ -335,12 +339,12 @@
   (make-vertical-style rbl-superimpose))
 
 (define (rule-picts->pict/compact-vertical rps)
-  (let* ([max-w (apply max
-                       (compact-vertical-min-width)
-                       (map pict-width
-                            (append
-                             (map rule-pict-info-lhs rps)
-                             (map rule-pict-info-rhs rps))))]
+  (let* ([max-w
+          (apply max
+                 (map pict-width
+                      (append
+                       (map rule-pict-info-lhs rps)
+                       (map rule-pict-info-rhs rps))))]
          [scs (map (lambda (rp)
                      (rule-pict-info->side-condition-pict rp max-w))
                    rps)]
@@ -348,7 +352,7 @@
                         (hbl-append (blank (label-space) 0) (rp->pict-label rp)))
                       rps)]
          [total-w (apply max
-                         max-w
+                         max-w ; max-width-of-rule-picts
                          (append (map pict-width scs)
                                  (map (lambda (lbl)
                                         (+ max-w 2 (label-space) (pict-width lbl)))
@@ -360,8 +364,6 @@
                   [lhs (rule-pict-info-lhs rp)]
                   [rhs (rule-pict-info-rhs rp)]
                   [spc (basic-text " " (default-style))]
-                  [sep (blank (compact-vertical-min-width)
-                              (reduction-relation-rule-separation))]
                   [add-label (lambda (p label)
                                (htl-append 
                                 p
@@ -378,14 +380,13 @@
                    (list arrow rhs)
                    (list (blank) sc)))))])
     (define rowss
-      (map one-line rps scs  labels))
+      (map one-line rps scs labels))
     (define all-cols
-      (let ([min-left (blank (compact-vertical-min-width) 0)])
-        (for*/fold ([all-cols (list min-left (blank))]) ([rows (in-list rowss)]
-                                                         [row (in-list rows)])
-          (for/list ([col (in-list all-cols)]
-                     [p (in-list row)])
-            (ltl-superimpose col (blank (pict-width p) 0))))))
+      (for*/fold ([all-cols (list (blank) (blank))]) ([rows (in-list rowss)]
+                                                      [row (in-list rows)])
+        (for/list ([col (in-list all-cols)]
+                   [p (in-list row)])
+          (ltl-superimpose col (blank (pict-width p) 0)))))
     (apply vl-append
            (+ (reduction-relation-rule-extra-separation)
               (reduction-relation-rule-separation))
@@ -408,13 +409,7 @@
            (if (null? fresh-vars)
                null
                (list
-                (hbl-append
-                 (apply 
-                  hbl-append
-                  (add-between
-                   fresh-vars
-                   (basic-text ", " (default-style))))
-                 (basic-text " fresh" (default-style)))))]
+                (fresh-vars-pict fresh-vars)))]
           [lst (add-between
                 (append
                  (map (adjust 'side-condition) pattern-binds/sc)
@@ -435,6 +430,15 @@
                              (vl-append ((adjust 'side-condition-line) p)
                                         (loop (car lst) (cdr lst)))]
                             [else (loop (htl-append p (car lst)) (cdr lst))])))))))))
+
+(define (fresh-vars-pict fresh-vars)
+  (hbl-append
+   (apply
+    hbl-append
+    (add-between
+     fresh-vars
+     (basic-text ", " (default-style))))
+   (basic-text " fresh" (default-style))))
 
 (define where-make-prefix-pict
   (make-parameter (lambda ()
@@ -1483,7 +1487,7 @@
   (define name-pict
     (cond
       [(or (symbol? name-rewritten) (string? name-rewritten))
-       ((current-text) (format "~a" name) (metafunction-style) (metafunction-font-size))]
+       ((current-text) (format "~a" name-rewritten) (metafunction-style) (metafunction-font-size))]
       [else name-rewritten]))
   ((adjust 'metafunction-contract)
    (hbl-append name-pict
@@ -1603,6 +1607,9 @@
        (make-pict))]))
 
 (define judgment-form-show-rule-names (make-parameter #t))
+
+;; inference-rules-pict : ?? ?? (listof (or/c #f string?)) ?? boolean? -> pict?
+;;   eqn-names is expected to be a list of all of the names in the jf/relation, in order
 (define (inference-rules-pict name all-eqns eqn-names lang judgment-form?)
   (define all-nts (language-nts lang))
   (define (wrapper->pict lw) (lw->pict all-nts lw))
@@ -1632,7 +1639,16 @@
                               (+ (lw-line rhs) (lw-line-span rhs)))]
                        [(struct metafunc-extra-side-cond (expr))
                         (wrapper->pict+lines expr)]
-                       [wrapper (wrapper->pict+lines wrapper)])
+                       [(struct metafunc-extra-fresh (vars))
+                        (define line-mins (for/list ([lw (in-list vars)])
+                                            (lw-line lw)))
+                        (define line-maxes (for/list ([lw (in-list vars)])
+                                             (+ (lw-line lw) (lw-line-span lw))))
+                        (list (fresh-vars-pict (map wrapper->pict vars))
+                              (apply min line-mins)
+                              (apply max line-maxes))]
+                       [wrapper
+                        (wrapper->pict+lines wrapper)])
                      (list-ref eqn 1))))
       (define sorted-premises (sort all-premises < #:key (λ (x) (list-ref x 1))))
        
@@ -1694,37 +1710,28 @@
 (define horizontal-bar-spacing (make-parameter 4))
 (define relation-clauses-combine (make-parameter (λ (l) (apply vc-append 20 l))))
 
-(define-for-syntax (inference-rules-pict/judgment-form form-name)
-  (define jf (syntax-local-value form-name))
-  (define-values (name lws rule-names lang relation?) 
-    (values (judgment-form-name jf) (judgment-form-lws jf) (judgment-form-rule-names jf)
-            (judgment-form-lang jf) (judgment-form-relation? jf)))
-  (syntax-property
-   #`(inference-rules-pict '#,name
-                           #,lws
-                           '#,rule-names
-                           #,lang
-                           #,(not relation?))
-   'disappeared-use
-   (syntax-local-introduce form-name)))
+(define (inference-rules-pict/judgment-form who jf save-as)
+  (unless (runtime-judgment-form? jf)
+    (error who "expected a judgment-form\n  given: ~e" jf))
+  (render-pict
+   (λ ()
+     (inference-rules-pict (runtime-judgment-form-name jf)
+                           (runtime-judgment-form-lws jf)
+                           (for/list ([name (in-list (runtime-judgment-form-rule-names jf))])
+                             (if (symbol? name)
+                                 (symbol->string name)
+                                 #f))
+                           (runtime-judgment-form-lang jf)
+                           (not (runtime-judgment-form-relation? jf))))
+   save-as))
 
-(define-syntax (render-judgment-form stx)
-  (syntax-case stx ()
-    [(_ form-name . opt-arg)
-     (if (judgment-form-id? #'form-name)
-         (let ([save-as (syntax-case #'opt-arg ()
-                          [() #'#f]
-                          [(path) #'path])])
-           #`(render-pict (λ () #,(inference-rules-pict/judgment-form #'form-name))
-                          #,save-as))
-         (raise-syntax-error #f "expected a judgment form name" stx #'form-name))]))
+(define (render-judgment-form jf [path #f])
+  (inference-rules-pict/judgment-form 'render-judgment-form
+                                      jf
+                                      path))
 
-(define-syntax (judgment-form->pict stx)
-  (syntax-case stx ()
-    [(_ form-name)
-     (if (judgment-form-id? #'form-name)
-         (inference-rules-pict/judgment-form #'form-name)
-         (raise-syntax-error #f "expected a judgment form name" stx #'form-name))]))
+(define (judgment-form->pict jf)
+  (inference-rules-pict/judgment-form 'judgment-form->pict jf #f))
 
 ;                              
 ;                              

@@ -121,6 +121,9 @@
                  pred
                  acc)))]))
 
+(define/who unsafe-make-struct-type-property/guard-calls-no-arguments
+  make-struct-type-property)
+
 (define (struct-type-property-accessor-procedure? v)
   (let ([v (strip-impersonator v)])
     (and (#%procedure? v)
@@ -223,8 +226,9 @@
   (check who
          :test (or (not insp)
                    (inspector? insp)
+                   (eq? insp 'current)
                    (eq? insp 'prefab))
-         :contract "(or/c inspector? #f 'prefab)"
+         :contract "(or/c inspector? #f 'current 'prefab)"
          insp)
   (check who
          :test (and (#%list? immutables)
@@ -389,7 +393,10 @@
          
          ;; Record inspector
          (unless (and system? insp)
-           (inspector-set! rtd insp))
+           (inspector-set! rtd (if (eq? insp 'current)
+                                   (current-inspector)
+                                   insp)))
+
          ;; Register guard
          (register-guards! rtd parent-rtd guard 'at-start)))]))
 
@@ -441,10 +448,6 @@
                         (list (or eql?
                                   (lambda (a b eql? mode) (eq? a b)))
                               hash-code)))
-(define struct-set-default-equal+hash!
-  (let ([l (list default-struct-equal? default-struct-hash default-struct-hash)])
-    (lambda (rtd)
-      (struct-property-set! prop:equal+hash rtd l))))
 (define (inherit-equal+hash! rtd parent-rtd)
   (struct-property-set! prop:equal+hash rtd (struct-property-ref prop:equal+hash parent-rtd #f)))
 
@@ -452,9 +455,9 @@
 (define make-struct-type-install-properties
   (case-lambda
    [(name init-count auto-count parent-rtd)
-    (make-struct-type-install-properties name init-count auto-count parent-rtd '() (current-inspector) #f '() #f #f)]
+    (make-struct-type-install-properties name init-count auto-count parent-rtd '() 'current #f '() #f #f)]
    [(name init-count auto-count parent-rtd props)
-    (make-struct-type-install-properties name init-count auto-count parent-rtd props (current-inspector) #f '() #f #f)]
+    (make-struct-type-install-properties name init-count auto-count parent-rtd props 'current #f '() #f #f)]
    [(name init-count auto-count parent-rtd props insp)
     (make-struct-type-install-properties name init-count auto-count parent-rtd props insp #f '() #f #f)]
    [(name init-count auto-count parent-rtd props insp proc-spec)
@@ -636,11 +639,11 @@
 (define make-struct-type
   (case-lambda 
     [(name parent-rtd init-count auto-count)
-     (make-struct-type name parent-rtd init-count auto-count #f '() (current-inspector) #f '() #f #f)]
+     (make-struct-type name parent-rtd init-count auto-count #f '() 'current #f '() #f #f)]
     [(name parent-rtd init-count auto-count auto-val)
-     (make-struct-type name parent-rtd init-count auto-count auto-val '() (current-inspector) #f '() #f #f)]
+     (make-struct-type name parent-rtd init-count auto-count auto-val '() 'current #f '() #f #f)]
     [(name parent-rtd init-count auto-count auto-val props)
-     (make-struct-type name parent-rtd init-count auto-count auto-val props (current-inspector) #f '() #f #f)]
+     (make-struct-type name parent-rtd init-count auto-count auto-val props 'current #f '() #f #f)]
     [(name parent-rtd init-count auto-count auto-val props insp)
      (make-struct-type name parent-rtd init-count auto-count auto-val props insp #f '() #f #f)]
     [(name parent-rtd init-count auto-count auto-val props insp proc-spec)
@@ -658,11 +661,12 @@
             [parent-fi (if parent-rtd*
                            (struct-type-field-info parent-rtd*)
                            empty-field-info)]
-            [rtd (make-record-type-descriptor* name
-                                               parent-rtd*
-                                               prefab-uid
-                                               (#%ormap (lambda (p) (eq? prop:sealed (car p))) props)
-                                               #f
+            [rtd (make-record-type-descriptor name
+                                              parent-rtd*
+                                              prefab-uid
+                                              (#%ormap (lambda (p) (eq? prop:sealed (car p))) props)
+                                              #f
+                                              (cons
                                                (+ init-count auto-count)
                                                (let ([mask (sub1 (general-arithmetic-shift 1 (+ init-count auto-count)))])
                                                  (if (eq? insp 'prefab)
@@ -672,10 +676,10 @@
                                                                           immutables)]
                                                                 [mask mask])
                                                        (cond
-                                                        [(null? imms) mask]
-                                                        [else
-                                                         (let ([m (bitwise-not (arithmetic-shift 1 (car imms)))])
-                                                           (loop (cdr imms) (bitwise-and mask m)))])))))]
+                                                         [(null? imms) mask]
+                                                         [else
+                                                          (let ([m (bitwise-not (arithmetic-shift 1 (car imms)))])
+                                                            (loop (cdr imms) (bitwise-and mask m)))]))))))]
             [parent-auto*-count (get-field-info-auto*-count parent-fi)]
             [parent-init*-count (get-field-info-init*-count parent-fi)]
             [parent-total*-count (get-field-info-total*-count parent-fi)]
@@ -772,13 +776,14 @@
                                  (cdr parent-prefab-key+count)
                                  0))]
              [uid (encode-prefab-key+count-as-symbol prefab-key+count)]
-             [rtd (make-record-type-descriptor* name
-                                                parent-rtd
-                                                uid #f #f
+             [rtd (make-record-type-descriptor name
+                                               parent-rtd
+                                               uid #f #f
+                                               (cons
                                                 total-count
                                                 ;; All fields must be reported as mutable, because
                                                 ;; we might need to mutate to create cyclic data:
-                                                (sub1 (bitwise-arithmetic-shift-left 1 total-count)))]
+                                                (sub1 (bitwise-arithmetic-shift-left 1 total-count))))]
              [mutables (prefab-key-mutables prefab-key total-count)])
         (with-global-lock
          (cond
@@ -1223,6 +1228,8 @@
   (#3%record? v r))
 (define (unsafe-sealed-struct? v r)
   (#3%$sealed-record? v r))
+(define (unsafe-struct*-type s)
+  (#%$record-type-descriptor s))
 
 ;; internal use only, so doesn't need to have 'unsafe-struct as it's name, etc.:
 (define unsafe-struct #%$record)
@@ -1371,6 +1378,11 @@
                           (hash-code-combine hc (hash-code (unsafe-struct-ref s j)))))))
             (eq-hash-code raw-s))))]))
 
+(define struct-set-default-equal+hash!
+  (let ([l (list default-struct-equal? default-struct-hash default-struct-hash)])
+    (lambda (rtd)
+      (struct-property-set! prop:equal+hash rtd l))))
+
 (define struct->vector
   (case-lambda
    [(s dots)
@@ -1464,7 +1476,7 @@
                                          #'mk))]
                          [uid (datum->syntax #'name ((current-generate-id) (syntax->datum #'name)))])
              #'(begin
-                 (define struct:name (make-record-type-descriptor* 'name  struct:parent 'uid #f #f field-count 0))
+                 (define struct:name (make-record-type-descriptor 'name struct:parent 'uid #f #f '(field-count . 0)))
                  (define unsafe-make-name (record-constructor (make-record-constructor-descriptor struct:name #f #f)))
                  (define name ctr-expr)
                  (define authentic-name? (record-predicate struct:name))

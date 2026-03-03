@@ -62,14 +62,21 @@ To embed Racket CS in a program, follow these steps:
            @cpp{argv[0]} for the @cpp{argv} received by your program's
            @cpp{main}.}
 
-     @item{@cpp{boot1_path} --- a path to @filepath{petite.boot}. Use
-     a path that includes at least one directory separator.}
+     @item{@cpp{boot1_path} or @cpp{boot1_data} and @cpp{boot1_len}
+           --- either a path to @filepath{petite.boot} or the content
+           of @filepath{petite.boot} and its length in bytes. In the
+           former case, use a path that includes at least one
+           directory separator.}
 
-     @item{@cpp{boot2_path} --- a path to @filepath{scheme.boot} (with
-     a separator).}
-     
-     @item{@cpp{boot3_path} --- a path to @filepath{racket.boot}
-     (with a separator).}
+     @item{@cpp{boot2_path} or @cpp{boot2_data} and @cpp{boot2_len}
+           --- either a path to @filepath{scheme.boot} (with a
+           separator) or the content of @filepath{scheme.boot} and its
+           length.}
+
+     @item{@cpp{boot3_path} or @cpp{boot3_data} and @cpp{boot3_len}
+           --- either a path to @filepath{racket.boot} (with a
+           separator) or the content of @filepath{racket.boot} and its
+           length.}
 
   ]
 
@@ -85,7 +92,9 @@ To embed Racket CS in a program, follow these steps:
   offset of each boot image in the file.
 
   See @secref["segment-ideas"] for advice on embedding files like
-  @filepath{petite.boot} in an executable.}
+  @filepath{petite.boot} in an executable, or consider using
+  @cpp{racket_get_self_exe_path} and @cpp{racket_path_replace_filename}
+  to build paths that are relative to the executable.}
 
  @item{Configure the main thread's namespace by adding module
   declarations. The initial namespace contains declarations only for a

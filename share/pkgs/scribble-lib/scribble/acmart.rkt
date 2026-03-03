@@ -28,72 +28,55 @@
   #:name author-institution
   #:transparent)
 
-(provide/contract
- [title (->* ()
-             (#:short pre-content?
-              #:tag (or/c string? (listof string?) #f)
-              #:tag-prefix (or/c string? module-path? #f)
-              #:style (or/c style? string? symbol? #f)
-              #:version (or/c string? #f)
-              #:date (or/c string? #f))
-             #:rest (listof pre-content?)
-             title-decl?)]
- [author (->* ()
-              (#:orcid (or/c pre-content? #f)
-               #:affiliation (or/c pre-content?
-                                   affiliation?
-                                   (listof affiliation?)
-                                   #f)
-               #:email (or/c pre-content? email? (listof email?)))
-              #:rest (listof pre-content?)
-              block?)]
- [authorsaddresses (->* ()
-                        ()
-                        #:rest (listof pre-content?)
-                        block?)]
- [shortauthors (->* ()
-                    ()
-                    #:rest (listof pre-content?)
-                    element?)]
- [institution (->* ()
-                   (#:departments (listof (or/c pre-content? institution?)))
-                   #:rest pre-content?
-                   institution?)]
- [institution? (-> any/c boolean?)]
- [email (->* ()
-             #:rest (listof pre-content?)
-             email?)]
- [email-string (->* ()
-                    #:rest (listof string?)
-                    email?)]
- [email? (-> any/c boolean?)]
- [affiliation (->* ()
-                   (#:position (or/c pre-content? #f)
-                    #:institution (or/c pre-content? institution? (listof institution?) #f)
-                    #:street-address (or/c pre-content? #f)
-                    #:city (or/c pre-content? #f)
-                    #:state (or/c pre-content? #f)
-                    #:postcode (or/c pre-content? #f)
-                    #:country (or/c pre-content? #f))
-                   affiliation?)]
- [affiliation? (-> any/c boolean?)]
- [abstract 
-  (->* () () #:rest (listof pre-content?)
-       block?)]
- [acmConference 
-  (-> string? string? string? block?)]
- [grantsponsor 
-  (-> string? string? string? content?)]
- [grantnum 
-  (->* (string? string?) (#:url string?) content?)]
- [acmBadgeR (->* (string?) (#:url string?) block?)]
- [acmBadgeL (->* (string?) (#:url string?) block?)]
- [received (->* (string?) (#:stage string?) block?)]
- [citestyle (-> content? block?)]
- [ccsdesc (->* (string?) (#:number exact-integer?) block?)]
- [CCSXML 
-  (->* () () #:rest (listof pre-content?)
-       any/c)])
+(provide (contract-out [title
+                        (->* ()
+                             (#:short pre-content?
+                                      #:tag (or/c string? (listof string?) #f)
+                                      #:tag-prefix (or/c string? module-path? #f)
+                                      #:style (or/c style? string? symbol? #f)
+                                      #:version (or/c string? #f)
+                                      #:date (or/c string? #f))
+                             #:rest (listof pre-content?)
+                             title-decl?)]
+                       [author
+                        (->* ()
+                             (#:orcid (or/c pre-content? #f)
+                              #:affiliation (or/c pre-content? affiliation? (listof affiliation?) #f)
+                              #:email (or/c pre-content? email? (listof email?)))
+                             #:rest (listof pre-content?)
+                             block?)]
+                       [authorsaddresses (->* () () #:rest (listof pre-content?) block?)]
+                       [shortauthors (->* () () #:rest (listof pre-content?) element?)]
+                       [institution
+                        (->* ()
+                             (#:departments (listof (or/c pre-content? institution?)))
+                             #:rest pre-content?
+                             institution?)]
+                       [institution? (-> any/c boolean?)]
+                       [email (-> pre-content? ... email?)]
+                       [email-string (-> string? ... email?)]
+                       [email? (-> any/c boolean?)]
+                       [affiliation
+                        (->* ()
+                             (#:position (or/c pre-content? #f)
+                              #:institution (or/c pre-content? institution? (listof institution?) #f)
+                              #:street-address (or/c pre-content? #f)
+                              #:city (or/c pre-content? #f)
+                              #:state (or/c pre-content? #f)
+                              #:postcode (or/c pre-content? #f)
+                              #:country (or/c pre-content? #f))
+                             affiliation?)]
+                       [affiliation? (-> any/c boolean?)]
+                       [abstract (->* () () #:rest (listof pre-content?) block?)]
+                       [acmConference (-> string? string? string? block?)]
+                       [grantsponsor (-> string? string? string? content?)]
+                       [grantnum (->* (string? string?) (#:url string?) content?)]
+                       [acmBadgeR (->* (string?) (#:url string?) block?)]
+                       [acmBadgeL (->* (string?) (#:url string?) block?)]
+                       [received (->* (string?) (#:stage string?) block?)]
+                       [citestyle (-> content? block?)]
+                       [ccsdesc (->* (string?) (#:number exact-integer?) block?)]
+                       [CCSXML (->* () () #:rest (listof pre-content?) any/c)]))
 (provide
   invisible-element-to-collect-for-acmart-extras
   include-abstract)
@@ -144,7 +127,8 @@
 (defopts manuscript acmsmall acmlarge acmtog sigconf siggraph sigplan sigchi sigchi-a
   dtrap pacmcgit tiot tdsci)
 ; boolean options
-(defopts review screen natbib anonymous authorversion 9pt 10pt 11pt 12pt)
+(defopts review screen natbib anonymous authorversion nonacm timestamp authordraft
+  acmthm balance pbalance urlbreakonhyphens 9pt 10pt 11pt 12pt)
 
 (define acmart-extras
   (let ([abs (lambda (s)
@@ -255,23 +239,19 @@
                #:date [date #f]
                #:short [short #f]
                . str)
-  (let ([content (decode-content str)])
-    (make-title-decl (prefix->string prefix)
-                     (convert-tag tag content)
-                     version
-                     (let* ([s (convert-part-style 'title style)]
-                            [s (if date
-                                   (make-style (style-name s)
-                                               (cons (make-document-date date)
-                                                     (style-properties s)))
-                                   s)]
-                            [s (if short
-                                   (make-style (style-name s)
-                                               (cons (short-title short)
-                                                     (style-properties s)))
-                                   s)])
-                       s)
-                     content)))
+  (define content (decode-content str))
+  (make-title-decl
+   (prefix->string prefix)
+   (convert-tag tag content)
+   version
+   (let* ([s (convert-part-style 'title style)]
+          [s (if date
+                 (make-style (style-name s) (cons (make-document-date date) (style-properties s)))
+                 s)]
+          [s
+           (if short (make-style (style-name s) (cons (short-title short) (style-properties s))) s)])
+     s)
+   content))
 
 (define (author #:orcid [orcid #f]
                 #:affiliation [affiliation '()]
@@ -286,8 +266,9 @@
                                   (make-element #f
                                                 (if orcid
                                                     (make-element
-                                                     (make-style "SAuthorOrcid" multicommand-props)
-                                                     (decode-content (list orcid)))
+                                                     (make-style "SAuthorOrcid" (cons 'exact-chars multicommand-props))
+                                                     ;; not decoding, since we want exact chars
+                                                     orcid)
                                                     '()))
                                   (make-element #f
                                                 (cond
@@ -341,7 +322,7 @@
                            (decode-content name))]
       [else (make-element (make-style "department"
                                       (append
-                                       (if (> level 0)
+                                       (if (positive? level)
                                            (list (command-optional (list (number->string level))))
                                            (list))
                                        command-props))

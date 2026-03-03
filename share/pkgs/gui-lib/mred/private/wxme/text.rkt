@@ -24,7 +24,8 @@
          "wordbreak.rkt"
          "stream.rkt"
          "wx.rkt"
-         racket/draw/private/region)
+         racket/draw/private/region
+         racket/snip/private/grapheme)
 
 (provide text%
          add-text-keymap-functions
@@ -86,9 +87,8 @@
        'solid)]))
 
 (define outline-pen (send the-pen-list find-or-create-pen "BLACK" 0 'transparent))
-(define outline-inactive-pen (send the-pen-list find-or-create-pen (get-highlight-background-color) 1 'solid))
-(define outline-brush (send the-brush-list find-or-create-brush (get-highlight-background-color) 'solid))
-(define outline-nonowner-brush outline-brush)
+(define (outline-inactive-pen) (send the-pen-list find-or-create-pen (get-highlight-background-color) 1 'solid))
+(define (outline-brush) (send the-brush-list find-or-create-brush (get-highlight-background-color) 'solid))
 (define clear-brush (send the-brush-list find-or-create-brush "WHITE" 'solid))
 
 (define (showcaret>= a b)
@@ -289,7 +289,7 @@
     (let loop ([line first-line]
                [snip snips]
                [snip-num 0])
-      (unless (eq? snips (mline-snip first-line))
+      (unless (object-or-false=? snips (mline-snip first-line))
         (error who "bad start snip"))
       (let sloop ([snip snip][snip-num snip-num])
         (when (zero? (snip->count snip))
@@ -297,13 +297,13 @@
             (error who "snip count is 0 at ~s" snip-num)))
         (unless (eq? line (snip->line snip))
           (error who "snip's line is wrong: ~s ~s" snip (snip->line snip)))
-        (if (eq? snip (mline-last-snip line))
+        (if (object-or-false=? snip (mline-last-snip line))
             (if (mline-next line)
                 (begin
                   (unless (has-flag? (snip->flags snip) NEWLINE)
                     (error who "strange line ending"))
                   (loop (mline-next line) (snip->next snip) (add1 snip-num)))
-                (unless (eq? last-snip snip)
+                (unless (object-or-false=? last-snip snip)
                   (error who "bad last snip")))
             (begin
               (when (or (has-flag? (snip->flags snip) NEWLINE)
@@ -516,7 +516,7 @@
             (when (send event button-down?)
               (set-caret-owner snip))
             (when (and prev-mouse-snip
-                       (not (eq? snip prev-mouse-snip)))
+                       (not (object-or-false=? snip prev-mouse-snip)))
               (let-boxes ([x 0.0] [y 0.0])
                   (get-snip-position-and-location prev-mouse-snip #f x y)
                 (send prev-mouse-snip on-goodbye-event dc (- x scrollx) (- y scrolly) x y event)))
@@ -914,10 +914,10 @@
                                                  editor-x-selection-mode?
                                                  (or (and (not (eq? 'local seltype))
                                                           (not (= start end ))
-                                                          (not (eq? editor-x-selection-owner this))
+                                                          (not (object-or-false=? editor-x-selection-owner this))
                                                           (eq? (own-x-selection #t #f seltype) 'x))
                                                      (and (or (= start end)
-                                                              (not (eq? editor-x-selection-allowed this))
+                                                              (not (object-or-false=? editor-x-selection-allowed this))
                                                               (eq? 'local seltype))
                                                           (eq? editor-x-selection-owner this)
                                                           (own-x-selection #f #f #f))))])
@@ -1105,7 +1105,9 @@
                                  start)]
                               [(eq? 'line kind)
                                (line-start-position (position-line start posateol?))]
-                              [else (max 0 (sub1 start))]))])
+                              [else
+                               (grapheme-position
+                                (max 0 (sub1 (position-grapheme start))))]))])
                       (let-values ([(start end)
                                     (if extend?
                                         (if leftshrink?
@@ -1133,7 +1135,9 @@
                                  end)]
                               [(eq? 'line kind)
                                (line-end-position (position-line end posateol?))]
-                              [else (add1 end)]))])
+                              [else
+                               (grapheme-position
+                                (add1 (position-grapheme end)))]))])
                       (let-values ([(start end)
                                     (if extend?
                                         (if rightshrink?
@@ -1230,7 +1234,7 @@
                                                             (let* ([newtop (find-scroll-line (+ vy scroll-height))]
                                                                    [y (scroll-line-location (+ newtop 1))]
                                                                    [newtop (if (y . > . (+ vy scroll-height))
-                                                                               (sub1 newtop)
+                                                                               (max 0 (sub1 newtop))
                                                                                newtop)]
                                                                    [y (scroll-line-location newtop)])
                                                               ;; y is the new top location
@@ -1313,7 +1317,7 @@
 
   ;; ----------------------------------------
 
-  (define/private (do-insert isnip str snipsl start end scroll-ok?)
+  (define/private (do-insert isnip str snipsl start end scroll-ok? force-keep-caret?)
     (assert (consistent-snip-lines 'do-insert))
     (unless (or write-locked?
                 s-user-locked?
@@ -1322,8 +1326,9 @@
             [str (and str (positive? (string-length str)) str)])
         ;; turn off pending style, if it doesn't apply
         (when caret-style
-          (when (or (not (equal? end start)) (not (= startpos start)))
-            (set! caret-style #f)))
+          (unless force-keep-caret?
+            (when (or (not (or (eq? end 'same) (equal? end start))) (not (= startpos start)))
+              (set! caret-style #f))))
         (let ([deleted? (and (not (eq? end 'same))
                              (start . < . end)
                              (begin
@@ -1508,14 +1513,14 @@
                                                                    [line (mline-insert gline line-root-box #t)])
                                                               (set-snip-line! isnip line)
                                                               (set! num-valid-lines (add1 num-valid-lines))
-                                                              (if (eq? gsnip (mline-snip gline))
+                                                              (if (object-or-false=? gsnip (mline-snip gline))
                                                                   (set-mline-snip! line isnip)
                                                                   (set-mline-snip! line (mline-snip gline)))
                                                               (set-mline-last-snip! line isnip)
                                                               (set-mline-snip! gline gsnip)
                                                               
                                                               (let loop ([c-snip (mline-snip line)])
-                                                                (unless (eq? c-snip isnip)
+                                                                (unless (object-or-false=? c-snip isnip)
                                                                   (set-snip-line! c-snip line)
                                                                   (loop (snip->next c-snip))))
                                                               
@@ -1524,7 +1529,7 @@
                                                               #t)
                                                             (let ([gline (snip->line gsnip)])
                                                               (set-snip-line! isnip gline)
-                                                              (when (eq? (mline-snip gline) gsnip)
+                                                              (when (object=? (mline-snip gline) gsnip)
                                                                 (set-mline-snip! gline isnip))
                                                               #f))))])
                                             
@@ -1591,11 +1596,11 @@
                                                 (values #f 0))])
                                 (let-values ([(snip s-pos)
                                               (if (or (not gsnip)
-                                                      (and caret-style (not (eq? caret-style (snip->style gsnip))))
+                                                      (and caret-style (not (object-or-false=? caret-style (snip->style gsnip))))
                                                       (not (has-flag? (snip->flags gsnip) IS-TEXT))
                                                       ((+ (snip->count gsnip) addlen) . > . MAX-COUNT-FOR-SNIP)
                                                       (and (not sticky-styles?)
-                                                           (not (eq? (snip->style gsnip) (get-default-style)))))
+                                                           (not (object-or-false=? (snip->style gsnip) (get-default-style)))))
                                                   
                                                   (let ([style (or caret-style
                                                                    (if sticky-styles?
@@ -1618,7 +1623,7 @@
 
                                   (if (and gsnip
                                            (has-flag? (snip->flags gsnip) HARD-NEWLINE)
-                                           (eq? (snip->next gsnip) snip))
+                                           (object-or-false=? (snip->next gsnip) snip))
                                       ;; preceding snip was a newline, so the new slip belongs on the next line:
                                       (let* ([oldline (snip->line gsnip)]
                                              [inserted-new-line?
@@ -1664,14 +1669,19 @@
                     (let loop ([pos (- start s)] [snip snip] [size (+ addlen s)])
                       (cond
                        [(size . > . MAX-COUNT-FOR-SNIP)
-                        (define half (quotient size 2))
-                        
-                        (define intm-snip
-                          (split-one half snip #f))
-                        
-                        (define-values (next-snip next-pos)
-                          (loop pos intm-snip half))
-                        (loop next-pos next-snip (- size half))]
+                        (define half (send snip grapheme-position
+                                           (send snip position-grapheme (quotient size 2))))
+                        (cond
+                          [(< 0 half size)
+                           (define intm-snip
+                             (split-one half snip #f))
+                           
+                           (define-values (next-snip next-pos)
+                             (loop pos intm-snip half))
+                           (loop next-pos next-snip (- size half))]
+                          [else
+                           ;; split wouldn't make anything smaller, susprisingly, so give up
+                           (values snip s)])]
                        [else
                         (define new-snip (split-one* size snip))
                         (values (snip->next new-snip) (+ pos size))]))
@@ -1740,7 +1750,7 @@
                                                                         HARD-NEWLINE)
                                                               INVISIBLE)
                                                     CAN-APPEND))
-                                  (if (not (eq? snip (mline-last-snip (snip->line snip))))
+                                  (if (not (object=? snip (mline-last-snip (snip->line snip))))
                                       (let* ([old-line (snip->line snip)]
                                              [line (mline-insert old-line line-root-box #t)])
                                         (set-snip-line! snip line)
@@ -1749,24 +1759,26 @@
                                         (set-mline-snip! line (mline-snip old-line))
 
                                         ;; retarget snips moved to new line:
-                                        (define delta
-                                          (let loop ([c-snip (mline-snip old-line)] [delta 0])
+                                        (define-values (delta grapheme-delta)
+                                          (let loop ([c-snip (mline-snip old-line)] [delta 0] [grapheme-delta 0])
                                             (cond
-                                             [(eq? c-snip snip)
-                                              (+ delta (snip->count snip))]
+                                             [(object-or-false=? c-snip snip)
+                                              (values (+ delta (snip->count snip))
+                                                      (+ grapheme-delta (snip->grapheme-count snip)))]
                                              [else
                                               (set-snip-line! c-snip line)
                                               (loop (snip->next c-snip)
-                                                    (+ delta (snip->count c-snip)))])))
+                                                    (+ delta (snip->count c-snip))
+                                                    (+ grapheme-delta (snip->grapheme-count c-snip)))])))
                                         
                                         (set-mline-snip! old-line (snip->next snip))
 
-                                        (mline-adjust-line-length old-line (- delta))
+                                        (mline-adjust-line-length old-line (- delta) (- grapheme-delta))
                                         (mline-mark-recalculate old-line)
                                         (when (max-width . > . 0)
                                           (mline-mark-check-flow old-line))
 
-                                        (mline-adjust-line-length line delta)
+                                        (mline-adjust-line-length line delta grapheme-delta)
                                         (mline-mark-recalculate line)
                                         (when (max-width . > . 0)
                                           (mline-mark-check-flow line)))
@@ -1790,7 +1802,7 @@
                                                      ts))])
                                   (set-snip-style! tabsnip (snip->style snip))
                                   (let* ([rsnip (snip-set-admin tabsnip snip-admin)]
-                                         [tabsnip (if (not (eq? rsnip tabsnip))
+                                         [tabsnip (if (not (object-or-false=? rsnip tabsnip))
                                                       ;; uh-oh
                                                       (let ([tabsnip (new tab-snip%)])
                                                         (set-snip-style! tabsnip (snip->style snip))
@@ -1809,9 +1821,9 @@
 
                                     (splice-snip tabsnip (snip->prev snip) (snip->next snip))
                                     (set-snip-line! tabsnip (snip->line snip))
-                                    (when (eq? (mline-snip (snip->line snip)) snip)
+                                    (when (object=? (mline-snip (snip->line snip)) snip)
                                       (set-mline-snip! (snip->line tabsnip) tabsnip))
-                                    (when (eq? (mline-last-snip (snip->line snip)) snip)
+                                    (when (object=? (mline-last-snip (snip->line snip)) snip)
                                       (set-mline-last-snip! (snip->line tabsnip) tabsnip))
                                     tabsnip)))))
 
@@ -1845,30 +1857,45 @@
     (case-args
      args
      [([string? str])
-      (do-insert #f str #f startpos endpos #t)]
+      (do-insert #f str #f startpos endpos #t #f)]
      [([string? str] 
        [exact-nonnegative-integer? start] 
        [(make-alts exact-nonnegative-integer? (symbol-in same)) [end 'same]]
-       [any? [scroll-ok? #t]])
-      (do-insert #f str #f start end scroll-ok?)]
+       [any? [scroll-ok? #t]]
+       [any? [join-graphemes? #f]])
+      (if join-graphemes?
+          (do-insert-graphemes str start end scroll-ok?)
+          (do-insert #f str #f start end scroll-ok? #f))]
      [([exact-nonnegative-integer? len] 
-       [string? str])
+       [string? str]
+       [any? [join-graphemes? #f]])
       (check-len str len)
-      (do-insert #f (substring str 0 len) #f startpos endpos #t)]
+      (let ([str (if (= len (string-length str))
+                     str
+                     (substring str 0 len))])
+        (if join-graphemes?
+            (do-insert-graphemes str startpos endpos #t)
+            (do-insert #f str #f startpos endpos #t #f)))]
      [([exact-nonnegative-integer? len] 
        [string? str] 
        [exact-nonnegative-integer? start] 
        [(make-alts exact-nonnegative-integer? (symbol-in same)) [end 'same]]
-       [any? [scroll-ok? #t]])
+       [any? [scroll-ok? #t]]
+       [any? [join-graphemes? #f]])
       (check-len str len)
-      (do-insert #f (substring str 0 len) #f start end scroll-ok?)]
+      (let ([str (if (= len (string-length str))
+                     str
+                     (substring str 0 len))])
+        (if join-graphemes?
+            (do-insert-graphemes str startpos endpos #t)
+            (do-insert #f str #f start end scroll-ok? #f)))]
      [([snip% snip])
-      (do-insert snip #f #f startpos endpos #t)]
+      (do-insert snip #f #f startpos endpos #t #f)]
      [([snip% snip]
        [exact-nonnegative-integer? [start startpos]]
        [(make-alts exact-nonnegative-integer? (symbol-in same)) [end 'same]]
        [any? [scroll-ok? #t]])
-      (do-insert snip #f #f start end scroll-ok?)]
+      (do-insert snip #f #f start end scroll-ok? #f)]
      [([char? ch])
       (do-insert-char ch startpos endpos)]
      [([char? ch] 
@@ -1878,16 +1905,57 @@
      (method-name 'text% 'insert)))
 
   (define/public (do-insert-snips snips pos)
-    (do-insert #f #f snips pos pos #t))
+    (do-insert #f #f snips pos pos #t #f))
 
   (define/private (do-insert-char ch start end)
     (let ([streak? typing-streak?]
           [ifs? insert-force-streak?])
       (end-streaks '(delayed))
       (set! insert-force-streak? streak?)
-      (do-insert #f (string ch) #f start end #t)
+
+      (cond
+        [(char-iso-control? ch)
+         ;; shortcut for character that never joins, especially #\newline
+         (do-insert #f (string ch) #f start end #t #f)]
+        [else
+         (do-insert-graphemes (string ch) start end #t)])
+
       (set! insert-force-streak? ifs?)
       (set! typing-streak? #t)))
+
+  (define/private (do-insert-graphemes str start-in end-in scroll-ok?)
+    ;; maybe join characters to form a grapheme; we limit
+    ;; the search for a grapheme to one surrounding snip on
+    ;; the grounds that this makes sense when graphemes are
+    ;; already joined
+    (define start (max 0 (min start-in len)))
+    (define end (if (eq? end-in 'same) start (max start (min end-in len))))
+    (define keep-caret? (and (= start startpos)
+                             (or (eq? end 'same) (eqv? end start))))
+    (let loop ([s str] [start start] [end end])
+      (define pre-s (do-find-snip start 'before))
+      (define pre-pos (get-snip-position pre-s))
+      (define pre-count (snip->count pre-s))
+      (define txt (send pre-s get-text 0 (- start pre-pos) #f))
+      (cond
+        [(grapheme-spans? txt 0 (- start pre-pos)
+                          s 0 (string-length s))
+         (loop (string-append (string (string-ref txt (- start pre-pos 1))) s)
+               (sub1 start)
+               end)]
+        [else
+         (define post-s (do-find-snip end 'after))
+         (define post-pos (get-snip-position post-s))
+         (define post-count (snip->count post-s))
+         (define txt (send post-s get-text 0 post-count #f))
+         (cond
+           [(grapheme-spans? s 0 (string-length s)
+                             txt (- end post-pos) post-count)
+            (loop (string-append s (string (string-ref txt (- end post-pos))))
+                  start
+                  (add1 end))]
+           [else
+            (do-insert #f s #f start end #t keep-caret?)])])))
 
   (define/private (do-delete start end with-undo? [scroll-ok? #t])
     (assert (consistent-snip-lines 'do-delete))
@@ -1896,7 +1964,10 @@
                     (if (eq? end 'back)
                         (if (zero? start)
                             (values 0 0 #f)
-                            (values (sub1 start) start #t))
+                            (values (grapheme-position
+                                     (sub1 (position-grapheme start)))
+                                    start
+                                    #t))
                         (values start end (and (= start startpos)
                                                (= end endpos))))])
         (end-streaks '(delayed))
@@ -1947,15 +2018,17 @@
                                   (let loop ([snip end-snip]
                                              [deleted-line? #f]
                                              [update-cursor? #f])
-                                    (if (eq? snip start-snip)
+                                    (if (object-or-false=? snip start-snip)
                                         (values deleted-line? update-cursor?)
                                         (let ([update-cursor?
-                                               (or (and (eq? snip s-caret-snip)
+                                               (or (and (object-or-false=? snip s-caret-snip)
                                                         (let ([rl? read-locked?])
                                                           (set! read-locked? #t)
                                                           (send s-caret-snip own-caret #f)
+                                                          (do-own-caret #t)
                                                           (set! read-locked? rl?)
                                                           (set! s-caret-snip #f)
+                                                          (on-focus #t)
                                                           #t))
                                                    update-cursor?)])
                                           
@@ -1966,8 +2039,8 @@
                                                  [deleted-another-line?
                                                   (let ([line (snip->line snip)])
                                                     (cond
-                                                     [(eq? (mline-snip line) snip)
-                                                      (if (eq? (mline-last-snip line) snip)
+                                                     [(object-or-false=? (mline-snip line) snip)
+                                                      (if (object-or-false=? (mline-last-snip line) snip)
                                                           (begin
                                                             (mline-delete line line-root-box)
                                                             (set! num-valid-lines (sub1 num-valid-lines))
@@ -1975,7 +2048,7 @@
                                                           (begin
                                                             (set-mline-snip! line (snip->next snip))
                                                             #f))]
-                                                     [(eq? (mline-last-snip line) snip)
+                                                     [(object-or-false=? (mline-last-snip line) snip)
                                                       (if (mline-next line)
                                                           (begin
                                                             (set-mline-last-snip! line (mline-last-snip (mline-next line)))
@@ -2019,7 +2092,7 @@
                           ;; fix line references from possibly moved snips:
                           (let ([next (snip->next (mline-last-snip line))])
                             (let loop ([snip (mline-snip line)])
-                              (unless (eq? snip next)
+                              (unless (object-or-false=? snip next)
                                 (set-snip-line! snip line)
                                 (loop (snip->next snip)))))
 
@@ -2184,7 +2257,7 @@
             (set! flow-locked? #t)
 
             (let loop ([snip start])
-              (unless (eq? snip end)
+              (unless (object-or-false=? snip end)
                 (let ([asnip (send snip copy)])
                   (snip-set-admin asnip #f)
                   (set-snip-style! asnip (send sl convert (snip->style asnip)))
@@ -2534,7 +2607,7 @@
                            (let loop ([start start]
                                       [top top]
                                       [bottom bottom])
-                             (if (eq? end start)
+                             (if (object-or-false=? end start)
                                  (and (y . >= . top)
                                       (y . <= . bottom)
                                       c)
@@ -2750,21 +2823,29 @@
                    (error who "not a WXME file")
                    (let* ([b (make-object editor-stream-in-file-base% f)]
                           [mf (make-object editor-stream-in% b)])
-                     (or (and (not (read-editor-version mf b #f #t))
+                     (or (and (not (send mf ok?))
+                              'mf-not-initially-ok)
+                         (and (not (read-editor-version mf b #f #t))
                               'read-editor-version-failed)
+                         (and (not (send mf ok?))
+                              'mf-not-ok-after-editor-version)
                          (and (not (read-editor-global-header mf))
                               'read-editor-global-head-failed)
                          (and (not (send mf ok?))
-                              'mf-not-ok)
+                              'mf-not-ok-after-global-header)
                          (and (not (read-from-file mf clear-styles?))
                               'read-from-file-failed)
+                         (and (not (send mf ok?))
+                              'mf-not-okay-after-read-from-file)
                          (and (not (read-editor-global-footer mf))
                               'read-editor-gobal-footer-failed)
+                         (and (not (send mf ok?))
+                              'mf-not-okay-after-footer)
                          (begin
                            ;; if STD-STYLE wasn't loaded, re-create it:
                            (send s-style-list new-named-style "Standard" (send s-style-list basic-style))
                            (and (not (send mf ok?))
-                                'mf-not-okay-after-adding-standard-style)))))]
+                                'mf-not-okay-at-the-end)))))]
               [(or (eq? fmt 'text) (eq? fmt 'text-force-cr))
                (let ([s (make-string 1024)])
                  (let loop ([saved-cr? #f])
@@ -2776,9 +2857,10 @@
                               [s2 (if (equal? #\return (string-ref s1 (sub1 len)))
                                       (substring s1 0 (sub1 len))
                                       s1)])
-                         (insert (regexp-replace* #rx"\r\n" 
-                                                  (if saved-cr? (string-append "\r" s2) s2)
-                                                  "\n"))
+                         (let ([str (regexp-replace* #rx"\r\n" 
+                                                     (if saved-cr? (string-append "\r" s2) s2)
+                                                     "\n")])
+                           (insert (string-length str) str #t))
                          (loop (not (eq? s1 s2))))))))
                #f])])
         
@@ -2847,11 +2929,11 @@
   (define/override (do-read-insert snip)
     (if (list? snip)
         (let ([oldlen len])
-          (do-insert #f #f snip startpos startpos #t)
+          (do-insert #f #f snip startpos startpos #t #f)
           (set! read-insert (+ read-insert (- len oldlen)))
           #t)
         (let ([addpos (snip->count snip)])
-          (do-insert snip #f #f startpos startpos #t)
+          (do-insert snip #f #f startpos startpos #t #f)
           (set! read-insert (+ addpos read-insert))
           #t)))
 
@@ -3004,7 +3086,7 @@
                     (when (and ateol?-box 
                                atsnipend?
                                snip 
-                               (eq? snip (mline-last-snip line)))
+                               (object-or-false=? snip (mline-last-snip line)))
                       (set-box! ateol?-box #t))
                     p))))))]))
 
@@ -3018,7 +3100,7 @@
           (let loop ([snip snip]
                      [p p])
             (cond
-             [(eq? snip next-snip)
+             [(object-or-false=? snip next-snip)
               ;; if everything is invisible, then presumably the CR is forced,
               ;; so go to the beginning of the line anyway
               startp]
@@ -3038,7 +3120,7 @@
           (let ([p (if (has-flag? (snip->flags snip) INVISIBLE)
                        (- p (snip->count snip))
                        p)])
-            (if (eq? snip (mline-snip line))
+            (if (object-or-false=? snip (mline-snip line))
                 (begin
                   (set-box! p-box p)
                   (when snip-box
@@ -3083,26 +3165,27 @@
                              (- x))))
              0]
             [else
-              ;; binary search for position within snip:
-              (let loop ([range c]
-                         [i (quotient c 2)]
-                         [offset 0])
-                (let ([dl (send snip partial-offset dc X Y (+ offset i))])
-                  (if (dl . > . x)
-                      (loop i (quotient i 2) offset)
-                      (let ([dr (send snip partial-offset dc X Y (+ offset i 1))])
-                        (if (dr . <= . x)
-                            (let ([range (- range i)])
-                              (loop range (quotient range 2) (+ offset i)))
-                            (begin
-                              (when how-close
-                                (set-box! how-close
-                                          (if ((- dr x) . < . (- x dl))
-                                              (- dr x)
-                                              (- dl x))))
-                              (set! write-locked? wl?)
-                              (set! flow-locked? fl?)
-                              (+ i offset)))))))])))]))
+             ;; binary search for grapheme position within snip, returning character position:
+             (let ([c (snip->grapheme-count snip)])
+               (let loop ([range c]
+                          [i (quotient c 2)]
+                          [offset 0])
+                 (let ([dl (send snip partial-offset dc X Y (send snip grapheme-position (+ offset i)))])
+                   (if (dl . > . x)
+                       (loop i (quotient i 2) offset)
+                       (let ([dr (send snip partial-offset dc X Y (send snip grapheme-position (+ offset i 1)))])
+                         (if (dr . <= . x)
+                             (let ([range (- range i)])
+                               (loop range (quotient range 2) (+ offset i)))
+                             (begin
+                               (when how-close
+                                 (set-box! how-close
+                                           (if ((- dr x) . < . (- x dl))
+                                               (- dr x)
+                                               (- dl x))))
+                               (set! write-locked? wl?)
+                               (set! flow-locked? fl?)
+                               (send snip grapheme-position (+ i offset)))))))))])))]))
 
   (def/public (find-line [real? y] [maybe-box? [onit? #f]])
     (when onit?
@@ -3161,6 +3244,30 @@
                        line)])
         (mline-get-line line))]))
 
+  (def/public (position-grapheme [exact-nonnegative-integer? start]
+                                 [any? [eog? #f]])
+    (cond
+     [(not (check-recalc (max-width . > . 0) #f #t)) 0]
+     [(start . <= . 0) 0]
+     [(start . >= . len)
+      (+ (mline-get-grapheme-position last-line)
+         (mline-grapheme-len last-line))]
+     [else
+      (let* ([line (mline-find-position (unbox line-root-box) start)])
+        (let loop ([pos (mline-get-position line)]
+                   [grapheme-pos (mline-get-grapheme-position line)]
+                   [snip (mline-snip line)])
+          (cond
+            [(= pos start) grapheme-pos]
+            [(not snip) grapheme-pos]
+            [else
+             (define c (snip->count snip))
+             (cond
+               [(>= start (+ pos c))
+                (loop (+ pos c) (+ grapheme-pos (snip->grapheme-count snip)) (snip->next snip))]
+               [else
+                (+ grapheme-pos (send snip position-grapheme (- start pos)))])])))]))
+
   
   (def/public-final (get-snip-position-and-location [snip% thesnip] [maybe-box? pos] 
                                                     [maybe-box? [x #f]] [maybe-box? [y #f]])
@@ -3175,7 +3282,7 @@
              [p (mline-get-position line)])
         (let loop ([snip (mline-snip line)]
                    [p p])
-          (if (object=? snip thesnip)
+          (if (object-or-false=? snip thesnip)
               (begin
                 (when pos
                   (set-box! pos p))
@@ -3407,6 +3514,29 @@
                                  [any? [visible-only? #t]])
     (do-line-position #f i visible-only?))
 
+  (def/public (grapheme-position [exact-nonnegative-integer? start]
+                                 [any? [eog? #f]])
+    (cond
+     [(not (check-recalc (max-width . > . 0) #f #t)) 0]
+     [(start . <= . 0) 0]
+     [(start . >= . (+ (mline-get-grapheme-position last-line)
+                       (mline-grapheme-len last-line)))
+      len]
+     [else
+      (let* ([line (mline-find-grapheme-position (unbox line-root-box) start)])
+        (let loop ([pos (mline-get-position line)]
+                   [grapheme-pos (mline-get-grapheme-position line)]
+                   [snip (mline-snip line)])
+          (cond
+            [(= grapheme-pos start) pos]
+            [(not snip) pos]
+            [else
+             (define c (snip->grapheme-count snip))
+             (cond
+               [(>= start (+ grapheme-pos c))
+                (loop (+ pos (snip->count snip)) (+ grapheme-pos c) (snip->next snip))]
+               [else
+                (+ pos (send snip grapheme-position (- start grapheme-pos)))])])))]))
 
   (def/public (line-length [exact-nonnegative-integer? i])
     (cond
@@ -3596,7 +3726,7 @@
                            [any? [bos? #t]]
                            [any? [case-sens? #t]])
     (if (check-recalc #f #f)
-        (do-find-string-all str direction start end #t bos? case-sens? #f)
+        (do-find-string-all str direction start end #t bos? case-sens? (λ (x) #f))
         #f))
 
   (def/public (find-string-all [string? str]
@@ -3606,7 +3736,7 @@
                                [any? [bos? #t]]
                                [any? [case-sens? #t]])
     (if (check-recalc #f #f)
-        (do-find-string-all str direction start end #f bos? case-sens? #f)
+        (do-find-string-all str direction start end #f bos? case-sens? (λ (x) #f))
         null))
   
   (def/public (find-string-embedded [string? str]
@@ -3614,9 +3744,10 @@
                                     [(make-alts exact-nonnegative-integer? (symbol-in start)) [start 'start]]
                                     [(make-alts exact-nonnegative-integer? (symbol-in eof)) [end 'eof]]
                                     [any? [bos? #t]]
-                                    [any? [case-sens? #t]])
+                                    [any? [case-sens? #t]]
+                                    #:recur-inside? [(make-procedure 1) [recur-inside? (λ (x) #t)]])
     (if (check-recalc #f #f)
-        (do-find-string-all str direction start end #t bos? case-sens? #t)
+        (do-find-string-all str direction start end #t bos? case-sens? recur-inside?)
         #f))
 
   (def/public (find-string-embedded-all [string? str]
@@ -3624,9 +3755,10 @@
                                         [(make-alts exact-nonnegative-integer? (symbol-in start)) [start 'start]]
                                         [(make-alts exact-nonnegative-integer? (symbol-in eof)) [end 'eof]]
                                         [any? [bos? #t]]
-                                        [any? [case-sens? #t]])
+                                        [any? [case-sens? #t]]
+                                        #:recur-inside? [(make-procedure 1) [recur-inside? (λ (x) #t)]])
     (if (check-recalc #f #f)
-        (do-find-string-all str direction start end #f bos? case-sens? #t)
+        (do-find-string-all str direction start end #f bos? case-sens? recur-inside?)
         null))
 
   (def/public (find-newline [(symbol-in forward backward) [direction 'forward]]
@@ -3720,15 +3852,15 @@
            (cond
              [(not latest-snip)
               (define fst (find-first-snip))
-              (values fst (and fst 0) (and fst (send fst get-count)))]
+              (values fst (and fst 0) (and fst (snip->count fst)))]
              [forward?
-              (define next (send latest-snip next))
+              (define next (snip->next latest-snip))
               (values next
                       (and next (+ latest-snip-position latest-snip-len))
-                      (and next (send next get-count)))]
+                      (and next (snip->count next)))]
              [else
-              (define prev (send latest-snip previous))
-              (define pc (and prev (send prev get-count)))
+              (define prev (snip->prev latest-snip))
+              (define pc (and prev (snip->count prev)))
               (values prev
                       (and prev (- latest-snip-position pc))
                       pc)]))
@@ -3744,7 +3876,7 @@
             (set! latest-snip (find-snip i 'after-or-none b))
             (when latest-snip
               (set! latest-snip-position (unbox b))
-              (set! latest-snip-len (send latest-snip get-count)))])
+              (set! latest-snip-len (snip->count latest-snip)))])
          
          (when (or (not latest-snip-str)
                    (< (string-length latest-snip-str)
@@ -3755,8 +3887,8 @@
            (for ([c (in-range latest-snip-len)])
              (string-set! latest-snip-str c (char-downcase (string-ref latest-snip-str c)))))
          (cond
-           [(and recur-inside?
-                 (is-a? latest-snip editor-snip%))
+           [(and (is-a? latest-snip editor-snip%)
+                 (recur-inside? latest-snip))
             (let loop ([snip latest-snip])
               (define ed (send snip get-editor))
               (cond
@@ -3772,17 +3904,18 @@
                  (define inner-result
                    (let inner-loop ([inner-snip (send ed find-first-snip)])
                          (cond
-                           [(is-a? inner-snip editor-snip%)
+                           [(and (is-a? inner-snip editor-snip%)
+                                 (recur-inside? inner-snip))
                             (define this-one (loop inner-snip))
                             (if just-one?
                                 (or this-one
-                                    (inner-loop (send inner-snip next)))
+                                    (inner-loop (snip->next inner-snip)))
                                 (if this-one
                                     (cons this-one
-                                          (inner-loop (send inner-snip next)))
-                                    (inner-loop (send inner-snip next))))]
+                                          (inner-loop (snip->next inner-snip)))
+                                    (inner-loop (snip->next inner-snip))))]
                            [(not inner-snip) (if just-one? #f '())]
-                           [else (inner-loop (send inner-snip next))])))
+                           [else (inner-loop (snip->next inner-snip))])))
                  (and inner-result 
                       (pair? inner-result) 
                       (cons ed inner-result))]))]
@@ -3908,16 +4041,16 @@
                                  [prev-style-pos start]
                                  [p start]
                                  [gsnip start-snip])
-                        (if (not (eq? gsnip end-snip))
+                        (if (not (object-or-false=? gsnip end-snip))
                             ;; Change a snip style:
                             (let* ([style (snip->style gsnip)]
                                    [style2 (or new-style
                                                (send s-style-list find-or-create-style style delta))])
-                              (if (not (eq? style style2))
+                              (if (not (object-or-false=? style style2))
                                   (begin
                                     (set-snip-style! gsnip style2)
                                     (let-values ([(prev-style prev-style-pos)
-                                                  (if (and rec (not (eq? prev-style style)))
+                                                  (if (and rec (not (object-or-false=? prev-style style)))
                                                       (begin
                                                         (when prev-style
                                                           (send rec add-style-change prev-style-pos p prev-style))
@@ -4063,7 +4196,7 @@
 
             (let loop ([snip snips])
               (when snip
-                (when (eq? style (snip->style snip))
+                (when (object=? style (snip->style snip))
                   (send snip size-cache-invalid)
                   (let ([line (snip->line snip)])
                     (mline-mark-recalculate line)
@@ -4272,14 +4405,14 @@
         (set! last-snip snip)))
 
   (define/private (insert-snip before snip)
-    (if (and (eq? snips last-snip) (zero? (snip->count snips)))
+    (if (and (object-or-false=? snips last-snip) (zero? (snip->count snips)))
         (append-snip snip)
         (begin
           (splice-snip snip (snip->prev before) before)
           (set! snip-count (add1 snip-count)))))
   
   (define/private (append-snip snip)
-    (if (and (eq? snips last-snip) (zero? (snip->count snips))) 
+    (if (and (object-or-false=? snips last-snip) (zero? (snip->count snips)))
         ;; get rid of empty snip
         (begin
           (set! snips snip)
@@ -4289,7 +4422,7 @@
           (set! snip-count (add1 snip-count)))))
   
   (define/private (delete-snip snip)
-    (when (eq? snip prev-mouse-snip)
+    (when (object-or-false=? snip prev-mouse-snip)
       (set! prev-mouse-snip #f))
     (cond
      [(snip->next snip)
@@ -4340,9 +4473,9 @@
                      (set-snip-line! naya line)
                      
                      (when line
-                       (when (eq? (mline-snip line) snip)
+                       (when (object=? (mline-snip line) snip)
                          (set-mline-snip! line naya))
-                       (when (eq? (mline-last-snip line) snip)
+                       (when (object=? (mline-last-snip line) snip)
                          (set-mline-last-snip! line naya)))
                      
                      (send snip set-s-admin #f)
@@ -4427,8 +4560,8 @@
             [prev (snip->prev snip)]
             [next (snip->next snip)]
             [style (snip->style snip)])
-        (let ([at-start? (eq? (mline-snip line) snip)]
-              [at-end? (eq? (mline-last-snip line) snip)]
+        (let ([at-start? (object=? (mline-snip line) snip)]
+              [at-end? (object=? (mline-last-snip line) snip)]
               [orig snip])
           (let-boxes ([ins-snip #f]
                       [snip #f])
@@ -4482,7 +4615,7 @@
                       (send s-style-list basic-style))])
       (set-snip-style! snip style)
       (let ([snip (let ([rsnip (snip-set-admin snip snip-admin)])
-                    (if (not (eq? snip rsnip))
+                    (if (not (object-or-false=? snip rsnip))
                         ;; uh-oh; resort to string-snip%:
                         (let ([snip (new string-snip%)])
                           (set-snip-style! snip style)
@@ -4510,14 +4643,14 @@
                  [(not gsnip)
                   (append-snip snip)
                   (set-snip-line! snip last-line)
-                  (when (eq? (mline-last-snip last-line) last-snip)
+                  (when (object-or-false=? (mline-last-snip last-line) last-snip)
                     (set! last-snip snip))
                   (set-mline-last-snip! last-line snip)
                   snip]
                  [(= s-pos start)
                   (insert-snip gsnip snip)
                   (set-snip-line! snip (snip->line gsnip))
-                  (when (eq? (mline-snip (snip->line snip)) gsnip)
+                  (when (object-or-false=? (mline-snip (snip->line snip)) gsnip)
                     (set-mline-snip! (snip->line snip) snip))
                   snip]
                  [else
@@ -4531,11 +4664,11 @@
     (when (let loop ([did-something? #f])
             (let-values ([(snip1 s-pos1) (find-snip/pos start 'before)]
                          [(snip2 s-pos2) (find-snip/pos start 'after)])
-              (if (eq? snip1 snip2)
+              (if (object-or-false=? snip1 snip2)
                   did-something?
                   (if (not (and (snip->snipclass snip1)
-                                (eq? (snip->snipclass snip1) (snip->snipclass snip2))
-                                (eq? (snip->style snip1) (snip->style snip2))))
+                                (object-or-false=? (snip->snipclass snip1) (snip->snipclass snip2))
+                                (object-or-false=? (snip->style snip1) (snip->style snip2))))
                       did-something?
                       (if (not (and
                                 (not (has-flag? (snip->flags snip1) NEWLINE))
@@ -4546,13 +4679,13 @@
                           did-something?
                           (cond
                            [(zero? (snip->count snip1))
-                            (when (eq? (mline-snip (snip->line snip1)) snip1)
+                            (when (object=? (mline-snip (snip->line snip1)) snip1)
                               (set-mline-snip! (snip->line snip1) snip2))
                             (delete-snip snip1)
                             (set-snip-flags! snip1 (remove-flag (snip->flags snip1) OWNED))
                             (loop #t)]
                            [(zero? (snip->count snip2))
-                            (when (eq? (mline-last-snip (snip->line snip2)) snip2)
+                            (when (object=? (mline-last-snip (snip->line snip2)) snip2)
                               (set-mline-last-snip! (snip->line snip2) snip1)
                               (mline-mark-recalculate (snip->line snip1)) ; need last-w updated
                               (set! graphic-maybe-invalid? #t))
@@ -4564,8 +4697,8 @@
                                   [prev (snip->prev snip1)]
                                   [next (snip->next snip2)]
                                   [line (snip->line snip1)])
-                              (let ([at-start? (eq? (mline-snip line) snip1)]
-                                    [at-end? (eq? (mline-last-snip line) snip2)]
+                              (let ([at-start? (object=? (mline-snip line) snip1)]
+                                    [at-end? (object=? (mline-last-snip line) snip2)]
                                     [wl? write-locked?]
                                     [fl? flow-locked?])
                                 (set! read-locked? #t)
@@ -4701,7 +4834,7 @@
 
   (def/public (find-next-non-string-snip [(make-or-false snip%) snip])
     (if (or (and snip
-                 (not (eq? (snip->admin snip) snip-admin)))
+                 (not (object=? (snip->admin snip) snip-admin)))
             (zero? len))
         #f
         (let loop ([snip (if snip
@@ -5484,7 +5617,7 @@
                                     [hsys 0.0]
                                     [hsye 0.0]
                                     [old-style old-style])
-                          (if (eq? snip last)
+                          (if (object-or-false=? snip last)
                               (values hilite-some? hsxs hsxe hsys hsye old-style)
                               (begin
                                 (send (snip->style snip) switch-to dc old-style)
@@ -5511,7 +5644,7 @@
                                                 dx dy
                                                 (if (pair? show-caret)
                                                     (cons p (+ p (snip->count snip)))
-                                                    (if (eq? snip s-caret-snip)
+                                                    (if (object-or-false=? snip s-caret-snip)
                                                         show-caret
                                                         (if (and maybe-hilite?
                                                                  (-endpos . > . p)
@@ -5542,7 +5675,7 @@
                                                       (and (= -endpos -startpos) pos-at-eol?)
                                                       (and (not (= -endpos -startpos)) 
                                                            (-startpos . < . (+ p (snip->count snip))))))
-                                              (or (not (eq? snip first))
+                                              (or (not (object-or-false=? snip first))
                                                   ;; beginning of line:
                                                   (or (not (= p -endpos))
                                                       (and (= -endpos -startpos) (not pos-at-eol?))
@@ -5605,7 +5738,7 @@
                                                   (if show-outline-for-inactive?
                                                       (let ([first-hilite? (-startpos . >= . pcounter)]
                                                             [last-hilite? (-endpos . <= . (+ pcounter (mline-len line)))])
-                                                        (send dc set-pen outline-inactive-pen)
+                                                        (send dc set-pen (outline-inactive-pen))
                                                         (let ([prevwasfirst
                                                                (cond
                                                                 [first-hilite?
@@ -5626,13 +5759,13 @@
                                                       prevwasfirst)
                                                   (let ([save-brush (send dc get-brush)])
                                                     (send dc set-pen outline-pen)
-                                                    (send dc set-brush outline-brush)
+                                                    (send dc set-brush (outline-brush))
                                                     
                                                     (send dc draw-rectangle (+ hsxs dx) (+ hsys dy) 
                                                           (max 0.0 (- hsxe hsxs)) (max 0.0 (- hsye hsys)))
                                                     (when ALLOW-X-STYLE-SELECTION?
                                                       (when show-xsel?
-                                                        (send dc set-brush outline-nonowner-brush)
+                                                        (send dc set-brush (outline-brush))
                                                         (send dc draw-rectangle (+ hsxs dx) (+ hsys dy) 
                                                               (max 0.0 (- hsxe hsxs)) (max 0.0 (- hsye hsys)))))
                                                     (send dc set-brush save-brush)

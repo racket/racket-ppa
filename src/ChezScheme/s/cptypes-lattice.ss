@@ -48,10 +48,10 @@
               * TODO?: add something to indicate that x is a procedure that is the
                        constructor/setter/getter/predicate of a record of that type
               * a record #[pred-or <sin> <mul> <nor> <exi> <rec>] where:
-                  <sim> is a predicate for singletons
+                  <sim> is a predicate for singletons, includes 0, 0.0 and -0.0
                   <mul> is a predicate for multiplets
                   <nor> is a predicate for things not in the other fields
-                  <exi> is a predicate for exact integers
+                  <exi> is a predicate for exact integers exept 0
                   <rec> is a predicate for records
 |#
 
@@ -62,12 +62,36 @@
    maybe-char-pred
    symbol-pred
    maybe-symbol-pred
+   fixnum-pred
+   bignum-pred
+   exact-integer-pred
    flonum-pred
    real-pred
    number-pred
+   zero-pred
    flzero-pred
+   flinteger-pred
+   exact-real-pred
+   exact-pred
+   inexact-pred
+   integer-pred
+   subset-of-rational-pred
+   subset-of-complex-rational-pred
    $fixmediate-pred
    $list-pred ; immutable lists
+   list-pair-pred
+   pair-pred
+   box-pred
+   vector*-pred
+   vector-pred
+   string*-pred
+   string-pred
+   bytevector*-pred
+   bytevector-pred
+   fxvector*-pred
+   fxvector-pred
+   flvector*-pred
+   flvector-pred
    boolean-pred
    true-pred ; anything that is not #f
    true-rec  ; only the #t object
@@ -120,7 +144,21 @@
     (define eof-rec `(quote #!eof))
     (define bwp-rec `(quote #!bwp))
     (define black-hole-rec `(quote ,($black-hole)))
-    (define unbound-rec `(quote ,($unbound-object))))
+    (define unbound-rec `(quote ,($unbound-object)))
+    (define null-mutable-vector-rec `(quote ,'#()))
+    (define null-immutable-vector-rec `(quote ,(vector->immutable-vector '#())))
+    (define null-mutable-string-rec `(quote ""))
+    (define null-immutable-string-rec `(quote ,(string->immutable-string "")))
+    (define null-mutable-bytevector-rec `(quote #vu8()))
+    (define null-immutable-bytevector-rec `(quote ,(bytevector->immutable-bytevector #vu8())))
+    (define null-mutable-fxvector-rec `(quote #vfx()))
+    ; no null-immutable-fxvector
+    (define null-mutable-flvector-rec `(quote #vfl()))
+    ; no null-immutable-flvector
+    (define fxzero-rec `(quote 0))
+    (define positive-flzero-rec `(quote 0.0))
+    (define negative-flzero-rec `(quote -0.0))
+  )
 
   (module (singleton-rec->mask
            build-pred-singleton
@@ -128,22 +166,46 @@
            singleton-pred
            true-singleton-pred
            immediate*-pred
-           boolean-pred)
+           boolean-pred
+           null-vector-pred
+           null-string-pred
+           null-bytevector-pred
+           null-mutable-fxvector-pred
+           null-mutable-flvector-pred
+           flzero-pred)
 
-    (define false-object-mask               #b0000000001)
-    (define true-object-mask                #b0000000010)
-    (define null-object-mask                #b0000000100)
-    (define void-object-mask                #b0000001000)
-    (define eof-object-mask                 #b0000010000)
-    (define bwp-object-mask                 #b0000100000)
-    (define black-hole-object-mask          #b0001000000)
-    (define unbound-object-mask             #b0010000000)
+    (define false-object-mask               #b0000000000000001)
+    (define true-object-mask                #b0000000000000010)
+    (define null-object-mask                #b0000000000000100)
+    (define void-object-mask                #b0000000000001000)
+    (define eof-object-mask                 #b0000000000010000)
+    (define bwp-object-mask                 #b0000000000100000)
+    (define black-hole-object-mask          #b0000000001000000)
+    (define unbound-object-mask             #b0000000010000000)
 
-    (define immediate*-pred-mask            #b0011111111)
-    (define singleton-pred-mask             #b0011111111) ; for the check in is-ptr?
+    (define null-mutable-vector-mask        #b0000000100000000)
+    (define null-immutable-vector-mask      #b0000001000000000)
+    (define null-mutable-string-mask        #b0000010000000000)
+    (define null-immutable-string-mask      #b0000100000000000)
+    (define null-mutable-bytevector-mask    #b0001000000000000)
+    (define null-immutable-bytevector-mask  #b0010000000000000)
+    (define null-mutable-fxvector-mask      #b0100000000000000)
+    (define null-mutable-flvector-mask      #b1000000000000000)
+
+    (define fxzero-mask                    #b10000000000000000)
+    (define positive-flzero-mask          #b100000000000000000) ; modulo eqv?
+    (define negative-flzero-mask         #b1000000000000000000) ; modulo eqv?
+
+    (define immediate*-pred-mask         #b0000000000011111111)
+    (define singleton-pred-mask          #b1111111111111111111) ; for the check in is-ptr?
 
     (define boolean-pred-mask (fxior true-object-mask false-object-mask))
     (define true-singleton-pred-mask (fxand singleton-pred-mask (fxnot false-object-mask)))
+    (define null-vector-pred-mask (fxior null-mutable-vector-mask null-immutable-vector-mask))
+    (define null-string-pred-mask (fxior null-mutable-string-mask null-immutable-string-mask))
+    (define null-bytevector-pred-mask (fxior null-mutable-bytevector-mask null-immutable-bytevector-mask))
+    (define null-string/bytevector-pred-mask (fxior null-string-pred-mask null-bytevector-pred-mask))
+    (define flzero-pred-mask (fxior positive-flzero-mask negative-flzero-mask))
 
     (define (singleton-rec->mask x)
       (cond
@@ -159,6 +221,17 @@
               [(bwp-object? d) bwp-object-mask]
               [(eq? d ($black-hole)) black-hole-object-mask]
               [($unbound-object? d) unbound-object-mask]
+              [(eq? d '#()) null-mutable-vector-mask]
+              [(eq? d (vector->immutable-vector '#())) null-immutable-vector-mask]
+              [(eq? d "") null-mutable-string-mask]
+              [(eq? d (string->immutable-string "")) null-immutable-string-mask]
+              [(eq? d #vu8()) null-mutable-bytevector-mask]
+              [(eq? d (bytevector->immutable-bytevector #vu8())) null-immutable-bytevector-mask]
+              [(eq? d #vfx()) null-mutable-fxvector-mask]
+              [(eq? d #vfl()) null-mutable-flvector-mask]
+              [(eq? d 0) fxzero-mask]
+              [(eqv? d 0.0) positive-flzero-mask]
+              [(eqv? d -0.0) negative-flzero-mask]
               [else ($oops 'singleton-rec->mask "invalid value ~s" d)])]
            [else ($oops 'singleton-rec->mask "invalid expression ~s" x)])]
         [else ($oops 'singleton-rec->mask "invalid expression ~s" x)]))
@@ -173,6 +246,17 @@
         [(fx= y bwp-object-mask) bwp-rec]
         [(fx= y black-hole-object-mask) black-hole-rec]
         [(fx= y unbound-object-mask) unbound-rec]
+        [(fx= y null-mutable-vector-mask) null-mutable-vector-rec]
+        [(fx= y null-immutable-vector-mask) null-immutable-vector-rec]
+        [(fx= y null-mutable-string-mask) null-mutable-string-rec]
+        [(fx= y null-immutable-string-mask) null-immutable-string-rec]
+        [(fx= y null-mutable-bytevector-mask) null-mutable-bytevector-rec]
+        [(fx= y null-immutable-bytevector-mask) null-immutable-bytevector-rec]
+        [(fx= y null-mutable-fxvector-mask) null-mutable-fxvector-rec]
+        [(fx= y null-mutable-flvector-mask) null-mutable-flvector-rec]
+        [(fx= y fxzero-mask) fxzero-rec]
+        [(fx= y positive-flzero-mask) positive-flzero-rec]
+        [(fx= y negative-flzero-mask) negative-flzero-rec]
         [else ($oops 'mask->singleton-rec "invalid mask number ~s" y)]))
 
     (define (build-pred-singleton mask x y)
@@ -187,42 +271,64 @@
 
     (define boolean-pred (make-pred-singleton boolean-pred-mask))
     (define immediate*-pred (make-pred-singleton immediate*-pred-mask))
+    (define null-vector-pred (make-pred-singleton null-vector-pred-mask))
+    (define null-string-pred (make-pred-singleton null-string-pred-mask))
+    (define null-bytevector-pred (make-pred-singleton null-bytevector-pred-mask))
+    (define null-string/bytevector-pred (make-pred-singleton null-string/bytevector-pred-mask))
+    (define null-mutable-fxvector-pred (make-pred-singleton null-mutable-fxvector-mask))
+    (define null-mutable-flvector-pred (make-pred-singleton null-mutable-flvector-mask))
     (define singleton-pred (make-pred-singleton singleton-pred-mask))
     (define true-singleton-pred (make-pred-singleton true-singleton-pred-mask))
+    (define flzero-pred (make-pred-singleton flzero-pred-mask))
   )
 
   (module (multiplet-rec->mask
            build-pred-multiplet
            multiplet-pred-mask multiplet-pred
            number*-pred real*-pred ratnum-pred
-           flonum-pred flinteger-pred flzero-pred
-           exact*-pred inexact-pred
-           exact-complex-pred inexact-complex-pred
+           flonum*-pred flonum**-pred flinteger*-pred
+           exact*-pred inexact*-pred
+           exact-complex-pred inexact-complex-pred inexact-complex-zero-pred
            char-pred
-           symbol-pred interned-symbol-pred uninterned-symbol-pred gensym-pred)
+           symbol-pred interned-symbol-pred uninterned-symbol-pred gensym-pred
+           box-pred
+           fxvector*-pred flvector*-pred bytevector*-pred string*-pred vector*-pred
+           list-pair-pred nonlist-pair-pred)
 
-    (define exact-complex-mask               #b0000000001)
-    (define ratnum-mask                      #b0000000010)
-    (define inexact-complex-mask             #b0000000100)
-    (define flonum*-mask                     #b0000001000)
-    (define flinteger*-mask                  #b0000010000)
-    (define flzero-mask                      #b0000100000)
+    (define exact-complex-mask         #b0000000000000001)
+    (define ratnum-mask                #b0000000000000010)
+    (define inexact-complex*-mask      #b0000000000000100)
+    (define inexact-complex-zero-mask  #b0000000000001000)
+    (define flonum**-mask              #b0000000000010000)
+    (define flinteger*-mask            #b0000000000100000)
     ; fixnum and bignum are in other field
 
-    (define char-mask                        #b0001000000)
-    (define interned-symbol-mask             #b0010000000)
-    (define uninterned-symbol-mask           #b0100000000)
-    (define gensym-mask                      #b1000000000)
+    (define char-mask                  #b0000000001000000)
 
-    (define number*-pred-mask                #b0000111111)
-    (define symbol-pred-mask                 #b1110000000)
-    (define multiplet-pred-mask                  #b1111111111) ; for the check in is-ptr?
+    (define interned-symbol-mask       #b0000000010000000)
+    (define uninterned-symbol-mask     #b0000000100000000)
+    (define gensym-mask                #b0000001000000000)
 
-    (define flonum-pred-mask (fxior flonum*-mask flinteger*-mask flzero-mask))
-    (define flinteger-pred-mask (fxior flinteger*-mask flzero-mask))
-    (define real*-pred-mask (fxior ratnum-mask flonum-pred-mask))
+    (define vector*-mask               #b0000010000000000)
+    (define string*-mask               #b0000100000000000)
+    (define bytevector*-mask           #b0001000000000000)
+    (define fxvector*-mask             #b0010000000000000)
+    (define flvector*-mask             #b0100000000000000)
+    (define box-mask                   #b1000000000000000)
+
+    ; These two are trickier, because they are not constant properties.
+    (define list-pair-mask           #b010000000000000000)
+    (define nonlist-pair-mask        #b100000000000000000)
+
+    (define number*-pred-mask        #b000000000000111111)
+    (define symbol-pred-mask         #b000000001110000000)
+    (define multiplet-pred-mask      #b111111111111111111) ; for the check in is-ptr?
+
+    (define flonum*-pred-mask (fxior flonum**-mask flinteger*-mask))
+    (define real*-pred-mask (fxior ratnum-mask flonum*-pred-mask))
     (define exact*-pred-mask (fxior ratnum-mask exact-complex-mask))
-    (define inexact-pred-mask (fxior flonum-pred-mask inexact-complex-mask))
+    (define inexact-complex-pred-mask (fxior inexact-complex*-mask inexact-complex-zero-mask))
+    (define inexact*-pred-mask (fxior flonum*-pred-mask inexact-complex-pred-mask))
 
     (define (multiplet-rec->mask x)
       (cond
@@ -233,13 +339,13 @@
               [(char? d) char-mask]
               [($exactnum? d) exact-complex-mask]
               [(ratnum? d) ratnum-mask]
-              [($inexactnum? d) inexact-complex-mask]
+              [(and ($inexactnum? d) (zero? d)) inexact-complex-zero-mask]
+              [($inexactnum? d) inexact-complex*-mask]
               [(gensym? d) gensym-mask]
               [(uninterned-symbol? d) uninterned-symbol-mask]
               [(interned-symbol? d) interned-symbol-mask]
-              [(flzero? d) flzero-mask]
               [(flinteger? d) flinteger*-mask]
-              [(flonum? d) flonum*-mask]
+              [(flonum? d) flonum**-mask]
               [else ($oops 'multiplet-rec->mask "invalid value ~s" d)])]
            [else ($oops 'multiplet-rec->mask "invalid expression ~s" x)])]
         [else ($oops 'multiplet-rec->mask "invalid expression ~s" x)]))
@@ -254,48 +360,29 @@
     (define number*-pred (make-pred-multiplet number*-pred-mask))
     (define real*-pred (make-pred-multiplet real*-pred-mask))
     (define ratnum-pred (make-pred-multiplet ratnum-mask))
-    (define flonum-pred (make-pred-multiplet flonum-pred-mask))
-    (define flinteger-pred (make-pred-multiplet flinteger-pred-mask))
-    (define flzero-pred (make-pred-multiplet flzero-mask))
+    (define flonum**-pred (make-pred-multiplet flonum**-mask))
+    (define flonum*-pred (make-pred-multiplet flonum*-pred-mask))
+    (define flinteger*-pred (make-pred-multiplet flinteger*-mask))
     (define exact*-pred (make-pred-multiplet exact*-pred-mask))
-    (define inexact-pred (make-pred-multiplet inexact-pred-mask))
+    (define inexact*-pred (make-pred-multiplet inexact*-pred-mask))
     (define exact-complex-pred (make-pred-multiplet exact-complex-mask))
-    (define inexact-complex-pred (make-pred-multiplet inexact-complex-mask))
+    (define inexact-complex-pred (make-pred-multiplet inexact-complex-pred-mask))
+    (define inexact-complex-zero-pred (make-pred-multiplet inexact-complex-zero-mask))
     (define char-pred (make-pred-multiplet char-mask))
     (define symbol-pred (make-pred-multiplet symbol-pred-mask))
     (define interned-symbol-pred (make-pred-multiplet interned-symbol-mask))
     (define uninterned-symbol-pred (make-pred-multiplet uninterned-symbol-mask))
     (define gensym-pred (make-pred-multiplet gensym-mask))
+    (define vector*-pred (make-pred-multiplet vector*-mask))
+    (define string*-pred (make-pred-multiplet string*-mask))
+    (define bytevector*-pred (make-pred-multiplet bytevector*-mask))
+    (define fxvector*-pred (make-pred-multiplet fxvector*-mask))
+    (define flvector*-pred (make-pred-multiplet flvector*-mask))
+    (define box-pred (make-pred-multiplet box-mask))
+    (define list-pair-pred (make-pred-multiplet list-pair-mask))
+    (define nonlist-pair-pred (make-pred-multiplet nonlist-pair-mask))
     (define multiplet-pred (make-pred-multiplet multiplet-pred-mask))
   )
-
-  (define immediate-pred (make-pred-or immediate*-pred char-pred 'bottom 'bottom 'bottom))
-  (define true-pred (make-pred-or true-singleton-pred multiplet-pred 'normalptr 'exact-integer '$record))
-  (define ptr-pred (make-pred-or singleton-pred multiplet-pred 'normalptr 'exact-integer '$record))
-  (define null-or-pair-pred (make-pred-or null-rec 'bottom 'pair 'bottom 'bottom))
-  (define $list-pred (make-pred-or null-rec 'bottom '$list-pair 'bottom 'bottom))
-  (define $fixmediate-pred (make-pred-or immediate*-pred char-pred 'bottom 'fixnum 'bottom))
-  (define maybe-fixnum-pred (make-pred-or false-rec 'bottom 'bottom 'fixnum 'bottom))
-  (define eof/fixnum-pred (make-pred-or eof-rec 'bottom 'bottom 'fixnum 'bottom))
-  (define maybe-exact-integer-pred (make-pred-or false-rec 'bottom 'bottom 'exact-integer 'bottom))
-  (define maybe-flonum-pred (make-pred-or false-rec flonum-pred 'bottom 'bottom 'bottom))
-  (define integer-pred (make-pred-or 'bottom flinteger-pred 'bottom 'exact-integer 'bottom))
-  (define exact-pred (make-pred-or 'bottom exact*-pred 'bottom 'exact-integer 'bottom))
-  (define real-pred (make-pred-or 'bottom real*-pred 'bottom 'exact-integer 'bottom))
-  (define number-pred (make-pred-or 'bottom number*-pred 'bottom 'exact-integer 'bottom))
-  (define maybe-number-pred (make-pred-or false-rec number*-pred 'bottom 'exact-integer 'bottom))
-  (define maybe-symbol-pred (make-pred-or false-rec symbol-pred 'bottom 'bottom 'bottom))
-  (define maybe-procedure-pred (make-pred-or false-rec 'bottom 'procedure 'bottom 'bottom))
-  (define maybe-string-pred (make-pred-or false-rec 'bottom 'string 'bottom 'bottom))
-  (define eof/string-pred (make-pred-or eof-rec 'bottom 'string 'bottom 'bottom))
-  (define maybe-bytevector-pred (make-pred-or false-rec 'bottom 'bytevector 'bottom 'bottom))
-  (define eof/bytevector-pred (make-pred-or eof-rec 'bottom 'bytevector 'bottom 'bottom))
-  (define maybe-pair-pred (make-pred-or false-rec 'bottom 'pair 'bottom 'bottom))
-  (define maybe-port-pred (make-pred-or false-rec 'bottom 'port 'bottom 'bottom))
-  (define maybe-symbol/string-pred (make-pred-or false-rec symbol-pred 'string 'bottom 'bottom))
-  (define maybe-$record-pred (make-pred-or false-rec 'bottom 'bottom 'bottom '$record))
-  (define maybe-char-pred (make-pred-or false-rec char-pred 'bottom 'bottom 'bottom))
-  (define eof/char-pred (make-pred-or eof-rec char-pred 'bottom 'bottom 'bottom))
 
   ; This can be implemented with implies?
   ; but let's use the straightforward test.
@@ -308,12 +395,12 @@
            (and (pred-multiplet? u)
                 (fx= (pred-multiplet-mask u) multiplet-pred-mask)))
          (eq? (pred-or-nor x) 'normalptr)
-         (eq? (pred-or-exi x) 'exact-integer)
+         (eq? (pred-or-exi x) 'exact-integer*)
          (eq? (pred-or-rec x) '$record)))
 
   ; don't use rtd-* as defined in record.ss in case we're building a patch
   ; file for cross compilation, because the offsets may be incorrect
-  (define rtd-ancestors (csv7:record-field-accessor #!base-rtd 'ancestors))
+  (define rtd-ancestry (csv7:record-field-accessor #!base-rtd 'ancestry))
   (define rtd-flds (csv7:record-field-accessor #!base-rtd 'flds))
 
   ;could be a ctrtd
@@ -334,9 +421,9 @@
   (define (rtd-ancestor*? x y)
     (or (eq? x y)
         (let ()
-          (define ax (rtd-ancestors x))
+          (define ax (rtd-ancestry x))
           (define lx (vector-length ax))
-          (define ay (rtd-ancestors y))
+          (define ay (rtd-ancestry y))
           (define ly (vector-length ay))
           (and (fx<= lx ly)
                (eq? x (vector-ref ay (fx- lx 1)))))))
@@ -348,9 +435,9 @@
       [(eq? x y) x]
       [else
        (let ()
-         (define ax (rtd-ancestors x))
+         (define ax (rtd-ancestry x))
          (define lx (vector-length ax))
-         (define ay (rtd-ancestors y))
+         (define ay (rtd-ancestry y))
          (define ly (vector-length ay))
          (cond
            [(and (fx<= lx ly)
@@ -391,9 +478,9 @@
       [(pair? name)
        (cond
          [(equal? name '(ptr . ptr))
-          'pair]
+          pair-pred]
          [else
-          (if (not extend?) 'bottom 'pair)])]
+          (if (not extend?) 'bottom pair-pred)])]
       [else
        (let ([r (do-primref-name/nqm->predicate name extend?)])
          (cond
@@ -420,23 +507,53 @@
       [bwp-object bwp-rec]
       [$immediate immediate-pred]
 
-      [pair 'pair]
+      [pair pair-pred]
       [maybe-pair maybe-pair-pred]
-      [list (cons $list-pred null-or-pair-pred)]
+      [char/pair (predicate-union char-pred pair-pred)]
       [list-assuming-immutable $list-pred]
-      [box 'box]
-      [vector 'vector]
-      [string 'string]
-      [sub-string '(bottom . string)]
+      [list
+       (cons null-rec null-or-pair-pred)] ; Very conservative to avoid problems with mutations.
+      [(sub-list list-of-string-pairs list-of-symbols)
+       (cons 'bottom null-or-pair-pred)]
+      [void/list
+       (cons (predicate-union void-rec null-rec) (predicate-union void-rec null-or-pair-pred))]
+      [symbol/list
+       (cons (predicate-union symbol-pred null-rec) (predicate-union symbol-pred null-or-pair-pred))]
+
+      [box box-pred]
+      [immutable-box (cons 'bottom box-pred)]
+      [mutable-box (cons 'bottom box-pred)]
+      [vector vector-pred]
+      [nonempty-vector vector*-pred]
+      [immutable-vector (cons null-immutable-vector-rec
+                              (predicate-union null-immutable-vector-rec vector*-pred))]
+      [mutable-vector (cons null-mutable-vector-rec
+                            (predicate-union null-immutable-vector-rec vector*-pred))]
+      [string string-pred]
+      [nonempty-string string*-pred]
+      [sub-string (cons 'bottom string-pred)]
       [maybe-string maybe-string-pred]
       [eof/string eof/string-pred]
-      [bytevector 'bytevector]
+      [immutable-string (cons null-immutable-string-rec
+                              (predicate-union null-immutable-string-rec string*-pred))]
+      [mutable-string (cons null-mutable-string-rec
+                            (predicate-union null-mutable-string-rec string*-pred))]
+      [bytevector bytevector-pred]
+      [nonempty-bytevector bytevector*-pred]
       [maybe-bytevector maybe-bytevector-pred]
       [eof/bytevector eof/bytevector-pred]
-      [fxvector 'fxvector]
-      [flvector 'flvector]
-      [pathname 'string]
-      [maybe-pathname maybe-string-pred]
+      [string/bytevector string/bytevector-pred]
+      [immutable-bytevector (cons null-immutable-bytevector-rec
+                                  (predicate-union null-immutable-bytevector-rec bytevector*-pred))]
+      [mutable-bytevector (cons null-mutable-bytevector-rec
+                                (predicate-union null-mutable-bytevector-rec bytevector*-pred))]
+      [mutable-nonempty-bytevector (cons null-immutable-bytevector-rec bytevector*-pred)]
+      [fxvector fxvector-pred]
+      [nonempty-fxvector fxvector*-pred]
+      [flvector flvector-pred]
+      [nonempty-flvector flvector*-pred]
+      [pathname (cons 'bottom string-pred)]
+      [maybe-pathname (cons false-rec maybe-string-pred)]
       [procedure 'procedure]
       [maybe-procedure maybe-procedure-pred]
       [maybe-who maybe-symbol/string-pred]
@@ -449,32 +566,45 @@
       [sub-symbol (cons 'bottom symbol-pred)]
       [maybe-sub-symbol (cons false-rec maybe-symbol-pred)]
 
-      [fixnum 'fixnum]
-      [(sub-fixnum bit length sub-length ufixnum sub-ufixnum pfixnum index sub-index u8 s8 u8/s8) '(bottom . fixnum)]
+      [fxzero fxzero-rec]
+      [fixnum fixnum-pred]
+      [(sub-fixnum bit length sub-length ufixnum sub-ufixnum pfixnum index sub-index u8 s8 u8/s8) (cons 'bottom fixnum-pred)]
       [maybe-fixnum maybe-fixnum-pred]
       [maybe-ufixnum (cons false-rec maybe-fixnum-pred)]
       [(eof/length eof/u8) (cons eof-rec eof/fixnum-pred)]
-      [bignum 'bignum]
-      [(exact-integer sint) 'exact-integer]
-      [(uint sub-uint nzuint exact-uinteger sub-sint) '(bottom . exact-integer)]
+      [bignum bignum-pred]
+      [(exact-integer sint) exact-integer-pred]
+      [(uint sub-uint nzuint exact-uinteger sub-sint) (cons 'bottom exact-integer-pred)]
       [maybe-uint (cons false-rec maybe-exact-integer-pred)]
       [ratnum ratnum-pred]
       [flonum flonum-pred]
       [sub-flonum (cons 'bottom flonum-pred)]
       [maybe-flonum maybe-flonum-pred]
       [real real-pred]
-      [rational (cons 'exact-integer real-pred)]
+      [sub-real (cons 'bottom real-pred)]
+      [rational (cons subset-of-rational-pred real-pred)]
+      [flrational (cons flinteger-pred flonum-pred)]
+      [(infinite nan) (cons 'bottom flonum**-pred)]
       [integer integer-pred]
       [(uinteger sub-integer) (cons 'bottom integer-pred)]
-      [inexact-number inexact-pred]
+      [flinteger flinteger-pred]
+      [(cflonum inexact-number) inexact-pred]
+      [exact-real exact-real-pred]
       [exact-number exact-pred]
       [$inexactnum inexact-complex-pred]
       [$exactnum exact-complex-pred]
-      [integer integer-pred]
-      [flinteger flinteger-pred]
       [number number-pred]
       [sub-number (cons 'bottom number-pred)]
       [maybe-number maybe-number-pred]
+      [zero zero-pred]
+      [flzero flzero-pred]
+      [port 'port]
+      [(textual-input-port textual-output-port textual-port
+        binary-input-port binary-output-port binary-port
+        input-port output-port file-port) '(bottom . port)]
+      [(sub-port) '(bottom . port)]
+      [(maybe-textual-input-port maybe-textual-output-port
+        maybe-binary-input-port maybe-binary-output-port) (cons false-rec maybe-port-pred)]
 
       [port 'port]
       [(textual-input-port textual-output-port textual-port
@@ -591,14 +721,6 @@
       [else
        ($oops 'predicate-union/multiplet "invalid expression ~s" x)]))
 
-  (define (union/simple x pred? y)
-    (cond
-      [(or (check-constant-is? x pred?)
-           (eq? x y))
-       y]
-      [else
-       'normalptr]))
-
   (define (predicate-union/normal x y)
     (cond
       [(eq? x y) y]
@@ -620,11 +742,6 @@
                      (pred-multiplet? x))
                  (predicate-union/multiplet x y)
                  'normalptr)]
-            [(vector? dy) (union/simple x vector? 'vector)]; i.e. #()
-            [(string? dy) (union/simple x string? 'string)]; i.e. ""
-            [(bytevector? dy) (union/simple x bytevector? 'bytevector)] ; i.e. '#vu8()
-            [(fxvector? dy) (union/simple x fxvector? 'fxvector)] ; i.e. '#vfx()
-            [(flvector? dy) (union/simple x flvector? 'flvector)] ; i.e. '#vfl()
             [else
              'normalptr])])]
       [(pred-multiplet? y)
@@ -635,21 +752,40 @@
            (predicate-union/multiplet x y)
            'normalptr)]
       [else
-       (case y
-         [(pair $list-pair)
-          (cond 
-	        [(or (eq? x 'pair)
-		         (eq? x '$list-pair))
-	         'pair]
-	        [else
-	         'normalptr])]
-         [(vector) (union/simple x vector? y)]; i.e. #()
-         [(string) (union/simple x string? y)]; i.e. ""
-         [(bytevector) (union/simple x bytevector? y)] ; i.e. '#vu8()
-         [(fxvector) (union/simple x fxvector? y)] ; i.e. '#vfx()
-         [(flvector) (union/simple x flvector? y)] ; i.e. '#vfl()
-         [else
-          'normalptr])]))
+       'normalptr]))
+
+  (define (predicate-union/exact-integer x y)
+    (or (cond
+          [(eq? x y) y]
+          [(eq? x 'bottom) y]
+          [(eq? y 'bottom) x]
+          [(eq? y 'exact-integer*) 'exact-integer*]
+          [(eq? x 'exact-integer*) 'exact-integer*]
+          [(eq? y 'fixnum*)
+           (and (check-constant-is? x target-fixnum?)
+                'fixnum*)]
+          [(eq? y 'bignum)
+           (and (check-constant-is? x target-bignum?)
+                'bignum)]
+          [(eq? x 'fixnum*)
+           (and (check-constant-is? y target-fixnum?)
+                'fixnum*)]
+          [(eq? x 'bignum)
+           (and (check-constant-is? y target-bignum?)
+                'bignum)]
+          [else
+           (let ([dx (constant-value x)]
+                 [dy (constant-value y)])
+             (cond
+               [(eqv? dx dy)
+                y]
+               [(target-fixnum? dx)
+                (and (target-fixnum? dy)
+                     'fixnum*)]
+               [else #;(target-bignum? dx)
+                (and (target-bignum? dy)
+                     'bignum)]))])
+        'exact-integer*))
 
   (define (predicate-union/exact-integer x y)
     (or (cond
@@ -794,15 +930,6 @@
       [else
        ($oops 'predicate-intersect/multiplet "invalid expression ~s" x)]))
 
-  (define (intersect/simple x pred? qpred y)
-     (cond
-       [(and pred? (check-constant-is? x pred?))
-        x]
-       [(eq? x qpred)
-        y]
-       [else
-        'bottom]))
-
   (define (predicate-intersect/normal x y)
     (cond
       [(eq? x y) x]
@@ -824,11 +951,6 @@
                      (pred-multiplet? x))
                  (predicate-intersect/multiplet x y)
                  'bottom)]
-            [(vector? dy) (intersect/simple x #f 'vector y)]; i.e. #()
-            [(string? dy) (intersect/simple x #f 'string y)]; i.e. ""
-            [(bytevector? dy) (intersect/simple x bytevector? 'bytevector y)] ; i.e. '#vu8()
-            [(fxvector? dy) (intersect/simple x #f 'fxvector y)] ; i.e. '#vfx()
-            [(flvector? dy) (intersect/simple x #f 'flvector y)] ; i.e. '#vfl()
             [else
              'bottom])])]
       [(pred-multiplet? y)
@@ -839,21 +961,34 @@
            (predicate-intersect/multiplet x y)
            'bottom)]
       [else
-       (case y
-         [(pair $list-pair)
-          (cond
-            [(or (eq? x 'pair)
-                 (eq? x '$list-pair))
-             '$list-pair]
-            [else
-             'bottom])]
-         [(vector) (intersect/simple x vector? 'vector y)]; i.e. #()
-         [(string) (intersect/simple x string? 'string y)]; i.e. ""
-         [(bytevector) (intersect/simple x bytevector? 'bytevector y)] ; i.e. '#vu8()
-         [(fxvector) (intersect/simple x fxvector? 'fxvector y)] ; i.e. '#vfx()
-         [(flvector) (intersect/simple x flvector? 'flvector y)] ; i.e. '#vfl()
-         [else
-          'bottom])]))
+       'bottom]))
+
+  (define (predicate-intersect/exact-integer x y)
+    (cond
+      [(eq? x y) x]
+      [(eq? y 'bottom) 'bottom]
+      [(eq? x 'bottom) 'bottom]
+      [(eq? y 'exact-integer*) x]
+      [(eq? x 'exact-integer*) y]
+      [(Lsrc? x)
+       (let ([dx (constant-value x)])
+         (if (cond
+               [(check-constant-eqv? y dx)
+                #t]
+               [(target-fixnum? dx)
+                (eq? y 'fixnum*)]
+               [else #;(target-bignum? dx)
+                (eq? y 'bignum)])
+             x
+             'bottom))]
+      [else
+       (if (cond
+		     [(eq? x 'fixnum*)
+              (check-constant-is? y target-fixnum?)]
+             [else #;(eq? x 'bignum)
+  		      (check-constant-is? y target-bignum?)])
+          y
+          'bottom)]))
 
   (define (predicate-intersect/exact-integer x y)
     (cond
@@ -1012,19 +1147,19 @@
   (define (predicate-substract/exact-integer x y)
     (cond
       [(eq? x y) 'bottom]
-      [(eq? y 'exact-integer) 'bottom]
-      [(eq? x 'exact-integer)
+      [(eq? y 'exact-integer*) 'bottom]
+      [(eq? x 'exact-integer*)
        (case y
-         [(fixnum) 'bignum]
-         [(bignum) 'fixnum]
-         [else 'exact-integer])]
+         [(fixnum*) 'bignum]
+         [(bignum) 'fixnum*]
+         [else 'exact-integer*])]
       [(Lsrc? x)
        (let ([dx (constant-value x)])
          (if (cond
                [(Lsrc? y)
                 (eqv? dx (constant-value y))]
                [(target-fixnum? dx)
-                (eq? y 'fixnum)]
+                (eq? y 'fixnum*)]
                [else #;(target-bignum? dx)
                 (eq? y 'bignum)])
             'bottom
@@ -1059,16 +1194,25 @@
   (define (predicate-disjoint? x y)
     (eq? (predicate-intersect x y) 'bottom))
 
+  (define (other-singleton? x)
+    (memv x (list '#() (vector->immutable-vector '#())
+                  ""  (string->immutable-string "")
+                  #vu8() (bytevector->immutable-bytevector #vu8())
+                  #vfx()
+                  #vfl()
+                  0 0.0 -0.0)))
+
   (define (predicate->class x)
     (cond
       #;[(eq? x 'bottom) 'bottom]
       [(check-constant-is? x char?)
        'multiplet]
       [(or (check-constant-is? x $immediate?)
+           (check-constant-is? x other-singleton?)
            (pred-singleton? x))
        'singleton]
       [(or (check-constant-is? x exact-integer?)
-           (memq x '(fixnum bignum exact-integer)))
+           (memq x '(fixnum* bignum exact-integer*)))
        'exact-integer]
       [(or (check-constant-is? x number?)
            (check-constant-is? x symbol?)
@@ -1386,4 +1530,57 @@
                (predicate-substract/exact-integer x y)]
               [($record)
                (predicate-substract/record x y)])]))]))
+
+  (define (maybe pred)
+    (predicate-union false-rec pred))
+  (define (eof/ pred)
+    (predicate-union eof-rec pred))
+  (define ptr-pred (make-pred-or singleton-pred multiplet-pred 'normalptr 'exact-integer* '$record))
+  (define true-pred (make-pred-or true-singleton-pred multiplet-pred 'normalptr 'exact-integer* '$record))
+  (define immediate-pred (predicate-union immediate*-pred char-pred))
+  (define fixnum-pred (predicate-union fxzero-rec 'fixnum*))
+  (define exact-integer-pred (predicate-union fxzero-rec 'exact-integer*))
+  (define bignum-pred 'bignum)
+  (define $fixmediate-pred (predicate-union immediate-pred fixnum-pred))
+  (define pair-pred (predicate-union list-pair-pred nonlist-pair-pred))
+  (define maybe-pair-pred (maybe pair-pred))
+  (define null-or-pair-pred (predicate-union null-rec pair-pred))
+  (define $list-pred (predicate-union null-rec list-pair-pred))
+  (define maybe-fixnum-pred (maybe fixnum-pred))
+  (define eof/fixnum-pred (eof/ fixnum-pred))
+  (define maybe-exact-integer-pred (maybe exact-integer-pred))
+  (define flonum-pred (predicate-union flonum*-pred flzero-pred))
+  (define maybe-flonum-pred (maybe flonum-pred))
+  (define flinteger-pred (predicate-union flinteger*-pred flzero-pred))
+  (define integer-pred (predicate-union flinteger-pred exact-integer-pred))
+  (define exact-pred (predicate-union exact*-pred exact-integer-pred))
+  (define exact-real-pred (predicate-union ratnum-pred exact-integer-pred))
+  (define inexact-pred (predicate-union inexact*-pred flzero-pred))
+  (define real-pred (predicate-union (predicate-union real*-pred flzero-pred)
+                                     exact-integer-pred))
+  (define number-pred (predicate-union (predicate-union number*-pred flzero-pred)
+                                       exact-integer-pred))
+  (define maybe-number-pred (maybe number-pred))
+  (define zero-pred (predicate-union (predicate-union flzero-pred inexact-complex-zero-pred)
+                                     fxzero-rec))
+  (define subset-of-rational-pred (predicate-union exact-real-pred flinteger-pred))
+  (define subset-of-complex-rational-pred (predicate-union subset-of-rational-pred inexact-complex-zero-pred))
+  (define maybe-symbol-pred (maybe symbol-pred))
+  (define maybe-procedure-pred (maybe 'procedure))
+  (define vector-pred (predicate-union null-vector-pred vector*-pred))
+  (define string-pred (predicate-union null-string-pred string*-pred))
+  (define maybe-string-pred (maybe string-pred))
+  (define eof/string-pred (eof/ string-pred))
+  (define bytevector-pred (predicate-union null-bytevector-pred bytevector*-pred))
+  (define maybe-bytevector-pred (maybe bytevector-pred))
+  (define eof/bytevector-pred (eof/ bytevector-pred))
+  (define string/bytevector-pred (predicate-union string-pred bytevector-pred))
+  (define maybe-port-pred (maybe 'port))
+  (define maybe-symbol/string-pred (predicate-union maybe-symbol-pred string-pred))
+  (define maybe-$record-pred (maybe '$record))
+  (define maybe-char-pred (maybe char-pred))
+  (define eof/char-pred (eof/ char-pred))
+  (define fxvector-pred (predicate-union null-mutable-fxvector-pred fxvector*-pred))
+  (define flvector-pred (predicate-union null-mutable-flvector-pred flvector*-pred))
+
 )

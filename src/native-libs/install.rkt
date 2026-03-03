@@ -5,10 +5,12 @@
          racket/file
          racket/pretty
          racket/list
+         racket/string
          "cmdline.rkt")
 
 (define sign-as #f)
 (define only-meta? #f)
+(define only-libs null)
 
 (define dest-dir
   (build-command-line
@@ -16,16 +18,19 @@
    [("--sign-as") id "Sign Mac OS X libraries"
     (set! sign-as id)]
    [("--only-meta") "only generate \"info.rkt\" and \"LICENSE.txt\" files"
-    (set! only-meta? #t)]
+                    (set! only-meta? #t)]
+   #:multi
+   [("--only") lib "only install <lib>"
+    (set! only-libs (cons lib only-libs))]
    #:args (dest-dir)
    dest-dir))
 
 (when (and mac? aarch64? (not sign-as))
   (error "supply `--sign-as` for AArch64 Mac OS"))
 
-;; Hack to make AArch64 Mac OS and Windows libraries look like other Macs:
+;; Hack to make AArch64 libraries look like other architecture:
 (define aarch64-renames
-  `(("libffi.7" "libffi.6")))
+  `(("libmpfr.6" "libmpfr.4")))
 
 (define libs
   `("libffi.6"
@@ -60,7 +65,8 @@
      "ssleay32"
      "sqlite3"
      "zlib1"
-     "libpangowin32-1.0.0")
+     "libpangowin32-1.0.0"
+     "ossl-modules/legacy")
    (if aarch64?
        null
        '("longdouble"))))
@@ -74,10 +80,18 @@
 (define macx86-libs
   '("PSMTabBarControl.framework"))
 
+(define stuck-on-openssl1? (or (and linux? (not aarch64?))
+                               (and mac? (or m32? ppc?))))
+
 (define nonwin-libs
-  '("libcrypto.1.1"
-    "libssl.1.1"
-    "libuuid.1"))
+  (append
+   (if stuck-on-openssl1?
+       '("libcrypto.1.1"
+         "libssl.1.1")
+       '("libcrypto.3"
+         "libssl.3"
+         "ossl-modules/legacy"))
+   '("libuuid.1")))
 
 (define no-copy-libs
   '("PSMTabBarControl.framework"
@@ -181,23 +195,33 @@
       ["libz" "zlib is by Jean-loup Gailly and Mark Adler."
               Zlib])]
     ["racket"
-     "-3"
+     ,(cond
+        [(and mac? (not m32?) (not ppc?))
+         "-4"]
+        [else
+         "-3"])
      "racket"
      ""
      ()
      #t
      "base"
-     "1.2"
-     (["libeay32" ,(~a "This product includes software developed by the OpenSSL Project for\n"
-                       "use in the OpenSSL Toolkit (https://www.openssl.org/).\n"
-                       "\n"
-                       "Eric Young is the author of libeay and ssleay.")
-                  OpenSSL]
-      ["ssleay32" #f OpenSSL]
-      ["libssl" ,(~a "This product includes software developed by the OpenSSL Project for\n"
-                       "use in the OpenSSL Toolkit (https://www.openssl.org/).\n")
-                OpenSSL]
-      ["libcrypto" #f OpenSSL]
+     ,(cond
+        [(and mac? (not m32?) (not ppc?))
+         "1.0"]
+        [else
+         "1.2"])
+     (["libeay32" #f Apache-2.0]
+      ["ssleay32" #f Apache-2.0]
+      ["libssl" ,(and stuck-on-openssl1?
+                      (~a "This product includes software developed by the OpenSSL Project for\n"
+                          "use in the OpenSSL Toolkit (https://www.openssl.org/).\n"))
+                ,(if stuck-on-openssl1?
+                     'OpenSSL
+                     'Apache-2.0)]
+      ["ossl-modules/legacy" #f 'Apache-2.0]
+      ["libcrypto" #f ,(if stuck-on-openssl1?
+                           'OpenSSL
+                           'Apache-2.0)]
       ["libiconv-2" "libiconv is released under the GNU Lesser General Public License (GNU LGPL)."
                     LGPL-3.0-or-later]
       ["longdouble" ,(~a "The source to longdouble is included with the Racket source code,\n"
@@ -385,7 +409,13 @@
     (pretty-write `(define ,(if lib?
                                 'copy-foreign-libs
                                 'copy-shared-files)
-                    (quote ,libs))
+                     (quote ,(for/list ([p (in-list libs)])
+                               (let loop ([p p])
+                                 (define-values (base name dir?) (split-path p))
+                                 (cond
+                                  [(path? base) (loop base)]
+                                  [(path? p) (path->string name)]
+                                  [else p])))))
                   o)
     (define dirs (filter (lambda (lib)
                            (or (framework? lib)
@@ -457,10 +487,18 @@
        (displayln l o))
      (display lic-end o))))
 
-(define (install platform i-platform so fixup libs renames)
+(define failed? #f)
+
+(define (install platform i-platform so fixup all-libs renames)
   (define pkgs (make-hash))
   (define pkgs-lic (make-hash))
   (define pkgs-lic-sexps (make-hash))
+
+  (define libs (if (null? only-libs)
+                   all-libs
+                   (for/list ([lib (in-list all-libs)]
+                              #:when (member lib only-libs))
+                     lib)))
 
   (define (install lib)
     (define-values (p orig-p)
@@ -468,7 +506,7 @@
 	(define (both v) (values v v))
 	(cond
 	 [(plain-path? lib) (both lib)]
-	 [(procedure? so) (both (so lib))]
+	 [(procedure? so) (values (so lib) (so (revert-name lib renames)))]
 	 [else
 	  (define (make lib) (format "~a.~a" lib so))
 	  (values (make lib) (make (revert-name lib renames)))])))
@@ -487,11 +525,19 @@
           [(file-exists? dest) (delete-file dest)]
           [(directory-exists? dest) (delete-directory/files dest)])
         (define src (build-path from orig-p))
-        (if (directory-exists? src)
-            (copy-directory/files src dest)
-            (copy-file src dest)))
-      (unless (plain-path? p)
-        (fixup p dest)))
+        (define (fixup-dest)
+          (unless (plain-path? p)
+            (fixup p dest)))
+        (cond
+          [(directory-exists? src)
+           (copy-directory/files src dest)
+           (fixup-dest)]
+          [(file-exists? src)
+           (copy-file src dest)
+           (fixup-dest)]
+          [else
+           (set! failed? #t)
+           (log-error "SKIPPING ~s" dest)])))
 
     (hash-update! pkgs pkg (lambda (l) (cons p l)) '())
     (hash-update! pkgs-lic-sexps pkg (λ (l) (append lic-sexps l)) '())
@@ -522,18 +568,28 @@
   (define (fixup p p-new)
     (unless (framework? p)
       (printf "Fixing ~s\n" p-new)
+      ;; newer tools do not need this step, and it confuses newer `install_name_tool`
+      #;
       (when aarch64?
 	(system (format "codesign --remove-signature ~a" p-new)))
       (unless (memq 'write (file-or-directory-permissions p-new))
         (file-or-directory-permissions p-new #o744))
-      (system (format "install_name_tool -id ~a ~a" (file-name-from-path p-new) p-new))
+      (unless (system (format "install_name_tool -id ~a ~a" (file-name-from-path p-new) p-new))
+        (error "naming failed"))
+      (define dots (apply string-append
+                          (let loop ([p p])
+                            (define-values (base name dir?) (split-path p))
+                            (if (path? base)
+                                (cons "../" (loop base))
+                                null))))
       (for-each (lambda (s)
                   (system (format "install_name_tool -change ~a @loader_path/~a ~a"
                                   (format "~a/~a.dylib" from (revert-name s renames))
-                                  (format "~a.dylib" s)
+                                  (format "~a~a.dylib" dots s)
                                   p-new)))
                 (append libs nonwin-libs))
       (system (format "strip -S ~a" p-new))
+      (mask-out-build-path p-new)
       (when sign-as
 	(system (format "codesign -s ~s --timestamp ~a" sign-as p-new)))))
 
@@ -546,7 +602,18 @@
                       aarch64-renames
                       null))
 
-  (install platform platform "dylib" fixup
+  (define (add-dylib lib)
+    (define p (string-append lib ".dylib"))
+    (cond
+      [(file-exists? (build-path from p))
+       p]
+      [else
+       (define alt-p (string-append (substring lib 0 (- (string-length lib) 2)) ".so.0"))
+       (if (file-exists? (build-path from alt-p))
+           alt-p
+           p)]))
+
+  (install platform platform add-dylib fixup
            (append libs
                    (cond
                      [ppc? '()]
@@ -569,6 +636,11 @@
   (define renames (if aarch64?
                       aarch64-renames
                       null))
+
+  (sync-dirs (if m32?
+                 "lib/ossl-modules"
+                 "lib64/ossl-modules")
+             "bin/ossl-modules")
   
   (define (rename-one s)
     (regexp-replace #rx"!"
@@ -584,6 +656,7 @@
   (define (fixup p p-new)
     (printf "Fixing ~s\n" p-new)
     (system (~a exe-prefix "-strip -S " p-new))
+    (mask-out-build-path p-new)
     (define-values (i o) (open-input-output-file p-new #:exists 'update))
     (for-each (lambda (p)
                 (let loop ()
@@ -619,14 +692,16 @@
   (define (fixup p p-new)
     (printf "Fixing ~s\n" p-new)
     (file-or-directory-permissions p-new #o755)
+    (mask-out-build-path p-new)
     (unless (system (format "strip -S ~a" p-new))
       (error "strip failed"))
     ;; Might fail if there are no external references:
     (system (format "chrpath -r '$ORIGIN' ~a" p-new)))
 
-  (define platform (~a (if m32?
-                           "i386"
-                           "x86_64")
+  (define platform (~a (cond
+                         [aarch64? "aarch64"]
+                         [m32? "i386"]
+                         [else "x86_64"])
                        "-linux-natipkg"))
 
   (define (add-so orig-p)
@@ -643,30 +718,64 @@
         "libatk-1.0"
         "libgdk-x11-2.0"
         "libgtk-x11-2.0"))
-    (let loop ([p orig-p] [suffix ""])
+    (let loop ([p orig-p] [suffix ""] [skip-exists? #f])
       (define p-so (string-append p ".so" suffix))
       (cond
-       [(or (file-exists? (build-path from p-so))
+        [(or (file-exists? (build-path from p-so))
+             skip-exists?
             (and only-meta? (member p special-cases)))
         p-so]
        [else
         (define m (regexp-match #rx"^(.*)[.](.*)$" p))
         (cond
          [m
-          (loop (cadr m) (string-append "." (caddr m) suffix))]
+          (define skip-exists?
+            (for/or ([rn (in-list renames)])
+              (and (equal? orig-p (cadr rn)))))
+          (loop (cadr m) (string-append "." (caddr m) suffix) skip-exists?)]
          [only-meta?
           p-so]
          [else
           (error 'add-so "not found: ~s" orig-p)])])))
+
+  (define renames (if aarch64?
+                      aarch64-renames
+                      null))
 
   (install platform platform add-so fixup
            (append (remove* linux-remove-libs
                             libs)
                    nonwin-libs
                    linux-libs)
-           null))
+           renames))
+
+(define (mask-out-build-path p-new)
+  (define old-bytes (path->bytes (build-path (current-directory) "dest")))
+  (define rx (byte-regexp (regexp-quote old-bytes)))
+  (define i (open-input-file p-new))
+  (define pos (regexp-match-positions rx i))
+  (close-input-port i)
+  (when pos
+    (printf "Replacing build path in ~a\n" p-new)
+    (define new-bytes (regexp-replace* #rx#"[^a-z]" old-bytes #"x"))
+    (define o (open-output-file p-new #:exists 'update))
+    (file-position o (caar pos))
+    (write-bytes new-bytes o)
+    (close-output-port o)
+    (mask-out-build-path p-new)))
+
+(define (sync-dirs from to)
+  (define dest (build-path (current-directory) "dest"))
+  (make-directory* (build-path dest to))
+  (for ([f (in-list (directory-list (build-path dest from)))])
+    (define to-f (build-path dest to f))
+    (when (file-exists? to-f) (delete-file to-f))
+    (copy-file (build-path dest from f) to-f)))
 
 (cond
  [win? (install-win)]
  [linux? (install-linux)]
  [else (install-mac)])
+
+(when failed?
+  (error "failed"))

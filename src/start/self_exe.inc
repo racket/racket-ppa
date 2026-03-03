@@ -1,136 +1,27 @@
 /* Used by "ustart.c" and "config.inc".
 
-   Defines self_exe_t get_self_path(char *exec_file),
-   which takes argv[0] and returns an improved representation of
-   the containing executable. At worst, on Unix, uses `PATH` to
-   convert `exec_file` into a path.
+   Defines
 
-   On Mac (even XonX), `find_mach_o_segment` is also defined.
+     self_exe_t get_process_executable_path(const char *argv0);
+
+   usually via "../ChezScheme/c/self-exe.c". See that file for more
+   information.
+
+   On Mac (even XonX), `find_mach_o_segment` is also defined,
+   unless `SELF_EXE_NO_EXTRAS` is defined.
 
    On Unix (not Mac OS, not even XonX), `find_elf_section`
    is also defined. 
 
-   If USE_EXE_LOOKUP_VIA_PATH, also: `lookup_exe_via_path`,
-   `path_append`, and `do_path_append`.
 */
 
-#define USE_GENERIC_GET_SELF_PATH
+#ifdef MZ_XFORM
+START_XFORM_SKIP;
+#endif
 
-#ifdef DOS_FILE_SYSTEM
+#if defined(DOS_FILE_SYSTEM) && !defined(SELF_EXE_WINDOWS_AS_UTF8)
 typedef wchar_t *self_exe_t;
-#else
-typedef char *self_exe_t;
-#endif
-
-#if defined(__linux__)
-# include <errno.h>
-# include <unistd.h>
-static char *get_self_path(char *exec_file)
-{
-  char buf[256], *s = buf;
-  ssize_t len, blen = sizeof(buf);
-
-  while (1) {
-    len = readlink("/proc/self/exe", s, blen-1);
-    if (len == (blen-1)) {
-      if (s != buf) free(s);
-      blen *= 2;
-      s = malloc(blen);
-    } else if (len < 0) {
-      fprintf(stderr, "failed to get self (%d)\n", errno);
-      exit(1);
-    } else
-      break;
-  }
-  s[len] = 0;
-  if (s == buf)
-    return strdup(buf);
-  else
-    return s;
-}
-# undef USE_GENERIC_GET_SELF_PATH
-#endif
-
-#if defined(__FreeBSD__) || defined(__NetBSD__)
-# include <sys/sysctl.h>
-# include <errno.h>
-static char *get_self_path(char *exec_file)
-{
-  int mib[4];
-  char *s;
-  size_t len;
-  int r;
-
-  mib[0] = CTL_KERN;
-#if defined(__NetBSD__)
-  mib[1] = KERN_PROC_ARGS;
-  mib[2] = getpid();
-  mib[3] = KERN_PROC_PATHNAME;
-#else
-  mib[1] = KERN_PROC;
-  mib[2] = KERN_PROC_PATHNAME;
-  mib[3] = -1;
-#endif
-
-  r = sysctl(mib, 4, NULL, &len, NULL, 0);
-  if (r < 0) {
-      fprintf(stderr, "failed to get self (%d)\n", errno);
-      exit(1);
-  }
-  s = malloc(len);
-  r = sysctl(mib, 4, s, &len, NULL, 0);
-  if (r < 0) {
-      fprintf(stderr, "failed to get self (%d)\n", errno);
-      exit(1);
-  }
-  return s;
-}
-# undef USE_GENERIC_GET_SELF_PATH
-#endif
-
-#if defined(__APPLE__) && defined(__MACH__)
-# include <mach-o/getsect.h>
-# include <mach-o/dyld.h>
-static char *get_self_path(char *exec_file)
-{
-  char buf[1024], *s;
-  uint32_t size = sizeof(buf);
-  int r;
-  
-  r = _NSGetExecutablePath(buf, &size);
-  if (!r)
-    return strdup(buf);
-  else {
-    s = malloc(size);
-    r = _NSGetExecutablePath(s, &size);
-    if (!r)
-      return s;
-    fprintf(stderr, "failed to get self\n");
-    exit(1);
-  }
-}
-# undef USE_GENERIC_GET_SELF_PATH
-
-static long find_mach_o_segment(const char *name, long *_len)
-{
-# if defined(__x86_64__) || defined(__arm64__)
-  const struct segment_command_64 *seg;
-# else
-  const struct segment_command *seg;
-#endif
-  seg = getsegbyname(name);
-  if (seg) {
-    if (_len)
-      *_len = seg->filesize;
-    return seg->fileoff;
-  } else
-    return 0;
-}
-#endif
-
-#ifdef DOS_FILE_SYSTEM
-/* used outside this file: */
-wchar_t *get_self_path(char *exec_file) XFORM_SKIP_PROC
+static self_exe_t get_self_path(const char *exec_file)
 {
   wchar_t *path;
   DWORD r, sz = 1024;
@@ -148,129 +39,74 @@ wchar_t *get_self_path(char *exec_file) XFORM_SKIP_PROC
 
   return path;
 }
-# undef USE_GENERIC_GET_SELF_PATH
+#else
+/* declare as static */
+typedef char *self_exe_t;
+static char *S_get_process_executable_path(const char *exec_file);
+# include "../ChezScheme/c/self-exe.c"
+static self_exe_t get_self_path(const char *exec_file) {
+  self_exe_t p;
+  p = S_get_process_executable_path(exec_file);
+  if (p == NULL)
+    return strdup(exec_file);
+  else
+    return p;
+}
 #endif
 
-#if defined(USE_GENERIC_GET_SELF_PATH) || defined(USE_EXE_LOOKUP_VIA_PATH)
+#ifdef MZ_XFORM
+END_XFORM_SKIP;
+#endif
 
-/* Get executable path via argv[0] and the `PATH` environment variable */
-
-static int has_slash(char *s) XFORM_SKIP_PROC
+#if defined(__APPLE__) && defined(__MACH__)
+# include <mach-o/getsect.h>
+# include <mach-o/dyld.h>
+# include <crt_externs.h>
+# ifndef SELF_EXE_NO_EXTRAS
+static long find_mach_o_segment(const char *name, long *_len)
 {
-  while (*s) {
-    if (s[0] == '/')
-      return 1;
-    s++;
-  }
-  return 0;
-}
+#  if defined(__x86_64__) || defined(__arm64__)
+  const struct segment_command_64 *seg;
+  const struct mach_header_64 *mh;
+# define LC_SEGMENT_bits LC_SEGMENT_64
+#  else
+  const struct segment_command *seg;
+  const struct mach_header *mh;
+# define LC_SEGMENT_bits LC_SEGMENT
+#  endif
 
-static char *do_path_append(char *s1, int l1, char *s2) XFORM_SKIP_PROC
-{
-  int l2;
-  char *s;
-
-  l2 = strlen(s2);
-
-  s  = (char *)malloc(l1 + l2 + 2);
-
-  memcpy(s, s1, l1);
-  if (s[l1 - 1] != '/') {
-    s[l1++] = '/';
-  }
-
-  memcpy(s + l1, s2, l2);
-  s[l1 + l2] = 0;
-
-  return s;
-}
-
-static char *path_append(char *s1, char *s2) XFORM_SKIP_PROC
-{
-  return do_path_append(s1, strlen(s1), s2);
-}
-
-static char *copy_string(char *s1) XFORM_SKIP_PROC
-{
-  int l1;
-  char *s;
-
-  if (!s1) return NULL;
-
-  l1 = strlen(s1);
-
-  s  = (char *)malloc(l1 + 1);
-
-  memcpy(s, s1, l1 + 1);
-
-  return s;
-}
-
-static int executable_exists(char *path) XFORM_SKIP_PROC
-{
-  return (access(path, X_OK) == 0);
-}
-
-static char *lookup_exe_via_path(char *exec_file) XFORM_SKIP_PROC
-{
-  if (exec_file[0] == '/') {
-    /* Absolute path */
-    return exec_file;
-  } else if (has_slash(exec_file)) {
-    /* Relative path with a directory: */
-    char *buf;
-    long buflen = 4096;
-    buf = (char *)malloc(buflen);
-    return path_append(getcwd(buf, buflen), exec_file);
-  } else {
-    /* We have to find the executable by searching PATH: */
-    char *path = copy_string(getenv("PATH")), *p, *m;
-    int more;
-
-    if (!path) {
-      path = "";
-    }
-
-    while (1) {
-      /* Try each element of path: */
-      for (p = path; *p && (*p != ':'); p++) { }
-      if (*p) {
-	*p = 0;
-	more = 1;
-      } else
-	more = 0;
-
-      if (!*path)
-	break;
-
-      m = path_append(path, exec_file);
-
-      if (executable_exists(m)) {
-	if (m[0] != '/')
-	  m = path_append(getcwd(NULL, 0), m);
-	return m;
+#if 0
+  seg = getsegbyname(name);
+#else
+  /* `getsegbyname` has been deprecated, but is implementing it
+     ourselves really the right idea? */
+  {
+    int i;
+    mh = _NSGetMachExecuteHeader();
+    seg = (void*)((char *)mh + sizeof(*mh));
+    for (i = mh->ncmds; i--; ){
+      if (seg->cmd == LC_SEGMENT_bits) {
+        if (!strcmp(seg->segname, name))
+          break;
       }
-      free(m);
-
-      if (more)
-	path = p + 1;
-      else
-	break;
+      seg = (void *)((char *)seg + seg->cmdsize);
     }
-
-    return exec_file;
+    if (i < 0)
+      seg = NULL;
   }
-}
 #endif
 
-#ifdef USE_GENERIC_GET_SELF_PATH
-static char *get_self_path(char *exec_file)
-{
-  return lookup_exe_via_path(exec_file);
+  if (seg) {
+    if (_len)
+      *_len = seg->filesize;
+    return seg->fileoff;
+  } else
+    return 0;
 }
+# endif
 #endif
 
-#if !defined(OS_X) && !defined(DOS_FILE_SYSTEM)
+#if !defined(OS_X) && !defined(DOS_FILE_SYSTEM) && !defined(SELF_EXE_NO_EXTRAS)
 
 #include <sys/types.h>
 #include <sys/stat.h>
