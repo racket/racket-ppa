@@ -159,12 +159,13 @@ Changes made to debian/:
 - All changes in a single commit, pushed to racket/plt-admin
 - SUCCESS
 
-### Step 13: Launchpad builds
-- All three builds completed successfully on Launchpad:
+### Step 13: Launchpad builds (amd64)
+- All three amd64 builds completed successfully on Launchpad:
   - noble (24.04): built on lcy02-amd64-009
   - jammy (22.04): built on lcy02-amd64-030
   - questing (25.10): built on lcy02-amd64-021
 - Build time: ~40 minutes each on Launchpad builders
+- arm64 builds queued separately (took longer to start)
 - SUCCESS
 
 ### Step 14: CLI tools
@@ -173,8 +174,26 @@ Changes made to debian/:
   - `ppa show` shows PPA status
   - Requires Launchpad OAuth authentication on first use
 
+### Step 15: Verify PPA installation
+- Waited for Launchpad publisher to move binary packages from Pending to Published
+  - amd64 binaries published within ~1 hour of build completion
+- Tested in clean Docker container (ubuntu:noble):
+  ```
+  add-apt-repository ppa:plt/racket
+  apt install racket
+  racket --version  →  "Welcome to Racket v9.1 [cs]"
+  ```
+- PPA version (9.1+ppa1-1~noble1) correctly supersedes the Ubuntu archive version (8.10+dfsg1-2ubuntu1)
+- SUCCESS
+
+### Launchpad API notes
+- Binary publication status can be checked via:
+  `https://api.launchpad.net/1.0/~plt/+archive/ubuntu/racket?ws.op=getPublishedBinaries&distro_arch_series=https://api.launchpad.net/1.0/ubuntu/noble/amd64`
+- Status goes: build "Successfully built" → binary "Pending" → binary "Published"
+- Publisher runs periodically; expect a delay between build completion and apt availability
+
 ## DONE
-All packages built and published. PPA updated from 8.6 to 9.1.
+All packages built, published, and verified installable. PPA updated from 8.6 to 9.1.
 
 ## Dependencies needed
 - cdbs (for debian/rules)
