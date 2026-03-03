@@ -3549,16 +3549,10 @@
           (check-3 long t int 7 (+ 70 x) 700)
           (check-3 i64 t int 9 (+ 90 x) 900)
           (check-3 i8 t int 10 (+ 100 x) 1000))]))
-    (machine-case
-     [(pb tpb pb32 tpb32)
-      ;; libffi doesn't write precisely
-      (define malloc_at_boundary (foreign-procedure "malloc" (int) uptr))
-      (define free_at_boundary (foreign-procedure "free" (uptr) void))]
-     [else
-      (define malloc_at_boundary (foreign-procedure "malloc_at_boundary"
-                                                    (int) uptr))
-      (define free_at_boundary (foreign-procedure "free_at_boundary"
-                                                  (uptr) void))])
+    (define malloc_at_boundary (foreign-procedure "malloc_at_boundary"
+                                                  (int) uptr))
+    (define free_at_boundary (foreign-procedure "free_at_boundary"
+                                                (uptr) void))
     #t)
   (check i8 -11)
   (check u8 129)

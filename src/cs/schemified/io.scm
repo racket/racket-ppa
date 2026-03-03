@@ -20906,49 +20906,30 @@
                                     (loop_0 app_0 (add1 i_0)))))))))
                          (loop_0 (sub1 fuel_1) 0))
                         #f)
-                      (if (stencil-vector? v_1)
+                      (if (mpair? v_1)
                         (if (not print-graph?_0)
-                          (letrec*
-                           ((loop_0
-                             (|#%name|
-                              loop
-                              (lambda (fuel_2 i_0)
-                                (begin
-                                  (if (not fuel_2)
-                                    #f
-                                    (if (= i_0 (stencil-vector-length v_1))
-                                      fuel_2
-                                      (let ((app_0
-                                             (quick-no-graph?_0
-                                              (stencil-vector-ref v_1 i_0)
-                                              fuel_2)))
-                                        (loop_0 app_0 (add1 i_0))))))))))
-                           (loop_0 (sub1 fuel_1) 0))
-                          #f)
-                        (if (mpair? v_1)
-                          (if (not print-graph?_0)
-                            (if (not (eq? mode_0 0))
-                              (let ((app_0 (unsafe-mcdr v_1)))
-                                (quick-no-graph?_0
-                                 app_0
-                                 (let ((app_1 (unsafe-mcar v_1)))
-                                   (quick-no-graph?_0 app_1 (sub1 fuel_1)))))
-                              #f)
+                          (if (not (eq? mode_0 0))
+                            (let ((app_0 (unsafe-mcdr v_1)))
+                              (quick-no-graph?_0
+                               app_0
+                               (let ((app_1 (unsafe-mcar v_1)))
+                                 (quick-no-graph?_0 app_1 (sub1 fuel_1)))))
                             #f)
-                          (if (if (1/custom-write? v_1)
-                                (not (struct-type? v_1))
+                          #f)
+                        (if (if (1/custom-write? v_1)
+                              (not (struct-type? v_1))
+                              #f)
+                          #f
+                          (if (if (struct? v_1)
+                                (config-get config_0 1/print-struct)
                                 #f)
-                            #f
-                            (if (if (struct? v_1)
-                                  (config-get config_0 1/print-struct)
-                                  #f)
-                              (if (not print-graph?_0)
-                                (if (prefab-struct-key v_1)
-                                  (let ((app_0 (struct->vector v_1)))
-                                    (quick-no-graph?_0 app_0 (sub1 fuel_1)))
-                                  #f)
+                            (if (not print-graph?_0)
+                              (if (prefab-struct-key v_1)
+                                (let ((app_0 (struct->vector v_1)))
+                                  (quick-no-graph?_0 app_0 (sub1 fuel_1)))
                                 #f)
-                              fuel_1))))))))))))))
+                              #f)
+                            fuel_1)))))))))))))
      (quick-no-graph?_0 v_0 fuel_0))))
 (define finish_2175
   (make-struct-type-install-properties

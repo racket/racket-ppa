@@ -575,18 +575,6 @@
     [(op)
      `(asm ,info ,(asm-fence (constant pb-fence-release)))])
 
-  (define-instruction effect (store-store-fence)
-    [(op)
-     `(asm ,info ,(asm-fence (constant pb-fence-store-store)))])
-    
-  (define-instruction effect (acquire-fence)
-    [(op)
-     `(asm ,info ,(asm-fence (constant pb-fence-acquire)))])
-
-  (define-instruction effect (release-fence)
-    [(op)
-     `(asm ,info ,(asm-fence (constant pb-fence-release)))])
-
   (define-instruction effect (pause)
     ;; NB: use sqrt or something like that?
     [(op) '()])

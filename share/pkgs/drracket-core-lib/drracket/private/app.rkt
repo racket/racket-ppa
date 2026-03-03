@@ -8,7 +8,6 @@
          browser/external
          setup/getinfo
          drracket/private/drsig
-         lang/htdp-langs-save-file-prefix
          "../acks.rkt"
          "local-member-names.rkt"
          "frame-icon.rkt"

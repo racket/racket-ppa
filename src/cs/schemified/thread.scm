@@ -3641,10 +3641,16 @@
                                                    (if (place-message? v_1)
                                                      (let ((make-unmessager_0
                                                             (|#%app|
-                                                             make-unmessager_0))
-                                                           (|#%app| fail_0)))
-                                                       (|#%app|
-                                                        fail_0)))))))))))))))))))))
+                                                             (place-message-ref
+                                                              v_1)
+                                                             v_1)))
+                                                       (if make-unmessager_0
+                                                         (message-ized1.1
+                                                          (|#%app|
+                                                           make-unmessager_0))
+                                                         (|#%app| fail_0)))
+                                                     (|#%app|
+                                                      fail_0))))))))))))))))))))
                   (loop_0 v_0))))
             (message-ized1.1 new-v_0)))))))
 (define un-message-ize

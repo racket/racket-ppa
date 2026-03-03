@@ -1,6 +1,5 @@
 #lang racket/base
 (require racket/class
-         racket/contract/base
          racket/match
          file/md5
          openssl
@@ -15,16 +14,6 @@
          (only-in "util.rkt" postgresql-connection<%>))
 (provide connection%
          password-hash)
-
-;; ========================================
-
-(define postgresql-connection<%>
-  (interface ()
-    [add-custom-types
-     (->m (listof pg-custom-type?) void?)]
-    [async-message-evt
-     (->m evt?)]
-    ))
 
 ;; ========================================
 

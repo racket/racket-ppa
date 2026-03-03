@@ -1148,10 +1148,6 @@ extern void Sbuild_heap(const char *execpath, void (*custom_init)(void)) {
   ptr tc = Svoid; /* initialize to make gcc happy */
   ptr p;
 
-#if defined(ALWAYS_USE_BOOT_FILE)
-  kernel = ALWAYS_USE_BOOT_FILE;
-#endif
-
   switch (current_state) {
     case UNINITIALIZED:
     case DEINITIALIZED:

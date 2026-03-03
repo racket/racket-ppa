@@ -380,11 +380,6 @@ ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
             strm.avail_out = left < UINT_MAX ? (unsigned)left : UINT_MAX;
             strm.next_out = buf + len - left;
         }
-        else if (skip) {                    /* at offset now */
-            strm.avail_out = len;
-            strm.next_out = buf;
-            skip = 0;                       /* only do this once */
-        }
 
         // Uncompress, setting got to the number of bytes uncompressed.
         if (strm.avail_in == 0) {

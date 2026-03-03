@@ -488,64 +488,6 @@ indexing and comparison operations, especially in the implementation of
                is now a syntax error.}]}
 
 
-@defthing[gen:equal-mode+hash any/c]{
- A @tech{generic interface} (see @secref["struct-generics"]) for types that
- may specify differences between @racket[equal?] and @racket[equal-always?].
- The following methods must be implemented:
-
- @itemlist[
-
- @item{@racket[_equal-mode-proc :
-               (any/c any/c (any/c any/c . -> . boolean?) boolean? . -> . any/c)] ---
-   the first two arguments are the values to compare, the third argument is an
-   equality function to use for recursive comparisons, and the last argument is
-   the mode: @racket[#t] for an @racket[equal?] or @racket[impersonator-of?]
-   comparison or @racket[#f] for an @racket[equal-always?] or
-   @racket[chaperone-of?] comparison.}
-
- @item{@racket[_hash-mode-proc :
-               (any/c (any/c . -> . exact-integer?) boolean? . -> . exact-integer?)] ---
-   the first argument is the value to compute a hash code for, the second
-   argument is a hashing function to use for recursive hashing, and the last
-   argument is the mode: @racket[#t] for @racket[equal?] hashing or @racket[#f]
-   for @racket[equal-always?] hashing.}]
-
- The @racket[_hash-mode-proc] implementation is used both for a
- primary hash code and secondary hash code.
-
- When implementing these methods, follow the guidelines in
- @secref["Honest_Custom_Equality"]. In particular, these
- methods should only access mutable data if the ``mode'' argument
- is true to indicate @racket[equal?] or @racket[impersonator-of?].
-
- Implementing @racket[gen:equal-mode+hash] is most useful for types that
- specify differences between @racket[equal?] and @racket[equal-always?], such
- as a structure type that wraps mutable data with getter and setter procedures:
- @(examples
-   (define (get gs) ((getset-getter gs)))
-   (define (set gs new) ((getset-setter gs) new))
-   (struct getset (getter setter)
-      #:methods gen:equal-mode+hash
-      [(define (equal-mode-proc self other rec mode)
-         (and mode (rec (get self) (get other))))
-       (define (hash-mode-proc self rec mode)
-         (if mode (rec (get self)) (eq-hash-code self)))])
-
-   (define x 1)
-   (define y 2)
-   (define gsx (getset (lambda () x) (lambda (new) (set! x new))))
-   (define gsy (getset (lambda () y) (lambda (new) (set! y new))))
-   (eval:check (equal? gsx gsy) #f)
-   (eval:check (equal-always? gsx gsy) #f)
-   (set gsx 3)
-   (set gsy 3)
-   (eval:check (equal? gsx gsy) #t)
-   (eval:check (equal-always? gsx gsy) #f)
-   (eval:check (equal-always? gsx gsx) #t))
-
-@history[#:added "8.5.0.3"]}
-
-
 @defthing[prop:equal+hash struct-type-property?]{
 
  A @tech{structure type property} (see @secref["structprops"])

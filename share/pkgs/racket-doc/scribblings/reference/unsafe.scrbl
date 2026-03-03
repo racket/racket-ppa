@@ -90,17 +90,6 @@ For @tech{fixnums}: Unchecked versions of @racket[fxpopcount],
 
 @history[#:added "8.5.0.6"]}
 
-@deftogether[(
-@defproc[(unsafe-fxpopcount [a (and/c fixnum? (not/c negative?))]) fixnum?]
-@defproc[(unsafe-fxpopcount32 [a (and/c fixnum? (integer-in 0 @#,racketvalfont{#xFFFFFFFF}))]) fixnum?]
-@defproc[(unsafe-fxpopcount16 [a (and/c fixnum? (integer-in 0 @#,racketvalfont{#xFFFF})) ]) fixnum?]
-)]{
-
-For @tech{fixnums}: Unchecked versions of @racket[fxpopcount],
-@racket[fxpopcount32], and @racket[fxpopcount16].
-
-@history[#:added "8.5.0.6"]}
-
 
 @deftogether[(
 @defproc[(unsafe-fx+/wraparound [a fixnum?] [b fixnum?]) fixnum?]

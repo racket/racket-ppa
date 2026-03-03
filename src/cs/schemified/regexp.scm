@@ -7264,7 +7264,7 @@
                                                                   (if out24_0
                                                                     (lazy-bytes-advance!
                                                                      lb-in_0
-                                                                     ms-pos_0
+                                                                     end-pos_0
                                                                      #t)
                                                                     (void))
                                                                   (if (input-port?
@@ -7273,7 +7273,7 @@
                                                                      port-in_0
                                                                      #f
                                                                      (-
-                                                                      me-pos_0
+                                                                      end-pos_0
                                                                       prefix-len_0))
                                                                     (void)))))
                                                             (void))))))

@@ -606,14 +606,6 @@
       [(maybe-textual-input-port maybe-textual-output-port
         maybe-binary-input-port maybe-binary-output-port) (cons false-rec maybe-port-pred)]
 
-      [port 'port]
-      [(textual-input-port textual-output-port textual-port
-        binary-input-port binary-output-port binary-port
-        input-port output-port file-port) '(bottom . port)]
-      [(sub-port) '(bottom . normalptr)]
-      [(maybe-textual-input-port maybe-textual-output-port
-        maybe-binary-input-port maybe-binary-output-port) (cons false-rec maybe-port-pred)]
-
       [$record '$record]
       [(record rtd) '(bottom . $record)] ; not sealed
       [(maybe-rtd) (cons false-rec maybe-$record-pred)]
@@ -787,39 +779,6 @@
                      'bignum)]))])
         'exact-integer*))
 
-  (define (predicate-union/exact-integer x y)
-    (or (cond
-          [(eq? x y) y]
-          [(eq? x 'bottom) y]
-          [(eq? y 'bottom) x]
-          [(eq? y 'exact-integer) 'exact-integer]
-          [(eq? x 'exact-integer) 'exact-integer]
-          [(eq? y 'fixnum)
-           (and (check-constant-is? x target-fixnum?)
-                'fixnum)]
-          [(eq? y 'bignum)
-           (and (check-constant-is? x target-bignum?)
-                'bignum)]
-          [(eq? x 'fixnum)
-           (and (check-constant-is? y target-fixnum?)
-                'fixnum)]
-          [(eq? x 'bignum)
-           (and (check-constant-is? y target-bignum?)
-                'bignum)]
-          [else
-           (let ([dx (constant-value x)]
-                 [dy (constant-value y)])
-             (cond
-               [(eqv? dx dy)
-                y]
-               [(target-fixnum? dx)
-                (and (target-fixnum? dy)
-                     'fixnum)]
-               [else #;(target-bignum? dx)
-                (and (target-bignum? dy)
-                     'bignum)]))])
-        'exact-integer))
-
   (define (predicate-union/record x y)
     (cond
       [(eq? x y) y]
@@ -984,33 +943,6 @@
       [else
        (if (cond
 		     [(eq? x 'fixnum*)
-              (check-constant-is? y target-fixnum?)]
-             [else #;(eq? x 'bignum)
-  		      (check-constant-is? y target-bignum?)])
-          y
-          'bottom)]))
-
-  (define (predicate-intersect/exact-integer x y)
-    (cond
-      [(eq? x y) x]
-      [(eq? y 'bottom) 'bottom]
-      [(eq? x 'bottom) 'bottom]
-      [(eq? y 'exact-integer) x]
-      [(eq? x 'exact-integer) y]
-      [(Lsrc? x)
-       (let ([dx (constant-value x)])
-         (if (cond
-               [(check-constant-eqv? y dx)
-                #t]
-               [(target-fixnum? dx)
-                (eq? y 'fixnum)]
-               [else #;(target-bignum? dx)
-                (eq? y 'bignum)])
-             x
-             'bottom))]
-      [else
-       (if (cond
-		     [(eq? x 'fixnum)
               (check-constant-is? y target-fixnum?)]
              [else #;(eq? x 'bignum)
   		      (check-constant-is? y target-bignum?)])

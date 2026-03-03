@@ -196,17 +196,6 @@
            (and (eq? av bv)
                 av)))))
 
-(define/who (equal-always?/recur a b eql?)
-  (check who (procedure-arity-includes/c 2) eql?)
-  (do-equal? a b 'equal-always? eql?))
-
-(define (struct-common-equal+hash a b)
-  (let ([av (struct-property-ref prop:equal+hash (#%$record-type-descriptor a) #f)])
-    (and av
-         (let ([bv (struct-property-ref prop:equal+hash (#%$record-type-descriptor b) #f)])
-           (and (eq? av bv)
-                av)))))
-
 ;; ----------------------------------------
 
 ;; Use a hash table to detect cycles and sharing,

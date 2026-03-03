@@ -175,13 +175,6 @@
 (define unsafe-stencil-vector-set! (unsafe-primitive stencil-vector-set!))
 (define unsafe-stencil-vector-update (unsafe-primitive stencil-vector-update))
 
-(define unsafe-stencil-vector (unsafe-primitive stencil-vector))
-(define unsafe-stencil-vector-length (unsafe-primitive stencil-vector-length))
-(define unsafe-stencil-vector-mask (unsafe-primitive stencil-vector-mask))
-(define unsafe-stencil-vector-ref (unsafe-primitive stencil-vector-ref))
-(define unsafe-stencil-vector-set! (unsafe-primitive stencil-vector-set!))
-(define unsafe-stencil-vector-update (unsafe-primitive stencil-vector-update))
-
 (define (unsafe-make-flrectangular r i)
   (#3%make-rectangular r i))
 (define (unsafe-flreal-part c)

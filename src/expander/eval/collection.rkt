@@ -157,7 +157,6 @@
   (set! links-cache-lock (make-uninterruptible-lock)))
 
 
-
 ;; used for low-level exception abort below:
 (define stamp-prompt-tag (make-continuation-prompt-tag 'stamp))
 

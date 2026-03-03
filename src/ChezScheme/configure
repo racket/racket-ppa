@@ -508,25 +508,6 @@ if [ $emscripten = yes ] ; then
     tm32=tpb32l
 fi
 
-if [ $emscripten = yes ] ; then
-    pb=yes
-    bits=32
-    if [ "$m" != "" ] ; then
-        echo "Don't combine --emscripten with -m or --machine"
-        exit 1
-    fi
-    m32=em
-fi
-
-case "$m" in
-    pb)
-        echo "Don't select pb using -m or --machine, because pb prefers to use the"
-        echo " machine as the kernel host machine. Instead, use --pb or --pbarch"
-        echo " to select a pb (portable bytecode) build."
-        exit 1
-        ;;
-esac
-
 if [ "$bits" = "" ] ; then
   # infer default bits; this will be irrelevant if a machine is specified
   if [ "$unamebits" != "" ] ; then
@@ -630,24 +611,6 @@ fi
 
 if [ "$flagsm" = "" ] ; then
     flagsm=$defaultflagsm
-fi
-
-if [ "$mboot" = "" ] ; then
-    mboot="$m"
-else
-    magain=`echo $mboot | sed -e 's/-.*//'`
-    if [ "$m" != "$magain" ]; then
-        echo "Machine $m is not consistent with boot directory $magain"
-        exit 1
-    fi
-    buildKernelOnly=yes
-fi
-
-if [ $pbarch = yes ] ; then
-    m=pb$bits$pbendian
-    if [ $threads = yes ] ; then
-        m=t$m
-    fi
 fi
 
 if [ "$mboot" = "" ] ; then

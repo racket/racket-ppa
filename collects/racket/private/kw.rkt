@@ -1477,7 +1477,7 @@
                                                    #,@(let loop ([i n-req] [args args])
                                                         (if (zero? i)
                                                             null
-                                                            (cons (convert-default-expr (car args))
+                                                            (cons (car args)
                                                                   (loop (sub1 i) (cdr args)))))
                                                    ;; optional arguments:
                                                    #,@(let loop ([opt-not-supplieds opt-not-supplieds]

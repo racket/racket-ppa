@@ -6865,35 +6865,7 @@
                                              (if (if (eq? 'values hd_0)
                                                    (let ((a_0
                                                           (cdr (unwrap e_0))))
-                                                     (let ((p_0 (unwrap a_0)))
-                                                       (if (pair? p_0)
-                                                         (let ((a_1 (cdr p_0)))
-                                                           (let ((p_1
-                                                                  (unwrap
-                                                                   a_1)))
-                                                             (if (pair? p_1)
-                                                               (let ((a_2
-                                                                      (cdr
-                                                                       p_1)))
-                                                                 (let ((p_2
-                                                                        (unwrap
-                                                                         a_2)))
-                                                                   (if (pair?
-                                                                        p_2)
-                                                                     (let ((a_3
-                                                                            (cdr
-                                                                             p_2)))
-                                                                       (begin-unsafe
-                                                                        (let ((app_0
-                                                                               (unwrap
-                                                                                '())))
-                                                                          (eq?
-                                                                           app_0
-                                                                           (unwrap
-                                                                            a_3)))))
-                                                                     #f)))
-                                                               #f)))
-                                                         #f)))
+                                                     (wrap-list? a_0))
                                                    #f)
                                                (let ((es_0
                                                       (let ((d_0

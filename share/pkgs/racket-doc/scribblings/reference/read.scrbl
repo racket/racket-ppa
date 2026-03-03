@@ -34,8 +34,6 @@ bytes. See also @secref["linecol"].}
 
 @guidealso["stx-obj"]
 
-@guidealso["stx-obj"]
-
 @defproc[(read/recursive [in input-port? (current-input-port)]
                          [start (or/c char? #f) #f]
                          [readtable (or/c readtable? #f) (current-readtable)]

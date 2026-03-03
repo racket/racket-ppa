@@ -168,8 +168,6 @@
  (root (#"pkgs" #"xrepl-lib"))
  (root (#"pkgs" #"xrepl-doc"))
  (root (#"pkgs" #"distributed-places"))
- (root (#"pkgs" #"distributed-places-lib"))
- (root (#"pkgs" #"distributed-places-doc"))
  ("racket-cheat" (#"pkgs" #"racket-cheat"))
  (root (#"pkgs" #"racket-index"))
  (root (#"pkgs" #"racket-index-exe"))
