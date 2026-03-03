@@ -1,0 +1,174 @@
+# Racket PPA Update to 9.1 - Notes
+
+## Starting State (2026-03-03)
+- Current PPA version: 8.6+ppa1-1 (uploaded September 2022)
+- Target version: Racket 9.1 (February 2026)
+- Repository: https://github.com/takikawa/racket-ppa
+- PPA: https://launchpad.net/~plt/+archive/ubuntu/racket
+- Debian upstream: https://salsa.debian.org/bremner/racket
+
+## Repository Branch State
+- `main` (current): has 8.6 packaging, merged from debian/master
+- `origin/upstream`: raw source imports up to 8.4
+- `origin/ppa`: merges of upstream, up to 8.4
+- `origin/dfsg`: old, stopped at 6.0
+- No local `upstream` or `ppa` branches yet
+
+## Old PPA targeted Ubuntu releases
+- bionic (18.04), focal (20.04), hirsute (21.04), impish (21.10),
+  groovy (20.10), jammy (22.04), xenial (16.04), trusty (14.04)
+
+## Build tools available
+- debuild, dput, dpkg-buildpackage, dch all present on system
+- Running Ubuntu 25.10 (questing)
+
+## Plan
+1. Download Racket 9.1 source tarball
+2. Set up local upstream branch, import 9.1 source
+3. Merge upstream into main branch
+4. Update debian packaging (changelog, control, rules, etc.)
+5. Build source package
+6. Upload to PPA for current Ubuntu releases
+
+---
+
+## Step-by-step log
+
+### Step 1: Download source tarball
+- Downloaded racket-9.1-src.tgz (33MB) from https://download.racket-lang.org/installers/9.1/racket-9.1-src.tgz
+- SUCCESS
+
+### Step 2: Import tarball on upstream branch
+- Created local `upstream` branch from `origin/upstream`
+- Ran `git clean -fxd` and `git ls-files -z | xargs -0 rm -f` to clear the working tree
+- Extracted tarball with `tar --strip-components=1 -zxf`
+- No nested .git directories found
+- Committed as "Importing racket-9.1-src.tgz" (3772 files changed)
+- SUCCESS
+
+### Step 3: Merge upstream into main
+- First attempt: `git merge upstream` — 73 merge conflicts (huge version gap from 8.4 to 9.1)
+- FAILURE: too many conflicts to resolve manually
+- Second attempt: `git merge -X theirs upstream` — auto-resolved most conflicts favoring upstream,
+  but 73 modify/delete conflicts remained
+- Resolved remaining conflicts with `git checkout --theirs` + `git add`
+- Committed merge
+- PROBLEM: Source tree still had diffs from the orig tarball (merge artifacts)
+- Fixed by running `git checkout upstream -- README collects etc share src`
+  to overwrite all source files with exact upstream versions
+- Also found 6 files that existed in main but not in upstream
+  (from old debian merge history): removed them
+- Files removed: deinprogramm/sdp/tests/match.rkt, deinprogramm/sdp/tests/test-docs-complete.rkt,
+  ChezScheme/c/ppc32le.c, ChezScheme/rktboot/machine-def.rkt,
+  ChezScheme/rktboot/parse-makefile.rkt, worksp/csbuild.rkt
+- SUCCESS (after multiple rounds of fixes)
+
+### Lesson learned for automation:
+The merge approach is fragile. A cleaner approach would be:
+1. Import tarball to upstream branch (same as above)
+2. On main branch, instead of merging, just:
+   a. Save the debian/ directory
+   b. `git checkout upstream -- .` to get all upstream files
+   c. Restore the debian/ directory
+   d. Remove any files not in upstream
+This avoids merge conflicts entirely.
+
+### Step 4: Update debian packaging
+Changes made to debian/:
+- **debian/changelog**: Added new entry for 9.1+ppa1-1~noble1
+- **debian/control**:
+  - Changed `libssl1.1` recommendation to `libssl3`
+  - Updated Breaks/Replaces versions from 8.6 to 9.1
+  - Updated Build-Depends: libfreetype6-dev → libfreetype-dev,
+    libgl1-mesa-dev → libgl-dev, libncurses5-dev+libncursesw5-dev → libncurses-dev,
+    debhelper >= 9 → >= 10
+- **debian/racket-common.manpages**: Fixed drracket.1 path from
+  share/pkgs/drracket/drracket/drracket.1 →
+  share/pkgs/drracket-core-lib/drracket/drracket.1
+- SUCCESS
+
+### Step 5: Tag upstream and generate orig tarball
+- Tagged upstream branch: `git tag upstream/9.1+ppa1 upstream`
+- Generated tarball: `./debian/rules get-orig-source`
+  (requires cdbs to be installed — had to install it separately)
+- Created ../racket_9.1+ppa1.orig.tar.gz (33MB)
+- SUCCESS
+
+### Step 6: Build source package
+- First attempt with `debuild -S -us -uc`: failed because cdbs not installed
+- After installing cdbs: failed because build deps not met
+- After installing build deps: failed due to source tree diffs from orig tarball
+  (the 6 extra files mentioned above)
+- After removing extra files: SUCCESS
+- Lintian warnings fixed: updated obsolete package names in Build-Depends
+- Final lintian: only 1 error (prebuilt .chm file in zlib contrib — harmless for PPA)
+- Source package files generated:
+  - racket_9.1+ppa1-1~noble1.dsc
+  - racket_9.1+ppa1-1~noble1.debian.tar.xz
+  - racket_9.1+ppa1-1~noble1_source.changes
+  - racket_9.1+ppa1-1~noble1_source.buildinfo
+- SUCCESS
+
+### Step 7: Test binary build
+- Ran `debuild -us -uc -j$(nproc)`
+- Build completed successfully (exit code 0)
+- Packages produced:
+  - racket_9.1+ppa1-1~noble1_amd64.deb (134MB)
+  - racket-common_9.1+ppa1-1~noble1_all.deb (15MB)
+  - racket-doc_9.1+ppa1-1~noble1_all.deb (36MB)
+- Verified: `build/cs/c/racketcs -e '(displayln (format "Racket ~a" (version)))'` → "Racket 9.1"
+- Only minor lintian warnings about zero-byte doc files
+- SUCCESS
+
+### Step 8: Docker container tests
+- **Noble (24.04)**: Installed racket_9.1+ppa1-1~noble1_amd64.deb in clean Noble container.
+  `racket --version` → "Welcome to Racket v9.1 [cs]". Basic arithmetic and raco help work.
+  - SUCCESS
+- **Jammy (22.04)**: Noble-built .deb files don't install on Jammy (library version differences).
+  This is expected — PPA packages are built per-release by Launchpad.
+  Built from source in Jammy container (make -j20 completed, full doc rendering finished).
+  - SUCCESS (build from source compiles on Jammy)
+
+### Step 9: GPG key and signing
+- Generated new RSA 4096-bit GPG key:
+  - UID: Racket PPA <adm@racket-lang.org>
+  - Fingerprint: 8D08AAF942E1F5C64AAE012A1ED00412299B67EB
+  - No expiration, no passphrase
+- Uploaded to keyserver.ubuntu.com (needed two attempts, short propagation delay)
+- Registered with Launchpad (samth account), confirmed via encrypted email
+- Private key encrypted with age and committed to plt-admin repo as ppa-signing-key
+- Built signed source packages for noble and jammy
+- SUCCESS
+
+### Step 10: Upload to PPA
+- `dput ppa:plt/racket racket_9.1+ppa1-1~noble1_source.changes` — SUCCESS
+- `dput ppa:plt/racket racket_9.1+ppa1-1~jammy1_source.changes` — SUCCESS
+- `dput ppa:plt/racket racket_9.1+ppa1-1~questing1_source.changes` — SUCCESS
+- Monitor builds at: https://launchpad.net/~plt/+archive/ubuntu/racket/+packages
+
+### Still TODO
+- Push git changes to racket-ppa repo
+- Push plt-admin commits
+- Verify Launchpad builds succeed
+
+## Dependencies needed
+- cdbs (for debian/rules)
+- Build-Depends from debian/control:
+  libfreetype-dev, libjpeg-dev, libpango1.0-dev, libpng-dev, libssl-dev,
+  libxaw7-dev, xbitmaps, libxft-dev, libgl-dev, libglu1-mesa-dev,
+  libx11-dev, libxrender-dev, libcairo2-dev, sqlite3, zlib1g-dev,
+  liblz4-dev, libncurses-dev, libffi-dev, patchutils
+
+## Ubuntu releases to target
+Policy: all current LTS releases + the current non-LTS release.
+
+As of March 2026:
+- jammy (22.04 LTS) — supported until April 2027
+- noble (24.04 LTS) — supported until April 2029
+- questing (25.10) — current release, supported until July 2026
+
+## Version scheme
+- `9.1+ppa1-1~noble1` for Noble
+- `9.1+ppa1-1~jammy1` for Jammy
+- The `~release1` suffix ensures proper version ordering
+
