@@ -1,7 +1,11 @@
 
 (define-syntax (extract-version-string stx)
   (#%call-with-input-file
-   "../version/racket_version.h"
+   (ormap (lambda (dir)
+            (let ([p (path-build dir "../version/racket_version.h")])
+              (and (#%file-exists? p)
+                   p)))
+          (source-directories))
    (lambda (i)
      (let ([to-find "#define MZSCHEME_VERSION_"])
        (let numbers-loop ([numbers '()])
@@ -34,4 +38,12 @@
                    (loop 0)]))]))]))))))
 
 (define (version) (extract-version-string))
-(define (banner) (string-append "Welcome to Racket v" (version) " [cs].\n"))
+
+(define build-stamp #f)
+(define (set-build-stamp! stamp)
+  (set! build-stamp stamp))
+
+(define (banner)
+  (if build-stamp
+      (string-append-immutable "Welcome to Racket v" (version) "-" build-stamp " [cs].\n")
+      (string-append-immutable "Welcome to Racket v" (version) " [cs].\n")))

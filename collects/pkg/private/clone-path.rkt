@@ -10,12 +10,14 @@
          "catalog.rkt"
          "repo-path.rkt"
          "git-url-scheme.rkt"
+         "orig-pkg.rkt"
          "desc.rkt"
          "dirs.rkt"
          "print.rkt")
 
 (provide initial-repo-descs
          adjust-to-normalize-repos
+         relookup-clone-source
          convert-clone-name-to-clone-repo/update
          convert-clone-name-to-clone-repo/install
          convert-directory-to-installed-clone
@@ -54,6 +56,7 @@
                                    from-command-line?
                                    convert-to-non-clone?
                                    prefetch-group)
+
   ;; A `repo-descs` is (hash repo (hash pkg-name desc) ...)
   (define (add-repo repo-descs repo name desc)
     (hash-set repo-descs repo
@@ -273,6 +276,16 @@
                        src)]))]
    [else desc]))
 
+(define (relookup-clone-source orig-pkg download-printf catalog-lookup-cache)
+  (case (car orig-pkg)
+    [(clone)
+     (define source (caddr orig-pkg))
+     (define-values (name type) (package-source->name+type source 'git))
+     (cond
+       [name (desc->orig-pkg 'name name #f)]
+       [else orig-pkg])]
+    [else orig-pkg]))
+
 ;; If `pkg-name` is a description with the type 'clone, but its syntax
 ;; matches a package name, then infer a repo from the current package
 ;; installation and return an alternate description.
@@ -310,7 +323,7 @@
                                 [(link static-link)
                                  (~a "\n  extra advice:\n"
                                      "   Your current installation is a directory link, and the directory might\n"
-                                     "   be a Git repostory checkout, but the package system doesn't know that.\n"
+                                     "   be a Git repository checkout, but the package system doesn't know that.\n"
                                      "   If so, try\n"
                                      "    cd " (simplify-path
                                                 (path->complete-path (cadr current-orig-pkg) (pkg-installed-dir)))
@@ -452,19 +465,23 @@
 
 ;; Change a clone-compatible desc into a clone desc:
 (define (convert-desc-to-clone d clone catalog-lookup-cache download-printf)
+  (define-values (name type) (package-source->name+type
+                              (pkg-desc-source d)
+                              (pkg-desc-type d)))
   (struct-copy pkg-desc d
+               [name (or (pkg-desc-name d)
+                         ;; preserve name used for lookup, since it could be
+                         ;; different from one inferred from the resolved source
+                         (and (eq? type 'name)
+                              name))]
                [source
-                (let ()
-                  (define-values (name type) (package-source->name+type 
-                                              (pkg-desc-source d) 
-                                              (pkg-desc-type d)))
-                  (if (eq? type 'name)
-                      ;; Since we got here, it must be that we have a
-                      ;; Git repo source cached:
-                      (package-catalog-lookup-source name
-                                                     catalog-lookup-cache
-                                                     download-printf)
-                      (pkg-desc-source d)))]
+                (if (eq? type 'name)
+                    ;; Since we got here, it must be that we have a
+                    ;; Git repo source cached:
+                    (package-catalog-lookup-source name
+                                                   catalog-lookup-cache
+                                                   download-printf)
+                    (pkg-desc-source d))]
                [type 'clone]
                [extra-path clone]))
 

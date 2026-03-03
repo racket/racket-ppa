@@ -47,9 +47,11 @@
                        #:get-module-linklet-info [get-module-linklet-info (lambda (mod-name p) #f)] ; to support submodules
                        #:serializable? [serializable? #t]
                        #:module-prompt? [module-prompt? #f]
+                       #:unlimited-compile?-box [unlimited-compile?-box #f]
                        #:to-correlated-linklet? [to-correlated-linklet? #f]
                        #:optimize-linklet? [optimize-linklet? #t]
-                       #:unsafe?-box [unsafe?-box #f])
+                       #:unsafe?-box [unsafe?-box #f]
+                       #:realm [realm (current-compile-realm)])
   (define phase (compile-context-phase cctx))
   (define self (compile-context-self cctx))
   
@@ -274,16 +276,21 @@
            ;; Compile the linklet with support for cross-module inlining, which
            ;; means that the set of imports can change:
            (compile-module-linklet body-linklet
+                                   #:body-info (hasheq 'module (compile-context-full-module-name cctx)
+                                                       'phase phase)
                                    #:body-imports body-imports
                                    #:body-import-instances body-import-instances
                                    #:get-module-linklet-info get-module-linklet-info
                                    #:serializable? serializable?
                                    #:module-prompt? module-prompt?
+                                   #:unlimited-compile? (and unlimited-compile?-box
+                                                             (unbox unlimited-compile?-box))
                                    #:module-use*s module-use*s
                                    #:optimize-linklet? optimize-linklet?
                                    #:unsafe? (and unsafe?-box (unbox unsafe?-box))
                                    #:load-modules? #f
-                                   #:namespace (compile-context-namespace cctx))]))
+                                   #:namespace (compile-context-namespace cctx)
+                                   #:realm realm)]))
       (values phase (cons linklet new-module-use*s))))
   
   (define body-linklets
@@ -395,34 +402,45 @@
 ;; and a list of `module-use*`
 (define (compile-module-linklet body-linklet
                                 #:compile-linklet [compile-linklet compile-linklet]
+                                #:body-info body-info
                                 #:body-imports body-imports
                                 #:body-import-instances body-import-instances
                                 #:get-module-linklet-info get-module-linklet-info
                                 #:serializable? serializable?
                                 #:module-prompt? module-prompt?
+                                #:unlimited-compile? unlimited-compile?
                                 #:module-use*s module-use*s
                                 #:optimize-linklet? optimize-linklet?
                                 #:unsafe? unsafe?
                                 #:load-modules? load-modules?
-                                #:namespace namespace)
+                                #:namespace namespace
+                                #:realm realm)
   (define-values (linklet new-module-use*s)
     (performance-region
      ['compile '_ 'linklet]
-     ((lambda (l name keys getter)
-        (compile-linklet l name keys getter (let ([flags (if serializable?
-                                                             (if module-prompt?
-                                                                 '(serializable use-prompt)
-                                                                 '(serializable))
-                                                             (if module-prompt?
-                                                                 '(use-prompt)
-                                                                 (if optimize-linklet?
-                                                                     '()
-                                                                     '(quick))))])
-                                              (if unsafe?
-                                                  (cons 'unsafe flags)
-                                                  flags))))
+     ((lambda (l info keys getter)
+        (parameterize ([current-compile-realm realm])
+          (compile-linklet l info keys getter (let* ([flags (if serializable?
+                                                                (if module-prompt?
+                                                                    '(serializable use-prompt)
+                                                                    '(serializable))
+                                                                (if module-prompt?
+                                                                    '(use-prompt)
+                                                                    (if optimize-linklet?
+                                                                        '()
+                                                                        '(quick))))]
+                                                     [flags (if unsafe?
+                                                                (cons 'unsafe flags)
+                                                                flags)]
+                                                     [flags (if unlimited-compile?
+                                                                (cons 'unlimited-compile flags)
+                                                                flags)])
+                                                flags))))
       body-linklet
-      'module
+      ;; Info from caller supplies
+      ;;   - 'module with full module name (if available)
+      ;;   - 'phase
+      (hash-set body-info 'name 'module)
       ;; Support for cross-module optimization starts with a vector
       ;; of keys for the linklet imports; we use `module-use` values
       ;; as keys, plus #f or an instance (=> cannot be pruned) for
@@ -482,7 +500,7 @@
                                                       (module-use-phase mu*))))
       (when mli
         ;; Record the module's declaration-time inspector, for use
-        ;; later recording extra inspectors for inlined referenced
+        ;; later recording extra inspectors for inlined references
         (module-use*-declaration-inspector! mu* (module-linklet-info-inspector mli)))
       (if mli
           ;; Found info for inlining:

@@ -1,6 +1,6 @@
-;; Bulgarian translation of Racket string constants file, version: 1.41
+;; Bulgarian translation of Racket string constants file, version: 1.56
 ;; This file is distributed under the same terms as Racket
-;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022.
+;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2024, 2025, 2026.
 
 (module bulgarian-string-constants "string-constant-lang.rkt"
   ;;; when translating this constant, substitute name of actual language for `English'
@@ -13,7 +13,7 @@
 
   (interact-with-drscheme-in-language "Работа с DrRacket на български")
 
-  ;; these two should probably be the same in all languages excepet English.
+  ;; these two should probably be the same in all languages except English.
   ;; they are the button labels (under macos and windows, respectively)
   ;; that go the with the string above.
   (accept-and-quit "Приемане и изход")
@@ -58,7 +58,7 @@
   ;; having an issue (replaces the bug report form, whose string constants are below)
   (have-an-issue? "Проблем ли има?…")
   (use-github-or-the-mailing-list-for-issues
-   "Ако сте открили проблем в Racket или DrRacket, молим да го докладвате като съзадете"
+   "Ако сте открили проблем в Racket или DrRacket, молим да го докладвате като създадете"
    " билет през GitHub.\n\nАко нещо ви прави впечатление, но не сте сигурни дали е грешка"
    " или не, попитайте през пощенския списък.")
   (visit-mailing-lists "Към пощенските списъци") ;; button in dialog
@@ -146,6 +146,8 @@
   (cs-name-duplication-error
    "Избраното име „~s“ повтаря друго име в този обхват.")
   (cs-rename-anyway "Преименуване въпреки това")
+  (cs-add-require-prefix "Добавяне на префикси за зависимости")
+  (cs-remove-unused-requires "Премахване на неизползваните префикси за зависимости")
   (cs-status-init "Проверка на синтаксиса: първоначална подготовка на средата за потребителския код")
   (cs-status-coloring-program "Проверка на синтаксиса: оцветяване на израз")
   (cs-status-eval-compile-time "Проверка на синтаксиса: изчисляване при компилиране")
@@ -185,7 +187,7 @@
    "Всички изисквания за внасяне вече имат префикс, пробвайте да го преименувате")
   (cs-the-binder-is-prefixed
    "Изискването за внасяне вече има префикс, пробвайте да го преименувате")
- 
+
   ;; mode sub-menu in the "view" menu
   (cs-check-syntax-mode "Режим на проверка на синтаксиса")
   (cs-mode-menu-show-my-obligations "Задължения на модула")
@@ -330,6 +332,7 @@
   ;; Help Desk
   (help "Помощ")
   (racket-documentation "Документация на Racket")
+  (x-documentation "Документация на „~a“") ;; ~a is filled with a language family name, eg Racket, Rhombus, or HtDP
   (help-desk "Ръководство")
   (plt:hd:search "Търсене")
   (plt:hd:feeling-lucky "Първото намерено")
@@ -542,6 +545,11 @@
   (basic-gray-paren-match-color "Посивени скоби") ; in prefs dialog
   (online-coloring-active "Интерактивно оцветяване на скицника")
   (open-files-in-tabs "Отваряне на файловете в подпрозорци")
+  (restore-open-files-from-previous-session? "Да се възстановят ли отворените в предишната сесия файлове?")
+  (startup-open-files "Отваряне на файлове при стартиране")
+  (restore-open-files-from-previous-session "Възстановяване на отворените в предишната сесия файлове")
+  (ask-me-each-time "Винаги да се пита")
+  (open-a-blank-window "Отваряне на празен прозорец")
   (show-interactions-on-execute "Автоматично отваряне на прозорец-скицник при изпълнение на програма")
   (switch-to-module-language-automatically
    "Автоматично превключване към езика на модула, при отваряне на модул")
@@ -555,7 +563,10 @@
   ;; the constant above shows up in the popup menu item in the bottom of
   ;; the drracket window; controls the line numbers on each line in the definitions;
   ;; used in a checkable menu item
-  (reflow-paragraph-maximum-width "Максимална широчина на абзаците при изливане на тескта наново")
+  ;; Capitalized for appearance in a menu item
+  (show-indent-guides/menu "Показване на &вертикалите за отстъп")
+  (hide-indent-guides/menu "Скриване на &вертикалите за отстъп")
+  (reflow-paragraph-maximum-width "Максимална широчина на абзаците при изливане на текста наново")
   (maximum-char-width-guide-pref-check-box "Вертикална линия за максимален брой знаци на ред")
   (hide-column-width-guide "Без вертикал, ако няма редове над ~a знака")
   (show-column-width-guide "Вертикал при ~a-я знак") ;; filled with a number > 2
@@ -569,6 +580,7 @@
   ;; used in the preferences dialog to undo preference changes
   (undo-changes "Отмяна на промените и затваряне")
 
+  ;;; this next section has to do with Color Schemes and configuring them
   (color-schemes "Цветови схеми") ;; the label in the preferences dialog for the color scheme panel
   (classic-color-scheme "Класическа") ;; formerly called 'black on white'
   (modern-color-scheme "Модерна")   ;; an attempt to be more color-blind friendly
@@ -576,6 +588,19 @@
   ; drracket additions to the color scheme dialog; two buttons
   (design-your-own-color-schemes "Собствена цветова схема") ; pointer to (english-only) docs
   (style-and-color-names "&Имена на стилове и цветове")
+  (dark-color-scheme "Тъмна цветова схема")
+  (light-color-scheme "Светла цветова схема")
+  (revert-colors-to-color-scheme-defaults "Връщане на цветовете към стандартните за схемата")
+  (color-mode "Режим на интерфейса")
+  ;; on macos and linux, racket can detect the OS's dark/light mode so
+  ;; the control will have the next three strings in it.
+  (use-os-dark-mode-selection "Да се ползва вградения светъл или тъмен режим")
+  (always-light-mode "Винаги да се ползва светлият режим")
+  (always-dark-mode "Винаги да се ползва тъмният режим")
+  ;; under windows, racket cannot detect the OS's dark/light mode, so
+  ;; the control will have just two options, which needs slightly different wording
+  (light-mode "Светъл режим")
+  (dark-mode "Тъмен режим")
 
   (add-spacing-between-lines "Добавяне по пиксел между редовете")
 
@@ -953,7 +978,7 @@
    " буферите да се върне към състоянието на диска?\n\nПроменени файлове:")
   ;; One file per line is appended to the end of this message
   (autoload-files-changed-on-disk-editor-dirty&clean/with-name
-   "Има файлове, които са променениъна диска, и други, променени в редактора. Искате ли съдържанието на"
+   "Има файлове, които са променени на диска, и други, променени в редактора. Искате ли съдържанието на"
    " буферите да се върне към състоянието на диска?\n\nПроменени файлове"
    " (променените в редактора буфери са означени с „◇“):")
   ;; a specialized version of dont-ask-again-always-current
@@ -1094,6 +1119,7 @@
   (close-tab "Затваряне на подпрозорец") ;; must not have any &s in it.
    ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
   (close-tab-amp "&Затваряне на подпрозорец")
+  (reopen-closed-tab "Наново отваряне на затворен подпрозорец")
 
   ;;; edit menu
   (split-menu-item-label "&Разделяне")
@@ -1132,6 +1158,12 @@
   (reindent-menu-item-label "&Форматиране наново")
   (reindent-all-menu-item-label "Форматиране наново на &всичко")
   (semicolon-comment-out-menu-item-label "&Закоментиране с „;“")
+  ;; the ~a is filled with the characters that'll be used to comment out a line,
+  ;; inserted at the start of the line
+  (comment-out-with-line-start "&Закоментиране с „~a“")
+  ;; the two '~a's are filled with the characters that'll be used to comment out
+  ;; the start and end of a region
+  (comment-out-with-region "&Закоментиране с „~a“ и „~a“")
   (box-comment-out-menu-item-label "Закоментиране с &кутия")
   (uncomment-menu-item-label "Да &не е коментар")
 
@@ -1194,6 +1226,7 @@
 
   ;;; buttons
   (execute-button-label "Изпълнение")
+  (execute-button-configure-label "Настройки на изпълнение")
   (save-button-label "Запазване")
   (break-button-label "Спиране")
   (break-button-kill-label "Принудително спиране")
@@ -1311,17 +1344,11 @@
 
 
   ;;; languages
-  (beginning-student "Начално ниво")
   (beginning-one-line-summary "дефиниции, условни изрази, структури, константи и примитиви")
-  (beginning-student/abbrev "Начално ниво със съкращения на списъци")
   (beginning/abbrev-one-line-summary "Начинаещ със стилово извеждане на списъците в REPL")
-  (intermediate-student "Междинно ниво")
   (intermediate-one-line-summary "Начално ниво плюс лексикален обхват")
-  (intermediate-student/lambda "Междинно ниво плюс λ-изрази")
   (intermediate/lambda-one-line-summary "Междинно ниво плюс функции от по-висок ред")
-  (advanced-student "Ниво за напреднали")
   (advanced-one-line-summary "Междинно ниво плюс λ-изрази и промяна")
-  (how-to-design-programs "Как да проектираме програми") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "Доста пълно ниво")
   (pretty-big-scheme-one-line-summary "Добавени са синтаксиса и функциите от езиците в „HtDP“ (Как да проектираме програми), mzscheme и mred/mred")
   (r5rs-language-name "R5RS")
@@ -1561,6 +1588,11 @@
     ;; like 'Long' but shows the phases where this file is loaded
   (module-browser-name-very-long "Дълги с фазите")
   (module-browser-open-all "Отваряне на всички показани файлове")
+  (module-browser-main-collects "Основни колекции")
+  (module-browser-unknown-pkg "Неизвестен пакет")
+  (module-browser-visible-pkgs "Видими пакети")
+  (module-browser-visible-submodules "Видими подмодули")
+  (module-browser-top-level-module "Модул от най-горно ниво") ; in the "which submodules?" filter; this is used for when there are no submodules
 
   (happy-birthday-matthias "Честит рожден ден, Матѝас (Фела̀йзен)!")
   (happy-birthday-matthew "Честит рожден ден, Ма̀тю (Фла̀т)!")
@@ -1769,6 +1801,14 @@
 
   ; The ~F is special marker for the offending values, which may be
   ; printed specially in DrRacket.
+  (test-engine-check-range-encountered-error
+   "„check-range“ получи следната грешка вместо стойност в [~F, ~F]. ~n   :: ~a")
+  (test-engine-check-member-of-encountered-error
+   "„check-member-of“ получи следната грешка вместо стойност в ~L.~n   :: ~a")
+  ; obsolete version of this
+  (test-engine-check-*-encountered-error
+   "„~a“ получи следната грешка вместо очакваната стойност ~F. ~n   :: ~a")
+  ; deprecated:
   (test-engine-check-encountered-error
    "check-expect получи грешката „~F“ вместо очакваната стойност ~n   :: ~a")
   (test-engine-check-error-cause
@@ -1979,11 +2019,13 @@
   (install-pkg-install "Инсталиране")
   (install-pkg-update "Обновяване")
   (install-pkg-setup "Настройки") ; for button
+  (install-pkg-update+setup "Обновяване и настройки") ; for button
   (install-pkg-setup-long "Настройки на инсталацията") ; for menu
   (install-pkg-remove "Деинсталиране")
   (install-pkg-do-not-remove "Да не се деинсталира")
   (install-pkg-action-inferred-to-be-update "Отгатнатото действие е „Обновяване“")
   (install-pkg-action-inferred-to-be-install "Отгатнатото действие е „Инсталиране“")
+  (install-pkg-action-inferred-to-be-update+setup "Отгатнатото действие е „Обновяване и настройване“")
   (install-pkg-default "Стандартно")
   (install-pkg-scope-label "Обхват на пакета")
   (install-pkg-default-scope-label "Стандартен обхват на пакет") ; for picking the scope to be default
@@ -2023,6 +2065,7 @@
   (install-pkg-abort-migrate "Преустановяване на мигрирането")
   (install-pkg-abort-setup "Преустановяване на настройките")
   (install-pkg-abort-generic-action "Преустановяване на действието")
+  (install-pkg-continue-generic-action "Продължаване на действието")
   (install-pkg-close-terminal-output "Затваряне на изхода")
   (install-pkg-show-all-options "Показване на всички опции")
   (install-pkg-migrate-available-installations "Налични инсталации")
@@ -2071,6 +2114,9 @@
 
   (install-pkg-not-rentrant "Не може едновременно да инсталирате и да обновявате —"
                             " или спрете действието, или го изчакайте.")
+  (install-pkg-generic-action-in-progress "Все още тече операция по управление на пакетите."
+                                          " Сигурни ли сте, че искате да затворите прозореца и да прекъснете действието?"
+                                          " Това може да доведе до неправилно състояние на инсталацията!")
 
   ;; open a file via a collection path (new "Open" menu item in DrRacket)
   (open-require-path "Отваряне на път с необходими файлове…")
@@ -2084,7 +2130,7 @@
   ; second ~a is filled with /etc/paths.d/racket (or some other path like it in the future)
   ; third ~a is filled with the path to the bin directory of the current drracket
   (adding-racket/bin-to-path-failed
-   "Неуспешно добавяне на команада „racket“ към командния ред.~aПо-специално —"
+   "Неуспешно добавяне на командата „racket“ към командния ред.~aПо-специално —"
    " не може да се създаде файл „~a“ със съдържание — „~a“.")
   ; first and third ~a are filled with /etc/paths.d/racket (or some other path like it in the future)
   ; and the second one is filled with the path to the bin directory that was put into that file.
@@ -2111,4 +2157,72 @@
    " добавете следната директория към пътя в „PATH“:"
    "   ~a\n\n")
   (add-racket/bin-to-path "Настройване на командния ред за Racket…") ;; menu item label
+  
+  ;; quickscript messages
+  (qs-my-first-script "Моят първи скрипт")
+  (qs-script-library "Библиотека със скриптове")
+  (qs-directories "Директории")
+  (qs-add "&Добавяне")
+  (qs-remove "&Махане")
+  (qs-scripts "Скриптове")
+  (qs-disable "Из&ключване")
+  (qs-enable "В&ключване")
+  (qs-shadow "S&hadow")
+  (qs-recompiling  "Прекомпилиране на скриптове…")
+  (qs-recompiling-wait "Прекомпилиране на скриптове, изчакайте…")
+  (qs-scripts "&Скриптове")
+  (qs-manage "&Управление")
+  (qs-compilation-error "Скриптове: грешка при компилация")
+  (qs-caught-exception  "Скриптове: прихваната грешка")
+  (qs-recompiling-library "Прекомпилиране на библиотека")
+  (qs-my-script "Моят прекрасен скрипт")
+  (qs-script-help "Низът с помощ на скрипта.")
+  (qs-compiling-scripts "Компилиране на скриптове")
+  ;; ~a is a script file including its path
+  (qs-compiling "Компилиране на „~a“")
+  ;; ~a is a script file including its path
+  (qs-file-not-found "Файлът липсва:„~a“")
+  (qs-invalid-hook "Неправилно име на кука.\n Приемат се само:\n")
+  ;; the  three `qs-error-detail-*` string constants are put into the same message
+  (qs-error-detail-overview "прихванати са ~a грешки(а).") ; the ~a is number of errors
+  (qs-error-detail-summary "Обобщение:")
+  (qs-error-detail-details "Подробности:")
+  (qs-script-name "Име на скрипт")
+  (qs-script-name-enter "Въведете име на новия скрипт:")
+  (qs-open-script "Отваряне на скрипт")
+  ;; ~a is the name of a script file
+  (qs-error-run "Изпълнение: Грешка в скрипта „~s“:\n" )
+  (qs-output "Изход") ;; not repl-out-color where it means color of the output
+  (qs-load-script-menu "Зареждане на менюто за скриптове")
+  (qs-loading-file "Зареждане на файл ")
+  ;; ~a is the name of a script file
+  (qs-script-file "Файл със скрипт „~s“:")
+  (qs-build-menu "Изграждане на менюто със скриптове")
+  ;; ~a is number of rebuilds
+  (qs-menu-rebuild "Менюто със скриптове се изгради  #~a… път")
+  (qs-delete-menu "Deleting menu items")
+  ;; ~a is a a script entry in menu
+  (qs-delete-menu-item "Изтриване на елемент от меню „~a“…  ")
+  (qs-new-script "&Нов скрипт…")
+  (qs-open-script "&Отваряне на скрипт…")
+  (qs-disable-scripts "&Изключване на скриптове…")
+  (qs-library "&Библиотека…")
+  (qs-reload-menu "&Презареждане на меню")
+  (qs-compile-scripts "&Компилиране на скриптове")
+  (qs-stop-scripts "&Спиране на съхранените скриптове")
+  (qs-report-issue "&Докладване на проблем")
+  (qs-error-load "Скриптове: Грешки при зареждане на свойствата на скриптове")
+
+  ;; macro stepper
+  ; used in the button label and menu item and title for some dialog boxes
+  (macro-stepper "Постъпково изпълнение на макроси")
+
+  ; these next three are in the same dialog; first a message and then two button labels
+  (macro-stepper-warning-message
+   "Заместването на макрос продължи прекалено много стъпки.\n\nНатиснете"
+   " „Спиране“, за да спрете заместването на макроса и да проверите стъпките до този момент"
+   " или натиснете „Продължаване“, за да позволите още стъпки по заместване.")
+  (macro-stepper-continue "Продължаване")
+  (macro-stepper-stop "Спиране")
+
   )

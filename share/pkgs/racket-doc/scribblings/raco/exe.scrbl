@@ -15,7 +15,8 @@
 @exec{raco exe}, use a smaller base language---such as
 @racketmodfont{#lang} @racketmodname[racket/base] instead of
 @racketmodfont{#lang} @racketmodname[racket]. Also, ensure that
-bytecode files are compiled by using @seclink["make"]{@exec{raco make}}.}
+bytecode files are compiled by using @seclink["make"]{@exec{raco make}}.
+For further improvements, try using @seclink["demod"]{@exec{raco demod}}.}
 
 Compiled code produced by @exec{raco make} relies on Racket
 executables to provide run-time support to the compiled code. However,
@@ -80,7 +81,7 @@ such mapping is created for filesystem paths. By default, a module's
 symbolic name is generated in an unspecified but deterministic
 way where the name starts with @as-index{@litchar{#%embedded:}},
 except that the main module is prefixed with @litchar{#%mzc:}. The
-relative lack of specification for module names can be be a problem
+relative lack of specification for module names can be a problem
 for language constructs that are sensitive to module names, such as
 serialization. To take more control over a module's symbolic name, use
 the @DPFlag{named-lib} or @DPFlag{named-file} argument to specify a
@@ -275,4 +276,3 @@ The @exec{raco exe} command accepts the following command-line flags:
 @include-section["exe-api.scrbl"]
 @include-section["launcher.scrbl"]
 @include-section["exe-dylib-path.scrbl"]
-

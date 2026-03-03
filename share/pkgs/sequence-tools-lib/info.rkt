@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define pkg-authors (quote (jocyber))) (define version "1.0") (define license (quote (Apache-2.0 OR MIT))) (define pkg-desc "Extends the standard racket sequence libraries (list, stream, etc) to include more algorithms") (define deps (quote ("base"))) (define build-deps (quote ("rackunit-lib")))))

@@ -14,6 +14,7 @@
          test-engine/test-engine
          (only-in simple-tree-text-markup/data
                   markup?
+                  empty-markup?
                   srcloc-markup? srcloc-markup-srcloc
                   transform-markup)
          simple-tree-text-markup/construct
@@ -51,7 +52,10 @@
   (make-parameter
    (lambda (markup)
      (if (port-writes-special? (current-output-port))
-         (write-special markup)
+         (begin
+           (write-special markup)
+           (unless (empty-markup? markup)
+             (newline))) ; an exception message might be printed after the markup
          (display-markup markup)))))
 
 (define (display-test-results! markup)
@@ -64,7 +68,7 @@
          empty-markup]
         [(and (null? (test-object-failed-checks test-object))
               (null? (test-object-signature-violations test-object)))
-         (let ((count (length (test-object-tests test-object))))
+         (let ((count (length (test-object-successful-tests test-object))))
            (case count
              [(0) (string-constant test-engine-0-tests-passed)]
              [(1) (string-constant test-engine-1-test-passed)]
@@ -191,6 +195,14 @@
                 (cdr vals)
                 (cons (framed-markup (value->markup (car vals))) rev-markups)
                 rev-lines))
+         ((#\L #\l)
+          (loop (cddr chars)
+                (cdr vals)
+                (append (reverse (cdr (append-map (lambda (val)
+                                                    (list " " (framed-markup (value->markup val))))
+                                                  (car vals))))
+                        rev-markups)
+                rev-lines))
          ((#\a #\A)
           (let ((val (car vals)))
             (loop (cddr chars)
@@ -223,11 +235,26 @@
 
 (define (reason->markup fail)
   (cond
+    [(unexpected-error/range? fail)
+     (format->markup (string-constant test-engine-check-range-encountered-error)
+                     (unexpected-error/range-min fail)
+                     (unexpected-error/range-max fail)
+                     (unexpected-error/markup-error-markup fail))]
+    [(unexpected-error/member? fail)
+     (horizontal
+      (format->markup (string-constant test-engine-check-member-of-encountered-error)
+                      (unexpected-error/member-set fail)
+                      (unexpected-error/markup-error-markup fail)))]
+    [(unexpected-error/check-*? fail)
+     (format->markup (string-constant test-engine-check-*-encountered-error)
+                     (unexpected-error/check-*-form-name fail)
+                     (unexpected-error-expected fail)
+                     (unexpected-error/markup-error-markup fail))]
     [(unexpected-error/markup? fail)
      (format->markup (string-constant test-engine-check-encountered-error)
                      (unexpected-error-expected fail)
                      (unexpected-error/markup-error-markup fail))]
-     
+
     [(unexpected-error? fail)
      (format->markup (string-constant test-engine-check-encountered-error)
                      (unexpected-error-expected fail)
@@ -315,9 +342,9 @@
      (format->markup "Unhandled signature violation: got ~F, violated signature ~a, to blame: ~a"
                      (violated-signature-obj fail)
                      (signature-name (violated-signature-signature fail))
-                     (let ((blame (violated-signature-blame fail)))
-                       (if blame
-                           (syntax->datum blame)
+                     (let ((blame-srcloc (violated-signature-blame-srcloc fail)))
+                       (if blame-srcloc
+                           (format-srcloc blame-srcloc)
                            '<unknown>)))]))
 
 (define (error-link->markup reason srcloc check-srcloc)
@@ -338,30 +365,30 @@
          (stx (signature-syntax signature))
          (srcloc (signature-violation-srcloc violation))
          (message (signature-violation-message violation)))
-    (horizontal
+    (vertical
+     (horizontal
+      (cond
+        ((string? message) message)
+        ((signature-got? message)
+         (horizontal (string-constant test-engine-got)
+                     " "
+                     (framed-markup (value->markup (signature-got-value message)))))
+        (else empty-markup))
+      
+      (if srcloc
+          (horizontal " " (srcloc-markup srcloc (format-srcloc srcloc)))
+          empty-markup)
+      ", "
+      (string-constant test-engine-signature)
+      " "
+      (srcloc-markup (syntax-srcloc stx) (format-srcloc (syntax-srcloc stx))))
      (cond
-       ((string? message) message)
-       ((signature-got? message)
-        (horizontal (string-constant test-engine-got)
-                    " "
-                    (framed-markup (value->markup (signature-got-value message)))))
-       (else empty-markup))
-    
-     (if srcloc
-         (horizontal " " (srcloc-markup srcloc (format-srcloc srcloc)))
-         empty-markup)
-     ", "
-     (string-constant test-engine-signature)
-     " "
-     (srcloc-markup (syntax-srcloc stx) (format-srcloc (syntax-srcloc stx)))
-     (cond
-       ((signature-violation-blame violation)
-        => (lambda (blame)
+       ((signature-violation-blame-srcloc violation)
+        => (lambda (blame-srcloc)
              (horizontal
-              "        "
               (string-constant test-engine-to-blame)
               " "
-              (srcloc-markup (syntax-srcloc blame) (format-srcloc (syntax-srcloc blame))))))
+              (srcloc-markup blame-srcloc (format-srcloc blame-srcloc)))))
        (else empty-markup)))))
 
 (define (syntax-srcloc stx)
@@ -418,6 +445,24 @@
     (failed-check
      (unexpected-error/markup (srcloc 'source 1 0 10 20) 'expected (exn "not expected" (current-continuation-marks))
                               (vertical "line1" "line2"))
+     (srcloc 'exn 2 1 30 40)))
+  (define fail-unexpected-error/check-*
+    (failed-check
+     (unexpected-error/check-* (srcloc 'source 1 0 10 20) 'expected (exn "not expected" (current-continuation-marks))
+                               (vertical "line1" "line2")
+                               'check-something)
+     (srcloc 'exn 2 1 30 40)))
+  (define fail-unexpected-error/range
+    (failed-check
+     (unexpected-error/range (srcloc 'source 1 0 10 20) #f (exn "not expected" (current-continuation-marks))
+                             (vertical "line1" "line2")
+                             1 5)
+     (srcloc 'exn 2 1 30 40)))
+  (define fail-unexpected-error/member
+    (failed-check
+     (unexpected-error/member (srcloc 'source 1 0 10 20) #f (exn "not expected" (current-continuation-marks))
+                              (vertical "line1" "line2")
+                              '(1 2 3))
      (srcloc 'exn 2 1 30 40)))
   (define fail-unsatisfied-error
     (failed-check
@@ -479,7 +524,7 @@
   (define integer (make-predicate-signature 'integer integer? #'integer-marker))
   (define fail-violated-signature
     (failed-check
-     (violated-signature (srcloc 'source 1 0 10 20) 'obj integer #'syntax)
+     (violated-signature (srcloc 'source 1 0 10 20) 'obj integer (srcloc 'signature 2 3 23 333))
      #f))
 
   (define signature-violation-1
@@ -516,6 +561,8 @@
    (test-object->markup
     (make-test-object (list void void)
                       (list fail-unexpected-error fail-unexpected-error/markup
+                            fail-unexpected-error/check-*
+                            fail-unexpected-error/range fail-unexpected-error/member
                             fail-unsatisfied-error fail-unsatisfied-error/markup
                             fail-unequal fail-not-within
                             fail-incorrect-error fail-incorrect-error/markup

@@ -60,24 +60,21 @@ The @racketmodname[redex/pict] library provides functions
 designed to typeset grammars, reduction relations, and
 metafunctions.
 
-Each grammar, reduction relation, and metafunction can be
-saved in a @filepath{.ps} file (as encapsulated PostScript),
-or can be turned into a pict for viewing in the REPL or
-using with Slideshow (see the @racketmodname[pict]
-library).
+Each grammar, reduction relation, and metafunction, and even
+individual examples can be
+turned into @seclink["top" #:doc '(lib "pict/scribblings/pict.scrbl")]{picts} for use with
+@seclink["top" #:doc '(lib "scribblings/scribble/scribble.scrbl") #:indirect? #t]{Scribble} or
+@seclink["top" #:doc '(lib "scribblings/slideshow/slideshow.scrbl") #:indirect? #t]{Slideshow}.
 
 For producing papers with Scribble, just include the
-picts inline in the paper and pass the @DFlag{dvipdf} 
-flag to generate the @filepath{.pdf} file. For producing
-papers with LaTeX, create @filepath{.ps} files from Redex and use
-@tt{latex} and @tt{dvipdf} to create @filepath{.pdf} files
-(using @tt{pdflatex} with @filepath{.pdf} files will 
-work but the results will not look as good onscreen).
+picts inline in the paper. For producing
+papers with LaTeX, create @filepath{.ps} files from the picts with Redex,
+which can be included into a LaTeX document.
 
-@section{Picts, PDF, & PostScript}
+@section{Generating Picts}
 
-This section documents two classes of operations, one for
-direct use of creating postscript figures for use in papers
+This section documents two sets of operations, one for
+direct use of creating figures for use in papers
 and for use in DrRacket to easily adjust the typesetting:
 @racket[render-term],
 @racket[render-language],
@@ -86,7 +83,7 @@ and for use in DrRacket to easily adjust the typesetting:
 @racket[render-judgment-form],
 @racket[render-metafunctions], and
 @racket[render-lw], 
-and one for use in combination with other libraries
+and a second set for use in combination with other libraries
 that operate on @racketmodname[pict]s
 @racket[term->pict],
 @racket[language->pict],
@@ -96,7 +93,7 @@ that operate on @racketmodname[pict]s
 @racket[derivation->pict],
 @racket[metafunction->pict], and
 @racket[lw->pict].
-The primary difference between these functions is that the former list
+The primary difference between these functions is that the former
 sets @racket[dc-for-text-size] and the latter does not.
 
 
@@ -110,8 +107,10 @@ sets @racket[dc-for-text-size] and the latter does not.
  @ex[(define-language nums
        (AE K
            (+ AE AE))
+       (code:comment "binary digits")
+       (k 1 0)
        (code:comment "binary constants")
-       (K · (1 K) (0 K)))
+       (K · (k K)))
      (render-term nums (+ (1 (0 (1 ·))) (+ (1 (1 (1 ·))) (1 (0 (0 ·))))))]
 
  The @racket[term] argument must be a literal; it is not an 
@@ -237,15 +236,18 @@ The following forms of arrows can be typeset:
 @arrows[--> -+> ==> -> => ..> >-> ~~> ~> :-> :--> c->
         -->> >-- --< >>-- --<<]
 
-@ex[(render-reduction-relation
-     (reduction-relation
-      nums
-      (--> (+ AE ())
-           AE)
-      (--> (+ AE_1
-              AE_2)
-           (+ AE_2
-              AE_1))))]
+ @ex[
+ (define simplify-ae
+   (reduction-relation
+    nums
+    (--> (+ AE ())
+         AE)
+    (--> (+ AE_1
+            AE_2)
+         (+ AE_2
+            AE_1))))
+ (render-reduction-relation
+  simplify-ae)]
 
 }
 
@@ -284,8 +286,10 @@ Similarly, @racket[render-metafunctions] accepts multiple
 metafunctions and renders them together, lining up all of the
 clauses together.
 
-Parameters that affect rendering include
-@racket[metafunction-pict-style], @racket[linebreaks], @racket[sc-linebreaks], and
+There are a number of different styles that affect the overall rendering
+of the metafunction, controlled by @racket[metafunction-pict-style].
+Other parameters that affect rendering include
+@racket[linebreaks], @racket[sc-linebreaks], and
 @racket[metafunction-cases].
 
 If the metafunctions have contracts, they are typeset as the first
@@ -354,18 +358,15 @@ This function sets @racket[dc-for-text-size]. See also
                (term (to-nat (add K_1 K_2)))))]
 }
 
-@deftogether[(@defform[(render-relation relation-name)]{}
-              @defform/none[#:literals (render-relation)
-                                       (render-relation relation-name filename)]{})]{
+@defform*[[(render-relation relation-name)
+           (render-relation relation-name filename)]]{
 Like @racket[render-metafunction] but for relations.
 
 This function sets @racket[dc-for-text-size]. See also
 @racket[relation->pict].
 }
 
-@deftogether[(@defform[(render-judgment-form judgment-form-name)]{}
-              @defform/none[#:literals (render-judgment-form)
-                                       (render-judgment-form judgment-form-name filename)]{})]{
+@defproc[(render-judgment-form [judgment-form judgment-form?] [filename (or/c path-string? #f)]) pict?]{
 Like @racket[render-metafunction] but for judgment forms. The
 @racket[judgment-form-cases] parameter can be used to control which clauses
 are rendered.
@@ -423,8 +424,8 @@ This function sets @racket[dc-for-text-size]. See also
   @racketmodname[pict]s.
 }
 
-@defform[(judgment-form->pict judgment-form-name)]{
-  This produces a pict, but without setting @racket[dc-for-text-size].
+@defproc[(judgment-form->pict [judgment-form judgment-form?]) pict?]{
+  Produces a pict like @racket[render-judgment-form], but without setting @racket[dc-for-text-size].
   It is suitable for use in Slideshow or other libraries that combine
   @racketmodname[pict]s.
 }
@@ -504,21 +505,41 @@ Defaults to @racket[#f].
 
 @defparam[rule-pict-style style reduction-rule-style/c]{
 
-This parameter controls the style used by default for the reduction
-relation. It can be @racket['horizontal], where the left and
-right-hand sides of the reduction rule are beside each other or
-@racket['vertical], where the left and right-hand sides of the
-reduction rule are above each other.  The @racket['compact-vertical]
-style moves the reduction arrow to the second line and uses less space
-between lines.  The @racket['vertical-overlapping-side-conditions]
-variant, the side-conditions don't contribute to the width of the
-pict, but are just overlaid on the second line of each rule.  The
-@racket['horizontal-left-align] style is like the @racket['horizontal]
-style, but the left-hand sides of the rules are aligned on the left,
-instead of on the right. The @racket['horizontal-side-conditions-same-line]
-is like @racket['horizontal], except that side-conditions
-are on the same lines as the rule, instead of on their own line below.
+ This parameter controls the style used by default for the
+ reduction relation. It can be @racket['horizontal], where
+ the left and right-hand sides of the reduction rule are
+ beside each other or @racket['vertical], where the left and
+ right-hand sides of the reduction rule are above each other.
 
+ @ex[#:label #f
+ (parameterize ([rule-pict-style 'horizontal])
+   (render-reduction-relation simplify-ae))
+ (parameterize ([rule-pict-style 'vertical])
+   (render-reduction-relation simplify-ae))]
+
+ The @racket['compact-vertical] style moves the reduction
+ arrow to the second line and uses less space between lines.
+
+ @ex[#:label #f
+ (parameterize ([rule-pict-style 'compact-vertical])
+   (render-reduction-relation simplify-ae))]
+ 
+ In the @racket['vertical-overlapping-side-conditions] variant,
+ the side-conditions don't contribute to the width of the
+ pict, but are just overlaid on the second line of each rule.
+ 
+ The @racket['horizontal-left-align] style is like the
+ @racket['horizontal] style, but the left-hand sides of the
+ rules are aligned on the left, instead of on the right.
+
+ @ex[#:label #f
+ (parameterize ([rule-pict-style 'horizontal-left-align])
+   (render-reduction-relation simplify-ae))]
+
+ The @racket['horizontal-side-conditions-same-line] is like
+ @racket['horizontal], except that side-conditions are on the
+ same lines as the rule, instead of on their own line below.
+ 
 }
 
 @defthing[reduction-rule-style/c contract?]{
@@ -598,25 +619,47 @@ results of calling the metafunction are displayed to the
 right of the arguments and the @racket['up-down] style means that
 the results are displayed below the arguments.
 
+ @ex[#:label #f
+ (parameterize ([metafunction-pict-style 'left-right])
+   (render-metafunction add #:contract? #t))
+ (parameterize ([metafunction-pict-style 'up-down])
+   (render-metafunction add #:contract? #t))]
+
 The @racket['left-right/vertical-side-conditions] and
 @racket['up-down/vertical-side-conditions] variants format side
 conditions each on a separate line, instead of all on the same line.
-
-The @racket['left-right/compact-side-conditions] and
-@racket['up-down/compact-side-conditions] variants move side
-conditions to separate lines to avoid making the rendered form wider
-would be otherwise---except that the rendered form is allowed to be up
-to the width specified by @racket[metafunction-fill-acceptable-width].
-
 The @racket['left-right/beside-side-conditions] variant is like
 @racket['left-right], except it puts the side-conditions on the 
 same line, instead of on a new line below the case.
 
- @ex[(parameterize ([metafunction-pict-style 'left-right])
-       (render-metafunction add #:contract? #t))
-     (parameterize ([metafunction-pict-style 'up-down])
-       (render-metafunction add #:contract? #t))]
+ @ex[#:label #f
+ (define-metafunction nums
+   to-nat/sc : K -> natural
+   [(to-nat/sc ·) 0]
+   [(to-nat/sc (k K))
+    ,(* 2 (term natural_K))
+    (where k 0)
+    (where natural_K (term (to-nat/sc K)))]
+   [(to-nat/sc (k K))
+    ,(+ 1 (* 2 (term natural_K)))
+    (where k 1)
+    (where natural_K (term (to-nat/sc K)))])
+ (parameterize ([metafunction-pict-style 'left-right])
+   (render-metafunction to-nat/sc #:contract? #t))
+ (parameterize ([metafunction-pict-style 'left-right/vertical-side-conditions])
+   (render-metafunction to-nat/sc #:contract? #t))
+ (parameterize ([metafunction-pict-style 'left-right/beside-side-conditions])
+   (render-metafunction to-nat/sc #:contract? #t))]
 
+ Sometimes, some cases have side-conditions that are wider
+ than other cases in such a way that they should break across
+ lines differently in different cases. The
+ @racket['left-right/compact-side-conditions] and
+ @racket['up-down/compact-side-conditions] variants move side
+ conditions to separate lines to avoid making the rendered
+ form wider would be otherwise---except that the rendered
+ form is allowed to be up to the width specified by
+ @racket[metafunction-fill-acceptable-width].
 }
 
 @defparam[metafunction-up/down-indent indent (>=/c 0)]{

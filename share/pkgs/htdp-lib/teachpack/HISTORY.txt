@@ -1,4 +1,96 @@
 ------------------------------------------------------------------------
+Version 9.1				  [Fri Jan  9 08:52:50 EST 2026]
+
+* nothing to report 
+
+------------------------------------------------------------------------
+Version 9.0				  [Wed Oct 22 06:51:51 EDT 2025]
+
+* nothing to report
+
+------------------------------------------------------------------------
+Version 8.18				  [Fri Jul 25 14:04:30 EDT 2025]
+
+* nothing to report 
+
+------------------------------------------------------------------------
+Version 8.17				  [Mon Apr 21 09:17:05 EDT 2025]
+
+* nothing to report 
+
+------------------------------------------------------------------------
+Version 8.16				  [Mon Jan 13 17:58:52 EST 2025]
+
+* nothing to report 
+
+------------------------------------------------------------------------
+Version 8.15				  [Tue Oct 22 08:32:30 EDT 2024]
+
+* nothing to report 
+
+------------------------------------------------------------------------
+Version 8.14				  [Tue Jul  9 10:37:51 EDT 2024]
+
+* nothing to report 
+
+------------------------------------------------------------------------
+Version 8.13				  [Tue Apr 23 17:32:20 EDT 2024]
+
+* fixed random to give better error message and improve its docs 
+
+------------------------------------------------------------------------
+Version 8.12				  [Mon Jan  8 10:32:06 EST 2024]
+
+* bug fixed in the testing framework 
+
+------------------------------------------------------------------------
+Version 8.11				  [Sun Oct 15 10:50:43 EDT 2023]
+
+* serious discrepancy between menu-based teaching languages and #lang
+  variants discovered; will be addressed in 8.12 
+
+------------------------------------------------------------------------
+Version 8.10				  [Fri Jul 14 13:17:33 CDT 2023]
+
+* doc fixes: remove inconsistencies between functionality and docs
+
+------------------------------------------------------------------------
+Version 8.9				  [Sun Apr 23 16:26:24 EDT 2023]
+
+* doc updates: use uniform contract names
+
+* The BSL, BSL+, ISL, and ISL+ languages come with checked signatures. 
+  This means that some names are now taken away from the global
+  namespace. -- This addition is an exploratory step. One problem
+  is that `lambda` now shows up in error messages of BSL .. ISL.
+  If we find additional obstacles over the summer and can't fix them, we
+  may backtrack. 
+
+------------------------------------------------------------------------
+Version 8.8				  [Wed Jan 18 16:41:16 EST 2023]
+
+* restrict <, <=, >, >= in *SL to take at least two arguments 
+
+------------------------------------------------------------------------
+Version 8.7				  [Tue Oct 18 08:53:31 EDT 2022]
+
+* expose arrow images from htdp/arrow for additional uses
+  (they were available via collects-path only) 
+
+------------------------------------------------------------------------
+Version 8.6				  [Wed Jul 13 08:48:06 EDT 2022]
+
+* no change 
+
+------------------------------------------------------------------------
+Version 8.5				  [Mon Apr 11 20:49:03 EDT 2022]
+
+* changed the behavior of `launch-many-worlds` so that when an
+  exception gets raised it does _not_ shut down the whole universe but
+  only the concurrent thread that's problematic (unless this uses a
+  handler) 
+
+------------------------------------------------------------------------
 version 8.3				  [Fri Oct  8 09:32:25 EDT 2021]
 
 * supplied (and fixed) documentation for functions in Intermediate

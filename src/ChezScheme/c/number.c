@@ -25,33 +25,33 @@
 #include "system.h"
 
 /* locally defined functions */
-static ptr copy_normalize PROTO((ptr tc, const bigit *p, iptr len, IBOOL sign));
-static IBOOL abs_big_lt PROTO((ptr x, ptr y, iptr xl, iptr yl));
-static IBOOL abs_big_eq PROTO((ptr x, ptr y, iptr xl, iptr yl));
-static ptr big_negate PROTO((ptr tc, ptr x));
-static ptr big_add_pos PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign));
-static ptr big_add_neg PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign));
-static ptr big_add PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys));
-static ptr big_mul PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign));
-static void big_short_trunc PROTO((ptr tc, ptr x, bigit s, iptr xl, IBOOL qs, IBOOL rs, ptr *q, ptr *r));
-static void big_trunc PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL qs, IBOOL rs, ptr *q, ptr *r));
-static INT normalize PROTO((bigit *xp, bigit *yp, iptr xl, iptr yl));
-static bigit quotient_digit PROTO((ptr tc, bigit *xp, bigit *yp, iptr yl));
-static bigit qhat PROTO((bigit *xp, bigit *yp));
-static ptr big_short_gcd PROTO((ptr tc, ptr x, bigit y, iptr xl));
-static ptr big_gcd PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl));
-static ptr s_big_ash PROTO((ptr tc, bigit *xp, iptr xl, IBOOL sign, iptr cnt));
-static double big_short_floatify PROTO((ptr tc, ptr x, bigit s, iptr xl, IBOOL sign));
-static double big_floatify PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign));
-static double floatify_normalize PROTO((bigit *p, iptr e, IBOOL sign, IBOOL sticky));
-static double floatify_ratnum PROTO((ptr tc, ptr x));
-static ptr big_logbitp PROTO((iptr n, ptr x, iptr xl, IBOOL xs));
-static ptr big_logbit0 PROTO((ptr tc, ptr origx, iptr n, ptr x, iptr xl, IBOOL xs));
-static ptr big_logbit1 PROTO((ptr tc, ptr origx, iptr n, ptr x, iptr xl, IBOOL xs));
-static ptr big_logtest PROTO((ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys));
-static ptr big_logand PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys));
-static ptr big_logor PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys));
-static ptr big_logxor PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys));
+static ptr copy_normalize(ptr tc, const bigit *p, iptr len, IBOOL sign);
+static IBOOL abs_big_lt(ptr x, ptr y, iptr xl, iptr yl);
+static IBOOL abs_big_eq(ptr x, ptr y, iptr xl, iptr yl);
+static ptr big_negate(ptr tc, ptr x);
+static ptr big_add_pos(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign);
+static ptr big_add_neg(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign);
+static ptr big_add(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys);
+static ptr big_mul(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign);
+static void big_short_trunc(ptr tc, ptr x, bigit s, iptr xl, IBOOL qs, IBOOL rs, ptr *q, ptr *r);
+static void big_trunc(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL qs, IBOOL rs, ptr *q, ptr *r);
+static INT normalize(bigit *xp, bigit *yp, iptr xl, iptr yl);
+static bigit quotient_digit(ptr tc, bigit *xp, bigit *yp, iptr yl);
+static bigit qhat(bigit *xp, bigit *yp);
+static ptr big_short_gcd(ptr tc, ptr x, bigit y, iptr xl);
+static ptr big_gcd(ptr tc, ptr x, ptr y, iptr xl, iptr yl);
+static ptr s_big_ash(ptr tc, bigit *xp, iptr xl, IBOOL sign, iptr cnt);
+static double big_short_floatify(ptr tc, ptr x, bigit s, iptr xl, IBOOL sign);
+static double big_floatify(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign);
+static double floatify_normalize(bigit *p, iptr e, IBOOL sign, IBOOL sticky);
+static double floatify_ratnum(ptr tc, ptr x);
+static ptr big_logbitp(iptr n, ptr x, iptr xl, IBOOL xs);
+static ptr big_logbit0(ptr tc, ptr origx, iptr n, ptr x, iptr xl, IBOOL xs);
+static ptr big_logbit1(ptr tc, ptr origx, iptr n, ptr x, iptr xl, IBOOL xs);
+static ptr big_logtest(ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys);
+static ptr big_logand(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys);
+static ptr big_logor(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys);
+static ptr big_logxor(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys);
 
 /* use w/o trailing semicolon */
 #define PREPARE_BIGNUM(tc,x,l)\
@@ -73,7 +73,7 @@ static ptr big_logxor PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, I
 }
 
 #define IBIGITBIGIT_TO_BIGNUM(tc,B,x,cnt,sign) {\
-  ibigitbigit _i_ = x; bigitbigit _u_; bigit _b_;\
+  ibigitbigit _i_ = x; bigitbigit _u_; bigitbigit _b_;\
   PREPARE_BIGNUM(tc, B, 2)\
   _u_ = (*sign = (_i_ < 0)) ? -_i_ : _i_;\
   if ((_b_ = (_u_ & (bigitbigit)bigit_mask)) == _u_) {\
@@ -82,12 +82,12 @@ static ptr big_logxor PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, I
   } else {\
     *cnt = 2;\
     BIGIT(B,0) = (bigit)(_u_ >> bigit_bits);\
-    BIGIT(B,1) = _b_;\
+    BIGIT(B,1) = (bigit)_b_;\
   }\
 }
 
 #define UBIGITBIGIT_TO_BIGNUM(tc,B,x,cnt) {\
-  bigitbigit _u_ = x; bigit _b_;\
+  bigitbigit _u_ = x; bigitbigit _b_;\
   PREPARE_BIGNUM(tc, B, 2)\
   if ((_b_ = (_u_ & (bigitbigit)bigit_mask)) == _u_) {\
     *cnt = 1;\
@@ -95,7 +95,7 @@ static ptr big_logxor PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, I
   } else {\
     *cnt = 2;\
     BIGIT(B,0) = (bigit)(_u_ >> bigit_bits);\
-    BIGIT(B,1) = _b_;\
+    BIGIT(B,1) = (bigit)_b_;\
   }\
 }
 
@@ -119,7 +119,7 @@ static ptr big_logxor PROTO((ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, I
 #endif
 
 #if (U64_bigits == 4)
-see v7.4 number.c for U64_TO_BIGNUM w/U64_bigits == 4
+#error see v7.4 number.c for U64_TO_BIGNUM w/U64_bigits == 4
 #endif
 
 #define ptr_bigits (ptr_bits / bigit_bits)
@@ -164,7 +164,7 @@ ptr S_normalize_bignum(ptr x) {
   return x;
 }
 
-static ptr copy_normalize(tc, p, len, sign) ptr tc; const bigit *p; iptr len; IBOOL sign; {
+static ptr copy_normalize(ptr tc, const bigit *p, iptr len, IBOOL sign) {
   bigit *p1; uptr n; ptr b;
 
   for (;;) {
@@ -202,14 +202,17 @@ static ptr copy_normalize(tc, p, len, sign) ptr tc; const bigit *p; iptr len; IB
   return b;
 }
 
+#define RETURN_STRY_OK(expr) { *val = expr; return 1; }
+#define RETURN_STRY_ERROR(why) { if (reason) *reason = why; return 0; }
+
 /* -2^(b-1) <= x <= 2^b-1, where b = number of bits in a uptr */
-iptr S_integer_value(who, x) const char *who; ptr x; {
-  if (Sfixnump(x)) return UNFIX(x);
+IBOOL Stry_integer_value(ptr x, iptr *val, const char** reason) {
+  if (Sfixnump(x)) RETURN_STRY_OK(UNFIX(x))
 
   if (Sbignump(x)) {
     iptr xl; uptr u;
 
-    if ((xl = BIGLEN(x)) > ptr_bigits) S_error1(who, "~s is out of range", x);
+    if ((xl = BIGLEN(x)) > ptr_bigits) RETURN_STRY_ERROR("~s is out of range")
 
     u = BIGIT(x,0);
 
@@ -217,69 +220,48 @@ iptr S_integer_value(who, x) const char *who; ptr x; {
     if (xl == 2) u = (u << bigit_bits) | BIGIT(x,1);
 #endif
 
-    if (!BIGSIGN(x)) return (iptr)u;
-    if (u < ((uptr)1 << (ptr_bits - 1))) return -(iptr)u;
-    if (u > ((uptr)1 << (ptr_bits - 1))) S_error1(who, "~s is out of range", x);
+    if (!BIGSIGN(x)) RETURN_STRY_OK((iptr)u)
+    if (u < ((uptr)1 << (ptr_bits - 1))) RETURN_STRY_OK(-(iptr)u)
+    if (u > ((uptr)1 << (ptr_bits - 1))) RETURN_STRY_ERROR("~s is out of range")
 #if (fixnum_bits > 32)
-    return (iptr)0x8000000000000000;
+    RETURN_STRY_OK((iptr)0x8000000000000000)
 #else
-    return (iptr)0x80000000;
+    RETURN_STRY_OK((iptr)0x80000000)
 #endif
   }
 
-  S_error1(who, "~s is not an integer", x);
-
-  return 0 /* not reached */;
+  RETURN_STRY_ERROR("~s is not an integer")
 }
 
-/* -2^(b-1) <= x <= 2^b-1, where b = number of bits in a uptr */
-IBOOL S_integer_valuep(x) ptr x; {
-  if (Sfixnump(x)) return 1;
-
-  if (Sbignump(x)) {
-    iptr xl; uptr u;
-
-    if ((xl = BIGLEN(x)) > ptr_bigits) return 0;
-
-    u = BIGIT(x,0);
-
-#if (ptr_bigits == 2)
-    if (xl == 2) u = (u << bigit_bits) | BIGIT(x,1);
-#endif
-
-    if (!BIGSIGN(x)) return 1;
-    return u <= ((uptr)1 << (ptr_bits - 1));
-  }
-
-  return 0;
-}
-
-iptr Sinteger_value(x) ptr x; {
-  return S_integer_value("Sinteger_value", x);
+iptr Sinteger_value(ptr x) {
+  iptr result;
+  const char* reason;
+  if (Stry_integer_value(x, &result, &reason)) return result;
+  S_error1("Sinteger_value", reason, x);
 }
 
 /* -2^31 <= x <= 2^32-1 */
-I32 S_int32_value(who, x) char *who; ptr x; {
+IBOOL Stry_integer32_value(ptr x, Sint32_t* val, const char** reason) {
 #if (fixnum_bits > 32)
   if (Sfixnump(x)) {
     iptr n = UNFIX(x);
     if (n < 0) {
-      I32 m = (I32)n;
-      if ((iptr)m == UNFIX(x)) return m;
+      Sint32_t m = (Sint32_t)n;
+      if ((iptr)m == UNFIX(x)) RETURN_STRY_OK(m)
     } else {
-      U32 m = (U32)n;
-      if ((uptr)m == (uptr)UNFIX(x)) return (I32)m;
+      Suint32_t m = (Suint32_t)n;
+      if ((uptr)m == (uptr)UNFIX(x)) RETURN_STRY_OK((Sint32_t)m)
     }
-    S_error1(who, "~s is out of range", x);
+    RETURN_STRY_ERROR("~s is out of range")
   }
-  if (Sbignump(x)) S_error1(who, "~s is out of range", x);
+  if (Sbignump(x)) RETURN_STRY_ERROR("~s is out of range")
 #else /* (fixnum_bits > 32) */
-  if (Sfixnump(x)) return UNFIX(x);
+  if (Sfixnump(x)) RETURN_STRY_OK(UNFIX(x))
 
   if (Sbignump(x)) {
-    iptr xl; U32 u;
+    iptr xl; Suint32_t u;
 
-    if ((xl = BIGLEN(x)) > U32_bigits) S_error1(who, "~s is out of range", x);
+    if ((xl = BIGLEN(x)) > U32_bigits) RETURN_STRY_ERROR("~s is out of range")
 
     u = BIGIT(x,0);
 
@@ -287,30 +269,31 @@ I32 S_int32_value(who, x) char *who; ptr x; {
     if (xl == 2) u = (u << bigit_bits) | BIGIT(x,1);
 #endif
 
-    if (!BIGSIGN(x)) return (I32)u;
-    if (u < ((U32)1 << 31)) return -(I32)u;
-    if (u > ((U32)1 << 31)) S_error1(who, "~s is out of range", x);
-    return (I32)0x80000000;
+    if (!BIGSIGN(x)) RETURN_STRY_OK((Sint32_t)u)
+    if (u < ((Suint32_t)1 << 31)) RETURN_STRY_OK(-(Sint32_t)u)
+    if (u > ((Suint32_t)1 << 31)) RETURN_STRY_ERROR("~s is out of range")
+    RETURN_STRY_OK((Sint32_t)0x80000000)
   }
 #endif /* (fixnum_bits > 32) */
 
-  S_error1(who, "~s is not an integer", x);
-
-  return 0 /* not reached */;
+  RETURN_STRY_ERROR("~s is not an integer")
 }
 
-I32 Sinteger32_value(x) ptr x; {
-  return S_int32_value("Sinteger32_value", x);
+Sint32_t Sinteger32_value(ptr x) {
+  Sint32_t result;
+  const char* reason;
+  if (Stry_integer32_value(x, &result, &reason)) return result;
+  S_error1("Sinteger32_value", reason, x);
 }
 
 /* -2^63 <= x <= 2^64-1 */
-I64 S_int64_value(who, x) char *who; ptr x; {
-  if (Sfixnump(x)) return UNFIX(x);
+IBOOL Stry_integer64_value(ptr x, Sint64_t *val, const char** reason) {
+  if (Sfixnump(x)) RETURN_STRY_OK(UNFIX(x))
 
   if (Sbignump(x)) {
-    iptr xl; U64 u;
+    iptr xl; Suint64_t u;
 
-    if ((xl = BIGLEN(x)) > U64_bigits) S_error1(who, "~s is out of range", x);
+    if ((xl = BIGLEN(x)) > U64_bigits) RETURN_STRY_ERROR("~s is out of range")
 
     u = BIGIT(x,0);
 
@@ -318,22 +301,54 @@ I64 S_int64_value(who, x) char *who; ptr x; {
     if (xl == 2) u = (u << bigit_bits) | BIGIT(x,1);
 #endif
 
-    if (!BIGSIGN(x)) return (I64)u;
-    if (u < ((U64)1 << 63)) return -(I64)u;
-    if (u > ((U64)1 << 63)) S_error1(who, "~s is out of range", x);
-    return (I64)0x8000000000000000;
+    if (!BIGSIGN(x)) RETURN_STRY_OK((Sint64_t)u)
+    if (u < ((Suint64_t)1 << 63)) RETURN_STRY_OK(-(Sint64_t)u)
+    if (u > ((Suint64_t)1 << 63)) RETURN_STRY_ERROR("~s is out of range")
+    RETURN_STRY_OK((Sint64_t)0x8000000000000000)
   }
 
-  S_error1(who, "~s is not an integer", x);
-
-  return 0 /* not reached */;
+  RETURN_STRY_ERROR("~s is not an integer")
 }
 
-I64 Sinteger64_value(x) ptr x; {
+I64 S_int64_value(char *who, ptr x) {
+  Sint64_t result;
+  const char* reason;
+  if (Stry_integer64_value(x, &result, &reason)) return result;
+  S_error1(who, reason, x);
+}
+
+Sint64_t Sinteger64_value(ptr x) {
   return S_int64_value("Sinteger64_value", x);
 }
 
-ptr Sunsigned(u) uptr u; { /* convert arg to Scheme integer */
+IBOOL Stry_unsigned_value(ptr x, uptr* val, const char** reason) {
+  iptr tmp;
+  if (Stry_integer_value(x, &tmp, reason)) {
+    *val = (uptr)tmp;
+    return 1;
+  }
+  return 0;
+}
+
+IBOOL Stry_unsigned32_value(ptr x, Suint32_t* val, const char** reason) {
+  Sint32_t tmp;
+  if (Stry_integer32_value(x, &tmp, reason)) {
+    *val = (Suint32_t)tmp;
+    return 1;
+  }
+  return 0;
+}
+
+IBOOL Stry_unsigned64_value(ptr x, Suint64_t* val, const char** reason) {
+  Sint64_t tmp;
+  if (Stry_integer64_value(x, &tmp, reason)) {
+    *val = (Suint64_t)tmp;
+    return 1;
+  }
+  return 0;
+}
+
+ptr Sunsigned(uptr u) { /* convert arg to Scheme integer */
   if (u <= most_positive_fixnum)
     return FIX(u);
   else {
@@ -344,7 +359,7 @@ ptr Sunsigned(u) uptr u; { /* convert arg to Scheme integer */
   }
 }
 
-ptr Sinteger(i) iptr i; { /* convert arg to Scheme integer */
+ptr Sinteger(iptr i) { /* convert arg to Scheme integer */
   if (FIXRANGE(i))
     return FIX(i);
   else {
@@ -355,7 +370,7 @@ ptr Sinteger(i) iptr i; { /* convert arg to Scheme integer */
   }
 }
 
-ptr Sunsigned32(u) U32 u; { /* convert arg to Scheme integer */
+ptr Sunsigned32(Suint32_t u) { /* convert arg to Scheme integer */
 #if (fixnum_bits > 32)
   return FIX((uptr)u);
 #else
@@ -370,11 +385,11 @@ ptr Sunsigned32(u) U32 u; { /* convert arg to Scheme integer */
 #endif
 }
 
-ptr Sinteger32(i) I32 i; { /* convert arg to Scheme integer */
+ptr Sinteger32(Sint32_t i) { /* convert arg to Scheme integer */
 #if (fixnum_bits > 32)
   return FIX((iptr)i);
 #else
-  if (i > most_negative_fixnum && i <= most_positive_fixnum)
+  if (i >= most_negative_fixnum && i <= most_positive_fixnum)
     return FIX((iptr)i);
   else {
     ptr x = FIX(0); iptr xl; IBOOL xs;
@@ -385,7 +400,7 @@ ptr Sinteger32(i) I32 i; { /* convert arg to Scheme integer */
 #endif
 }
 
-ptr Sunsigned64(u) U64 u; { /* convert arg to Scheme integer */
+ptr Sunsigned64(Suint64_t u) { /* convert arg to Scheme integer */
   if (u <= most_positive_fixnum)
     return FIX((uptr)u);
   else {
@@ -396,8 +411,8 @@ ptr Sunsigned64(u) U64 u; { /* convert arg to Scheme integer */
   }
 }
 
-ptr Sinteger64(i) I64 i; { /* convert arg to Scheme integer */
-  if (i > most_negative_fixnum && i <= most_positive_fixnum)
+ptr Sinteger64(Sint64_t i) { /* convert arg to Scheme integer */
+  if (i >= most_negative_fixnum && i <= most_positive_fixnum)
     return FIX((iptr)i);
   else {
     ptr x = FIX(0); iptr xl; IBOOL xs;
@@ -462,7 +477,7 @@ comparison
 ***
 */
 
-IBOOL S_big_lt(x, y) ptr x, y; {
+IBOOL S_big_lt(ptr x, ptr y) {
   if (BIGSIGN(x))
     if (BIGSIGN(y))
       return abs_big_lt(y, x, BIGLEN(y), BIGLEN(x)); /* both negative */
@@ -475,11 +490,11 @@ IBOOL S_big_lt(x, y) ptr x, y; {
       return abs_big_lt(x, y, BIGLEN(x), BIGLEN(y)); /* both positive */
 }
 
-IBOOL S_big_eq(x, y) ptr x; ptr y; {
+IBOOL S_big_eq(ptr x, ptr y) {
   return (BIGSIGN(x) == BIGSIGN(y)) && abs_big_eq(x, y, BIGLEN(x), BIGLEN(y));
 }
 
-static IBOOL abs_big_lt(x, y, xl, yl) ptr x, y; iptr xl, yl; {
+static IBOOL abs_big_lt(ptr x, ptr y, iptr xl, iptr yl) {
   if (xl != yl)
     return xl < yl;
   else {
@@ -492,7 +507,7 @@ static IBOOL abs_big_lt(x, y, xl, yl) ptr x, y; iptr xl, yl; {
   }
 }
 
-static IBOOL abs_big_eq(x, y, xl, yl) ptr x, y; iptr xl, yl; {
+static IBOOL abs_big_eq(ptr x, ptr y, iptr xl, iptr yl) {
   if (xl != yl)
     return 0;
   else {
@@ -511,16 +526,16 @@ addition/subtraction
 ***
 */
 
-static ptr big_negate(tc, x) ptr tc, x; {
+static ptr big_negate(ptr tc, ptr x) {
   return copy_normalize(tc, &BIGIT(x,0),BIGLEN(x),!BIGSIGN(x));
 }
 
-ptr S_big_negate(x) ptr x; {
+ptr S_big_negate(ptr x) {
   return big_negate(get_thread_context(), x);
 }
 
 /* assumptions: BIGLEN(x) >= BIGLEN(y) */
-static ptr big_add_pos(tc, x, y, xl, yl, sign) ptr tc, x, y; iptr xl, yl; IBOOL sign; {
+static ptr big_add_pos(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign) {
   iptr i;
   bigit *xp, *yp, *zp;
   bigit k = 0;
@@ -542,7 +557,7 @@ static ptr big_add_pos(tc, x, y, xl, yl, sign) ptr tc, x, y; iptr xl, yl; IBOOL 
 }
 
 /* assumptions: x >= y */
-static ptr big_add_neg(tc, x, y, xl, yl, sign) ptr tc, x, y; iptr xl, yl; IBOOL sign; {
+static ptr big_add_neg(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign) {
   iptr i;
   bigit *xp, *yp, *zp;
   bigit b = 0;
@@ -561,7 +576,7 @@ static ptr big_add_neg(tc, x, y, xl, yl, sign) ptr tc, x, y; iptr xl, yl; IBOOL 
   return copy_normalize(tc, zp+1,xl,sign);
 }
 
-static ptr big_add(tc, x, y, xl, yl, xs, ys) ptr tc, x, y; iptr xl, yl; IBOOL xs, ys; {
+static ptr big_add(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys) {
   if (xs == ys)
     if (xl < yl)
       return big_add_pos(tc, y, x, yl, xl, xs);
@@ -575,7 +590,7 @@ static ptr big_add(tc, x, y, xl, yl, xs, ys) ptr tc, x, y; iptr xl, yl; IBOOL xs
 }
 
 /* arguments must be integers, fixnums or bignums */
-ptr S_add(x, y) ptr x, y; {
+ptr S_add(ptr x, ptr y) {
   ptr tc = get_thread_context();
 
   if (Sfixnump(x)) {
@@ -599,7 +614,7 @@ ptr S_add(x, y) ptr x, y; {
 }
 
 /* arguments must be integers, fixnums or bignums */
-ptr S_sub(x, y) ptr x, y; {
+ptr S_sub(ptr x, ptr y) {
   ptr tc = get_thread_context();
 
   if (Sfixnump(x)) {
@@ -628,7 +643,7 @@ multiplication
 ***
 */
 
-static ptr big_mul(tc, x, y, xl, yl, sign) ptr tc, x, y; iptr xl, yl; IBOOL sign; {
+static ptr big_mul(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign) {
   iptr xi, yi;
   bigit *xp, *yp, *zp, *zpa;
   bigit k, k1, prod;
@@ -662,7 +677,7 @@ static ptr big_mul(tc, x, y, xl, yl, sign) ptr tc, x, y; iptr xl, yl; IBOOL sign
 #define SHORTRANGE(x) (-0x3FFFFFFF <= (x) && (x) <= 0x3FFFFFFF)
 #endif
 
-ptr S_mul(x, y) ptr x, y; {
+ptr S_mul(ptr x, ptr y) {
   ptr tc = get_thread_context();
 
   iptr xl, yl; IBOOL xs, ys;
@@ -700,7 +715,7 @@ division
 */
 
 /* arguments must be integers (fixnums or bignums), y must be nonzero */
-ptr S_div(x, y) ptr x, y; {
+ptr S_div(ptr x, ptr y) {
   ptr g, n, d;
   ptr tc = get_thread_context();
 
@@ -715,20 +730,20 @@ ptr S_div(x, y) ptr x, y; {
   return S_rational(n, d);
 }
 
-ptr S_trunc(x, y) ptr x, y; {
+ptr S_trunc(ptr x, ptr y) {
   ptr q;
   S_trunc_rem(get_thread_context(), x, y, &q, (ptr *)NULL);
   return q;
 }
 
-ptr S_rem(x, y) ptr x, y; {
+ptr S_rem(ptr x, ptr y) {
   ptr r;
   S_trunc_rem(get_thread_context(), x, y, (ptr *)NULL, &r);
   return r;
 }
 
 /* arguments must be integers (fixnums or bignums), y must be nonzero */
-void S_trunc_rem(tc, origx, y, q, r) ptr tc, origx, y, *q, *r; {
+void S_trunc_rem(ptr tc, ptr origx, ptr y, ptr *q, ptr *r) {
   iptr xl, yl; IBOOL xs, ys; ptr x = origx;
 
   if (Sfixnump(x)) {
@@ -781,8 +796,7 @@ static void big_short_trunc(ptr tc, ptr x, bigit s, iptr xl, IBOOL qs, IBOOL rs,
   if (r != (ptr *)NULL) *r = copy_normalize(tc, &k,1,rs);
 }
 
-static void big_trunc(tc, x, y, xl, yl, qs, rs, q, r)
-              ptr tc, x, y; iptr xl, yl; IBOOL qs, rs; ptr *q, *r; {
+static void big_trunc(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL qs, IBOOL rs, ptr *q, ptr *r) {
   iptr i;
   bigit *p, *xp, *yp;
   iptr m = xl-yl+1;
@@ -816,7 +830,7 @@ static void big_trunc(tc, x, y, xl, yl, qs, rs, q, r)
   }
 }
 
-static INT normalize(xp, yp, xl, yl) bigit *xp, *yp; iptr xl, yl; {
+static INT normalize(bigit *xp, bigit *yp, iptr xl, iptr yl) {
   iptr i;
   bigit *p, k, b;
   INT shft;
@@ -832,7 +846,7 @@ static INT normalize(xp, yp, xl, yl) bigit *xp, *yp; iptr xl, yl; {
   return shft;
 }
 
-static bigit quotient_digit(tc, xp, yp, yl) ptr tc; bigit *xp, *yp; iptr yl; {
+static bigit quotient_digit(ptr tc, bigit *xp, bigit *yp, iptr yl) {
   bigit *p1, *p2, q, k, b, prod;
   iptr i;
 
@@ -859,7 +873,7 @@ static bigit quotient_digit(tc, xp, yp, yl) ptr tc; bigit *xp, *yp; iptr yl; {
   return q;
 }
 
-static bigit qhat(xp, yp) bigit *xp, *yp; {
+static bigit qhat(bigit *xp, bigit *yp) {
   bigit q, r, high, low, k;
 
   k = 0;
@@ -886,7 +900,7 @@ gcd
 ***
 */
 
-static ptr uptr_gcd(x, y) uptr x, y; {
+static ptr uptr_gcd(uptr x, uptr y) {
   uptr r;
 
   while (y != 0) {
@@ -914,7 +928,7 @@ static ptr big_short_gcd(ptr tc, ptr x, bigit y, iptr xl) {
   return uptr_gcd((uptr)y,(uptr)r);
 }
 
-static ptr big_gcd(tc, x, y, xl, yl) ptr tc, x, y; iptr xl, yl; {
+static ptr big_gcd(ptr tc, ptr x, ptr y, iptr xl, iptr yl) {
   iptr i;
   INT shft, asc;
   bigit *p, *xp, *yp, k, b;
@@ -993,7 +1007,7 @@ static ptr big_gcd(tc, x, y, xl, yl) ptr tc, x, y; iptr xl, yl; {
   }
 }
 
-ptr S_gcd(x, y) ptr x, y; {
+ptr S_gcd(ptr x, ptr y) {
   ptr tc = get_thread_context();
   iptr xl, yl; IBOOL xs, ys;
 
@@ -1042,15 +1056,15 @@ floating-point operations
 
 #ifdef IEEE_DOUBLE
 /* exponent stored + 1024, hidden bit to left of decimal point */
-#define bias 1023
-#define bitstoright 52
-#define m1mask 0xf
-#ifdef WIN32
-#define hidden_bit 0x10000000000000
-#else
-#define hidden_bit 0x10000000000000ULL
-#endif
-#ifdef LITTLE_ENDIAN_IEEE_DOUBLE
+# define bias 1023
+# define bitstoright 52
+# define m1mask 0xf
+# ifdef WIN32
+#  define hidden_bit 0x10000000000000
+# else
+#  define hidden_bit 0x10000000000000ULL
+# endif
+# ifdef LITTLE_ENDIAN_IEEE_DOUBLE
 struct dblflt {
     UINT m4: 16;
     UINT m3: 16;
@@ -1059,7 +1073,7 @@ struct dblflt {
     UINT e: 11;
     UINT sign: 1;
 };
-#else
+# else
 struct dblflt {
     UINT sign: 1;
     UINT e: 11;
@@ -1068,10 +1082,10 @@ struct dblflt {
     UINT m3: 16;
     UINT m4: 16;
 };
-#endif
+# endif
 #endif
 
-double S_random_double(m1, m2, m3, m4, scale) U32 m1, m2, m3, m4; double scale; {
+double S_random_double(U32 m1, U32 m2, U32 m3, U32 m4, double scale) {
  /* helper for s_fldouble in prim5.c */
   union dxunion {
     double d;
@@ -1111,7 +1125,7 @@ static double big_short_floatify(ptr tc, ptr x, bigit s, iptr xl, IBOOL sign) {
   return floatify_normalize(&BIGIT(W(tc),0), xl*bigit_bits, sign, k != 0);
 }
 
-static double big_floatify(tc, x, y, xl, yl, sign) ptr tc, x, y; iptr xl, yl; IBOOL sign; {
+static double big_floatify(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL sign) {
   iptr i, ul;
   bigit *p, *xp, *yp, k;
 
@@ -1142,7 +1156,7 @@ static double big_floatify(tc, x, y, xl, yl, sign) ptr tc, x, y; iptr xl, yl; IB
 }
 
 /* come in with exactly 'enough' bigits */
-static double floatify_normalize(p, e, sign, sticky) bigit *p; iptr e; IBOOL sign, sticky; {
+static double floatify_normalize(bigit *p, iptr e, IBOOL sign, IBOOL sticky) {
   /* *p: first bigit; e: exponent; sign: sign; sticky: sticky bit */
   union dxunion {
     double d;
@@ -1222,7 +1236,7 @@ static double floatify_normalize(p, e, sign, sticky) bigit *p; iptr e; IBOOL sig
   return dx.d;
 }
 
-static double floatify_ratnum(tc, p) ptr tc, p; {
+static double floatify_ratnum(ptr tc, ptr p) {
   ptr x, y; iptr xl, yl; IBOOL xs;
 
   x = RATNUM(p); y = RATDEN(p);
@@ -1254,7 +1268,7 @@ static double floatify_ratnum(tc, p) ptr tc, p; {
     return big_floatify(tc, x, y, xl, yl, xs);
 }
 
-double S_floatify(x) ptr x; {
+double S_floatify(ptr x) {
   ptr tc = get_thread_context();
 
   if (Sflonump(x)) return FLODAT(x);
@@ -1267,7 +1281,7 @@ double S_floatify(x) ptr x; {
 }
 
 #ifdef IEEE_DOUBLE
-ptr S_decode_float(d) double d; {
+ptr S_decode_float(double d) {
   union dxunion {
     double d;
     struct dblflt x;
@@ -1313,7 +1327,7 @@ logical operations
 ***
 */
 
-static ptr s_big_ash(tc, xp, xl, sign, cnt) ptr tc; bigit *xp; iptr xl; IBOOL sign; iptr cnt; {
+static ptr s_big_ash(ptr tc, bigit *xp, iptr xl, IBOOL sign, iptr cnt) {
   iptr i;
   bigit *p1, *p2, k;
 
@@ -1398,7 +1412,7 @@ static ptr s_big_ash(tc, xp, xl, sign, cnt) ptr tc; bigit *xp; iptr xl; IBOOL si
 }
 
 /* x is a bignum or fixnum, n is a fixnum */
-ptr S_ash(x, n) ptr x, n; {
+ptr S_ash(ptr x, ptr n) {
   ptr tc = get_thread_context();
   iptr cnt = UNFIX(n);
 
@@ -1415,7 +1429,7 @@ ptr S_ash(x, n) ptr x, n; {
 }
 
 /* x is a bignum */
-ptr S_integer_length(x) ptr x; {
+ptr S_integer_length(ptr x) {
   iptr a; bigit b;
 
   if (BIGSIGN(x)) x = S_sub(FIX(-1), x);
@@ -1493,7 +1507,8 @@ ptr S_big_positive_bit_field(ptr x, ptr fxstart, ptr fxend) {
 }
 
 /* returns a lower bound on the number of trailing 0 bits in the
-   binary representation: */
+   binary representation; the result plus bigit_bits-1 is an
+   upper bound: */
 ptr S_big_trailing_zero_bits(ptr x) {
   bigit *xp = &BIGIT(x, 0);
   iptr xl = BIGLEN(x), i;
@@ -1526,7 +1541,7 @@ ptr S_big_trailing_zero_bits(ptr x) {
    # = 2's complement; #x = ~x + 1 = ~(x - 1) if x > 0
 */
 
-ptr S_logand(x, y) ptr x, y; {
+ptr S_logand(ptr x, ptr y) {
   ptr tc = get_thread_context();
 
   if (Sfixnump(x)) {
@@ -1563,7 +1578,7 @@ ptr S_logand(x, y) ptr x, y; {
 */
 
 /* assumes xl >= yl */
-static ptr big_logand(tc, x, y, xl, yl, xs, ys) ptr tc, x, y; iptr xl, yl; IBOOL xs, ys; {
+static ptr big_logand(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys) {
   iptr i;
   bigit *xp, *yp, *zp;
 
@@ -1631,7 +1646,7 @@ static ptr big_logand(tc, x, y, xl, yl, xs, ys) ptr tc, x, y; iptr xl, yl; IBOOL
 
 /* logtest is like logand but returns a boolean value */
 
-ptr S_logtest(x, y) ptr x, y; {
+ptr S_logtest(ptr x, ptr y) {
   ptr tc = get_thread_context();
 
   if (Sfixnump(x)) {
@@ -1660,7 +1675,7 @@ ptr S_logtest(x, y) ptr x, y; {
    logand would return a nonzero value */
 
 /* assumes xl >= yl */
-static ptr big_logtest(x, y, xl, yl, xs, ys) ptr x, y; iptr xl, yl; IBOOL xs, ys; {
+static ptr big_logtest(ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys) {
   iptr i;
   bigit *xp, *yp;
 
@@ -1702,7 +1717,7 @@ static ptr big_logtest(x, y, xl, yl, xs, ys) ptr x, y; iptr xl, yl; IBOOL xs, ys
 }
 
 /* k must be a nonnegative fixnum.  x may be a bignum or fixnum */
-ptr S_logbitp(k, x) ptr k, x; {
+ptr S_logbitp(ptr k, ptr x) {
   uptr n = UNFIX(k);
 
   if (Sfixnump(x)) {
@@ -1726,7 +1741,7 @@ void S_bignum_mask_test(void) {
 
 /* similar logic to big_logand */
 
-static ptr big_logbitp(n, x, xl, xs) ptr x; iptr n, xl; IBOOL xs; {
+static ptr big_logbitp(iptr n, ptr x, iptr xl, IBOOL xs) {
   iptr i;
   bigit *xp;
 
@@ -1753,7 +1768,7 @@ static ptr big_logbitp(n, x, xl, xs) ptr x; iptr n, xl; IBOOL xs; {
 }
 
 /* k must be a nonnegative fixnum.  x may be a bignum or fixnum */
-ptr S_logbit0(k, x) ptr k, x; {
+ptr S_logbit0(ptr k, ptr x) {
   ptr tc = get_thread_context();
   iptr n = UNFIX(k);
 
@@ -1780,7 +1795,7 @@ ptr S_logbit0(k, x) ptr k, x; {
 */
 
 /* adapted from big_logor algorithm */
-static ptr big_logbit0(tc, origx, n, x, xl, xs) ptr tc, origx, x; iptr n, xl; IBOOL xs; {
+static ptr big_logbit0(ptr tc, ptr origx, iptr n, ptr x, iptr xl, IBOOL xs) {
   iptr i;
   bigit *xp, *zp;
   iptr yl = (n / bigit_bits) + 1;
@@ -1830,7 +1845,7 @@ static ptr big_logbit0(tc, origx, n, x, xl, xs) ptr tc, origx, x; iptr n, xl; IB
 }
 
 /* k must be a nonnegative fixnum.  x may be a bignum or fixnum */
-ptr S_logbit1(k, x) ptr k, x; {
+ptr S_logbit1(ptr k, ptr x) {
   ptr tc = get_thread_context();
   iptr n = UNFIX(k);
 
@@ -1849,7 +1864,7 @@ ptr S_logbit1(k, x) ptr k, x; {
 }
 
 /* adapted from big_logor algorithm */
-static ptr big_logbit1(tc, origx, n, x, xl, xs) ptr tc, origx, x; iptr n, xl; IBOOL xs; {
+static ptr big_logbit1(ptr tc, ptr origx, iptr n, ptr x, iptr xl, IBOOL xs) {
   iptr i;
   bigit *xp, *zp;
   iptr yl = (n / bigit_bits) + 1;
@@ -1903,7 +1918,7 @@ static ptr big_logbit1(tc, origx, n, x, xl, xs) ptr tc, origx, x; iptr n, xl; IB
   }
 }
 
-ptr S_logor(x, y) ptr x, y; {
+ptr S_logor(ptr x, ptr y) {
   ptr tc = get_thread_context();
 
   if (Sfixnump(x)) {
@@ -1940,7 +1955,7 @@ ptr S_logor(x, y) ptr x, y; {
 */
 
 /* assumes xl >= yl */
-static ptr big_logor(tc, x, y, xl, yl, xs, ys) ptr tc, x, y; iptr xl, yl; IBOOL xs, ys; {
+static ptr big_logor(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys) {
   iptr i;
   bigit *xp, *yp, *zp;
 
@@ -2010,7 +2025,7 @@ static ptr big_logor(tc, x, y, xl, yl, xs, ys) ptr tc, x, y; iptr xl, yl; IBOOL 
   }
 }
 
-ptr S_logxor(x, y) ptr x, y; {
+ptr S_logxor(ptr x, ptr y) {
   ptr tc = get_thread_context();
 
   if (Sfixnump(x)) {
@@ -2047,7 +2062,7 @@ ptr S_logxor(x, y) ptr x, y; {
 */
 
 /* assumes xl >= yl */
-static ptr big_logxor(tc, x, y, xl, yl, xs, ys) ptr tc, x, y; iptr xl, yl; IBOOL xs, ys; {
+static ptr big_logxor(ptr tc, ptr x, ptr y, iptr xl, iptr yl, IBOOL xs, IBOOL ys) {
   iptr i;
   bigit *xp, *yp, *zp;
 
@@ -2141,7 +2156,7 @@ static ptr big_logxor(tc, x, y, xl, yl, xs, ys) ptr tc, x, y; iptr xl, yl; IBOOL
      (define (lognot x) (- -1 x))
 */
 
-ptr S_lognot(x) ptr x; {
+ptr S_lognot(ptr x) {
   if (Sfixnump(x)) {
     return FIX(~UNFIX(x));
   } else {
@@ -2149,7 +2164,7 @@ ptr S_lognot(x) ptr x; {
   }
 }
 
-void S_number_init() {
+void S_number_init(void) {
   if ((int)(hidden_bit >> 22) != 0x40000000) {
     fprintf(stderr, "hidden_bit >> 22 = %x\n", (int)(hidden_bit >> 22));
     S_abnormal_exit();

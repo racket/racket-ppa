@@ -9,15 +9,18 @@
          racket/match
          (for-syntax racket/base racket/syntax syntax/stx syntax/parse)
          racket/set
+         racket/treelist
          racket/sequence
          (for-template racket/base
                        racket/contract/base
                        racket/set
+                       racket/treelist
                        racket/async-channel
                        racket/sequence
                        racket/promise
                        "../../utils/evt-contract.rkt"
                        "../../utils/hash-contract.rkt"
+                       "../../utils/shallow-contract.rkt"
                        "../../utils/vector-contract.rkt"
                        "../../utils/promise-not-name-contract.rkt")
          racket/contract
@@ -153,10 +156,13 @@
 (combinator-structs
   ((or/sc . (#:covariant)) or/c #:flat)
   ((and/sc . (#:covariant)) and/c #:flat)
+  ((shallow-or/sc . (#:covariant)) shallow-or/c #:flat)
+  ((shallow-and/sc . (#:covariant)) shallow-and/c #:flat)
   ((list/sc . (#:covariant)) list/c #:flat)
   ((listof/sc (#:covariant)) listof #:flat)
   ((cons/sc (#:covariant) (#:covariant)) cons/c #:flat)
   ((set/sc (#:covariant #:chaperone)) set/c #:flat)
+  ((treelist/sc (#:covariant #:chaperone)) treelist/c #:flat)
   ((struct-property/sc (#:invariant)) struct-type-property/c #:impersonator)
   ((immutable-vectorof/sc (#:covariant)) immutable-vectorof/c #:flat)
   ((mutable-vectorof/sc (#:invariant)) mutable-vectorof/c #:chaperone)

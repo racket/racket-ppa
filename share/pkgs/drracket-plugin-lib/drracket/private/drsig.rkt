@@ -82,6 +82,7 @@
    add-prefs-panel
    
    get-error-color
+   get-error-color-name
    
    hide-backtrace-window
    show-backtrace-window
@@ -125,7 +126,10 @@
    modes-mixin
    drracket-determined-width
 
-   error-message%))
+   error-message%
+
+   disable-debugging-et-al
+   get-preferred-lang-line))
 
 (define-signature drracket:module-language-tools-cm^
   (frame-mixin
@@ -146,7 +150,9 @@
    (struct online-expansion-handler (mod-path id local-handler monitor?))
    get-online-expansion-handlers
    no-more-online-expansion-handlers
-   interactions-text-mixin))
+   interactions-text-mixin
+   call-capability-value
+   capability-value-irl))
 
 (define-signature drracket:get-collection-cm^ ())
 (define-signature drracket:get-collection^ extends drracket:get-collection-cm^
@@ -192,8 +198,10 @@
    get-all-scheme-manual-keywords
    get-all-manual-keywords
    add-built-in-languages
+   add-no-language-chosen-language-if-there-are-choices
    not-a-language-language<%>
-   language-allows-executable-creation?))
+   language-allows-executable-creation?
+   only-module-language?))
 
 (define-signature drracket:tools-cm^
   ())
@@ -237,6 +245,7 @@
    interactions-canvas%))
 (define-signature drracket:unit^ extends drracket:unit-cm^
   (open-drscheme-window
+   create-new-drscheme-frame
    find-symbol
    get-program-editor-mixin
    add-to-program-editor-mixin
@@ -255,7 +264,9 @@
 (define-signature drracket:frame/int^ extends drracket:frame^
   (create-root-menubar
    add-keybindings-item
-   planet-spec?))
+   planet-spec?
+   try-to-find-an-irl
+   try-to-find-a-language-family))
 
 (define-signature drracket:program-cm^
   (frame%))

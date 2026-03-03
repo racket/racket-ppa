@@ -1,20 +1,25 @@
 #lang racket/base
 
-(require racket/match racket/sequence
-         syntax/id-table racket/syntax syntax/stx
+(require (for-syntax racket/base
+                     racket/syntax
+                     syntax/parse)
+         (for-template racket/base)
+         racket/match
+         racket/promise
+         racket/sequence
+         racket/syntax
+         syntax/id-table
          syntax/parse
          syntax/parse/experimental/specialize
-         racket/promise
-         (for-syntax racket/base syntax/parse racket/syntax)
-         "../utils/utils.rkt"
+         syntax/stx
          (only-in "../utils/literal-syntax-class.rkt"
-           [define-literal-syntax-class define-literal-syntax-class*])
-         (for-template racket/base)
+                  [define-literal-syntax-class define-literal-syntax-class*])
+         "../rep/type-rep.rkt"
+         "../types/match-expanders.rkt"
+         "../types/subtype.rkt"
          "../types/type-table.rkt"
          "../types/utils.rkt"
-         "../types/subtype.rkt"
-         "../types/match-expanders.rkt"
-         "../rep/type-rep.rkt")
+         "../utils/utils.rkt")
 
 (provide *show-optimized-code*
          subtypeof? isoftype?
@@ -26,7 +31,8 @@
          define-unsafe-syntax-class
          define-literal-syntax-class
          define-merged-syntax-class
-         syntax/loc/origin quasisyntax/loc/origin)
+         syntax/loc/origin quasisyntax/loc/origin
+         raise-optimizer-context-error)
 
 ;; for tracking both origin and source location information
 (define-syntax-rule (syntax/loc/origin loc op body)
@@ -39,18 +45,19 @@
 
 ;; is the syntax object s's type a subtype of t?
 (define (subtypeof? s t)
-  (match (type-of s)
+  (match (maybe-type-of s)
     [(tc-result1: (== t (lambda (x y) (subtype y x)))) #t] [_ #f]))
 ;; similar, but with type equality
 (define (isoftype? s t)
-  (match (type-of s)
+  (match (maybe-type-of s)
          [(tc-result1: (== t)) #t] [_ #f]))
 
 ;; generates a table matching safe to unsafe promitives
 (define (mk-unsafe-tbl generic safe-pattern unsafe-pattern)
   (for/fold ([h (make-immutable-free-id-table)]) ([g (in-list generic)])
-    (let ([f (format-id g safe-pattern g)] [u (format-id g unsafe-pattern g)])
-      (free-id-table-set (free-id-table-set h g u) f u))))
+    (define f (format-id g safe-pattern g))
+    (define u (format-id g unsafe-pattern g))
+    (free-id-table-set (free-id-table-set h g u) f u)))
 
 ;; unlike their safe counterparts, unsafe binary operators can only take 2 arguments
 ;; this works on operations that are (A A -> A)
@@ -118,7 +125,7 @@
 (define-syntax-class (typed-expr predicate)
   #:attributes (opt)
   (pattern (~and e :opt-expr)
-           #:when (match (type-of #'e)
+           #:when (match (maybe-type-of #'e)
                     [(tc-result1: (? predicate)) #t]
                     [_ #f])))
 
@@ -132,11 +139,11 @@
     #:attr val (syntax-e #'v)
     #:with opt this-syntax)
   (pattern (~and e :opt-expr)
-    #:when (match (type-of #'e)
+    #:when (match (maybe-type-of #'e)
              [(tc-result1: (Val-able: _))
               #t]
              [_ #f])
-    #:attr val (match (type-of #'e)
+    #:attr val (match (maybe-type-of #'e)
                  [(tc-result1: (Val-able: v)) v]
                  [_ #f])))
 
@@ -159,3 +166,8 @@
     #:with (sub-exprs ...) #'(e)]
   [pattern (set! _ e:expr)
     #:with (sub-exprs ...) #'(e)])
+
+
+(define (raise-optimizer-context-error te-mode)
+  (raise-arguments-error 'optimize-top (format "cannot optimize in ~a context" te-mode)))
+

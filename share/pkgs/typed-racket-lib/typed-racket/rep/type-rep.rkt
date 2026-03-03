@@ -66,10 +66,11 @@
          abstract-obj
          substitute-names
          set-struct-property-pred!
+         variances-in-type
          DepFun/ids:
-         Struct-subflds
-         Struct-update-proc!
-         (rename-out [Union:* Union:]
+         HasArrows:
+         (rename-out [Arrow:* Arrow:]
+                     [Union:* Union:]
                      [Intersection:* Intersection:]
                      [make-Intersection* make-Intersection]
                      [Class:* Class:]
@@ -88,6 +89,8 @@
                      [Struct-Property* make-Struct-Property]
                      [Struct-Property:* Struct-Property:]))
 
+(module* shallow-exports #f (provide set-shallow-trusted-positive))
+
 (lazy-require
  ("../types/overlap.rkt" (overlap?))
  ("../types/prop-ops.rkt" (-and))
@@ -103,7 +106,7 @@
 
 ;; Name = Symbol
 
-;; Type is defined in rep-utils.rkt
+;; Type is defined in core-rep.rkt
 
 ;; this is ONLY used when a type error ocurrs
 ;; FIXME: add a safety so this type can literally
@@ -185,16 +188,23 @@
              #:with fld-frees #'(make-invariant (frees name))))
   (syntax-parse stx
     [(_ name:var-name ((~var flds (structural-flds #'frees)) ...) . rst)
-     (quasisyntax/loc stx
-       (def-rep name ([flds.name Type?] ...)
-         [#:parent Type]
-         [#:frees (frees) . #,(if (= 1 (length (syntax->list #'(flds.name ...))))
-                                  #'(flds.fld-frees ...)
-                                  #'((combine-frees (list flds.fld-frees ...))))]
-         [#:fmap (f) (name.constructor (f flds.name) ...)]
-         [#:for-each (f) (f flds.name) ...]
-         [#:variances (list flds.variance ...)]
-         . rst))]))
+     (with-syntax ([constructor-name (format-id #'name "make-~a-rep" (syntax-e #'name))]
+                   [type-constructor-name (format-id #'name "make-~a" (syntax-e #'name))])
+       (define arity (length (syntax->list #'(flds ...))))
+       (quasisyntax/loc stx
+         (begin
+           (def-rep (name #:constructor-name constructor-name) ([flds.name Type?] ...)
+             [#:parent Type]
+             [#:frees (frees) . #,(if (= 1 (length (syntax->list #'(flds.name ...))))
+                                      #'(flds.fld-frees ...)
+                                      #'((combine-frees (list flds.fld-frees ...))))]
+             [#:fmap (f) (constructor-name (f flds.name) ...)]
+             [#:for-each (f) (f flds.name) ...]
+             [#:variances (list flds.variance ...)]
+             . rst)
+           (define type-constructor-name (make-type-constr constructor-name #,arity
+                                                           #:variances (list flds.variance ...)))
+           (provide type-constructor-name))))]))
 
 
 ;;--------
@@ -342,6 +352,13 @@
 ;; TODO separate mutable/immutable set types
 (def-structural Set ([elem #:covariant])
   [#:mask mask:set])
+
+;;------
+;; Treelist (Immutable)
+;;------
+
+(def-structural TreeList ([elem #:covariant])
+  [#:mask mask:treelist])
 
 ;;------------
 ;; HashTable
@@ -602,11 +619,12 @@
   [#:fmap (f) (make-RestDots (f ty) nm)]
   [#:for-each (f) (f ty)])
 
-
 (def-rep Arrow ([dom (listof Type?)]
                 [rst (or/c #f Rest? RestDots?)]
                 [kws (and/c (listof Keyword?) keyword-sorted/c)]
-                [rng SomeValues?])
+                [rng SomeValues?]
+                [rng-shallow-safe? boolean?])
+  #:no-provide (Arrow:)
   [#:frees (f)
    (combine-frees
     (list* (f rng)
@@ -621,12 +639,34 @@
   [#:fmap (f) (make-Arrow (map f dom)
                           (and rst (f rst))
                           (map f kws)
-                          (f rng))]
+                          (f rng)
+                          rng-shallow-safe?)]
   [#:for-each (f)
    (for-each f dom)
    (when rst (f rst))
    (for-each f kws)
-   (f rng)])
+   (f rng)]
+  [#:extras
+   ;; equality can ignore shallow flag
+   #:methods gen:equal+hash
+   [(define (equal-proc a b recur)
+      (and
+        (recur (Arrow-dom a) (Arrow-dom b))
+        (recur (Arrow-rst a) (Arrow-rst b))
+        (recur (Arrow-kws a) (Arrow-kws b))
+        (recur (Arrow-rng a) (Arrow-rng b))))
+    (define (hash-proc a recur)
+      (bitwise-ior
+        (recur (Arrow-dom a))
+        (recur (Arrow-rst a))
+        (recur (Arrow-kws a))
+        (recur (Arrow-rng a))))
+    (define (hash2-proc a recur)
+      (bitwise-ior
+        (recur (Arrow-dom a))
+        (recur (Arrow-rst a))
+        (recur (Arrow-kws a))
+        (recur (Arrow-rng a))))]])
 
 (define/provide (Arrow-min-arity a)
   (length (Arrow-dom a)))
@@ -677,6 +717,20 @@
     [else
      (error 'Arrow-domain-at-arity
             "invalid arity! ~a @ ~a" a arity)]))
+
+(define-match-expander Arrow:*
+  (lambda (stx)
+    (syntax-case stx ()
+      [(_ dom rst kws rng)
+       #'(? Arrow? (app (lambda (arrow)
+                          (match-define (Arrow: domain rest keywords range _) arrow)
+                          (list domain rest keywords range))
+                        (list dom rst kws rng)))]
+      [(_ dom rst kws rng rng-T+)
+       #'(? Arrow? (app (lambda (arrow)
+                          (match-define (Arrow: domain rest keywords range rng-shallow-safe?) arrow)
+                          (list domain rest keywords range rng-shallow-safe?))
+                        (list dom rst kws rng rng-T+)))])))
 
 ;; a standard function
 ;; + all functions are case-> under the hood (i.e. see 'arrows')
@@ -811,23 +865,8 @@
   (define b (Struct-proc sty))
   (and b (unbox b)))
 
-;; returns non-inherited fields of a structure
-(define/cond-contract (Struct-subflds sty)
-  (-> Struct? (listof fld?))
-  (define all-flds (Struct-flds sty))
-  (define offset
-    (cond
-      [(Struct-parent sty) => (lambda (psty)
-                                (length (Struct-flds psty)))]
-      [else 0]))
-  (drop all-flds offset))
-
 (define (make-Struct* name parent flds proc poly? pred-id properties)
   (make-Struct name parent flds (box proc) poly? pred-id properties))
-
-(define (Struct-update-proc! sty ty)
-  (define bv (Struct-proc sty))
-  (set-box! bv ty))
 
 (define-match-expander Struct:*
   (lambda (stx)
@@ -1063,7 +1102,8 @@
 (define Un (make-type-constr Un-fun
                          0
                          #f
-                         #:kind*? #t))
+                         #:kind*? #t
+                         #:variances (list variance:co)))
 
 
 
@@ -1121,8 +1161,8 @@
           (match ts
             [(list) (-refine Univ prop)]
             [(list t) (-refine t prop)]
-            [_ (let ([t (make-Intersection ts -tt elems)])
-                 (-refine t prop))])]
+            [_ (define t (make-Intersection ts -tt elems))
+               (-refine t prop)])]
          [(cons arg args)
           (match arg
             [(Univ:) (loop ts elems prop args)]
@@ -1256,7 +1296,9 @@
      (for-each walk fields)
      (for-each walk methods)
      (for-each walk augments)
-     (when init-rest (f init-rest)))])
+     (when init-rest (f init-rest)))]
+  [#:extras
+   #:property prop:kind #t])
 
 (def-type ClassTop ()
   [#:mask mask:class]
@@ -1635,11 +1677,12 @@
     (match rep
       ;; Functions
       ;; increment the level of the substituted object
-      [(Arrow: dom rst kws rng)
+      [(Arrow: dom rst kws rng rng-T+)
        (make-Arrow (map rec dom)
                    (and rst (rec rst))
                    (map rec kws)
-                   (rec/inc rng))]
+                   (rec/inc rng)
+                   rng-T+)]
       [(DepFun: dom pre rng)
        (make-DepFun (for/list ([d (in-list dom)])
                       (rec/inc d))
@@ -1685,6 +1728,23 @@
     [(Mu-unsafe: body) (instantiate-type body t)]
     [t (error 'unfold "not a mu! ~a" t)]))
 
+(define (set-shallow-trusted-positive ty0)
+  ;; 2022-04-22: defined here (type-rep) instead of elsewhere to use the basic
+  ;;  constructors instead of the smart ones (make-PolyDots vs make-PolyDots*)
+  ;; alternatively: we could make and provide unsafe constructors in `rep-utils`
+  (let loop ((ty ty0))
+    (match ty
+      [(Arrow: dom rst kws rng _)
+       (make-Arrow dom rst kws rng #t)]
+      [(Fun: arrs)
+       (make-Fun (map loop arrs))]
+      [(PolyRow-unsafe: b c)
+       (make-PolyRow (loop b) c)]
+      [(PolyDots-unsafe: n b)
+       (make-PolyDots n (loop b))]
+      [(Poly-unsafe: n b)
+       (make-Poly n (loop b))]
+      [_ ty])))
 
 ;;***************************************************************
 ;; Smart Constructors/Expanders for Class-related structs
@@ -1753,7 +1813,7 @@
 
 ;; sorts the given field of a Row by the member name
 (define (sort-row-clauses clauses)
-  (sort clauses (λ (x y) (symbol<? (car x) (car y)))))
+  (sort clauses symbol<? #:key car))
 
 (define-match-expander Class:*
   (λ (stx)
@@ -1763,6 +1823,12 @@
             (app merge-class/row
                  (list row-pat inits-pat fields-pat
                        methods-pat augments-pat init-rest-pat)))])))
+
+
+(define/cond-contract (variances-in-type ty syms)
+  (-> Type? (listof symbol?) (listof variance?))
+  (define free-vars (free-vars-hash (free-vars* ty)))
+  (map (λ (v) (hash-ref free-vars v variance:const)) syms))
 
 ;;***************************************************************
 ;; Smart Constructors for Some structs
@@ -1787,3 +1853,18 @@
     (syntax-parse stx
       [(_) #'(Name: _ _ #t)]
       [(_ name-pat) #'(Name: name-pat _ #t)])))
+
+
+;;***************************************************************
+;; Helper Match Expanders
+;;***************************************************************
+(define (collect-arrows types)
+  (append-map (match-lambda
+                         [(Fun: (list arrows ...)) arrows]
+                         [_ null])
+              types))
+
+(define-match-expander HasArrows:
+  (lambda (stx)
+    (syntax-parse stx
+      [(_ arrs) #'(app collect-arrows (? pair? arrs))])))

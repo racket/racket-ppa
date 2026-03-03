@@ -9,8 +9,6 @@
 #ifdef WIN32
 # include <windows.h>
 # define DOS_FILE_SYSTEM
-static int scheme_utf8_encode(unsigned int *path, int zero_offset, int len,
-			      char *dest, int dest_len, int get_utf16);
 #endif
 #define BOOT_EXTERN extern
 #include "boot.h"
@@ -30,6 +28,7 @@ static int scheme_utf8_encode(unsigned int *path, int zero_offset, int len,
 #define XFORM_SKIP_PROC /* empty */
 
 #include "../../start/config.inc"
+#include "path_replace.inc"
 
 #ifdef WIN32
 typedef void *(*scheme_dll_open_proc)(const char *name, int as_global);
@@ -56,6 +55,11 @@ static void scheme_set_dll_procs(scheme_dll_open_proc open,
 PRESERVE_IN_EXECUTABLE
 char *boot_file_data = "BooT FilE OffsetS:\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
 static int boot_file_offset = 18;
+
+#ifdef WIN32
+PRESERVE_IN_EXECUTABLE
+char *racket_dll_name = "libracketcsxxxxxxx.dll";
+#endif
 
 #ifdef OS_X
 # include <mach-o/dyld.h>
@@ -89,7 +93,7 @@ static const char *get_framework_path() {
   return NULL;
 }
 
-static char *path_append(const char *p1, char *p2) {
+static char *path_append_2(const char *p1, const char *p2) {
   int l1, l2;
   char *s;
   l1 = strlen(p1);
@@ -105,29 +109,23 @@ static char *path_append(const char *p1, char *p2) {
 #endif
 
 #if !defined(WIN32) && !defined(OS_X)
-static long find_boot_section(const char *me)
+static long find_boot_section(const char *me, int must_find)
 {
   int start = 0, end = 0;
   
   find_elf_section_offset(me, ".rackboot", &start, &end);
+
+  if (start == 0 && must_find) {
+    fprintf(stderr, "%s: ELF section \".rackboot\" is missing\n", me);
+    exit(1);
+  }
 
   return start;
 }
 #endif
 
 #ifdef WIN32
-
-static int scheme_utf8_encode(unsigned int *path, int zero_offset, int len,
-			      char *dest, int offset, int get_utf16)
-{
-  int dest_len = 0;
-  if (dest) {
-    dest_len = WideCharToMultiByte(CP_UTF8, 0, (wchar_t *)path, len, NULL, 0, NULL, NULL);
-  }
-  return WideCharToMultiByte(CP_UTF8, 0, (wchar_t *)path, len, dest, dest_len, NULL, NULL);
-}
-
-# include "../start/cmdl_to_argv.inc"
+# include "../../start/cmdl_to_argv.inc"
 #endif
 
 #ifndef WIN32
@@ -136,21 +134,6 @@ static void *extract_dlldir()
   return NULL;
 }
 #endif
-
-static char *path_replace(const char *s, const char *new_file)
-{
-  int len1 = strlen(s), len2 = strlen(new_file);
-  char *r;
-
-  while ((len1 > 0) && (s[len1-1] != '/') && (s[len1-1] != '\\'))
-    len1--;
-
-  r = malloc(len1+len2+1);
-  memcpy(r, (void *)s, len1);
-  memcpy(r+len1, (void *)new_file, len2+1);
-
-  return r;
-}
 
 #ifndef do_pre_filter_cmdline_arguments
 # define do_pre_filter_cmdline_arguments(argc, argv) /* empty */
@@ -197,13 +180,13 @@ static int bytes_main(int argc, char **argv,
   register_embedded_dll_hooks();
   if (embedded_dll_open) {
     void *dll;
-    dll = embedded_dll_open("libracketcsxxxxxxx.dll", 1);
-    boot_rsrc_offset = in_memory_get_offset("libracketcsxxxxxxx.dll");
+    dll = embedded_dll_open(racket_dll_name, 1);
+    boot_rsrc_offset = in_memory_get_offset(racket_dll_name);
     racket_boot_p = (racket_boot_t)scheme_dll_find_object(dll, "racket_boot");
     dll_path = self_exe;
   } else {
-    HMODULE dll;
-    dll_path = load_delayed_dll_x(NULL, "libracketcsxxxxxxx.dll", &dll);
+    HMODULE dll = NULL;
+    dll_path = load_delayed_dll_x(NULL, racket_dll_name, &dll);
     racket_boot_p = (racket_boot_t)GetProcAddress(dll, "racket_boot");
   }
   boot_exe = string_to_utf8(dll_path);
@@ -219,9 +202,16 @@ static int bytes_main(int argc, char **argv,
   boot_offset = find_rktboot_section(boot_exe);
   if (!boot_offset) boot_images_in_exe = 0;
 #elif WIN32
-  boot_offset = find_resource_offset(dll_path, 259, boot_rsrc_offset);
+  if (boot1_offset || boot2_offset || boot3_offset)
+    boot_offset = find_resource_offset(dll_path, 259, boot_rsrc_offset);
+  else
+    boot_offset = 0;
 #else
-  boot_offset = find_boot_section(boot_exe);
+  boot_offset = find_boot_section(boot_exe,
+                                  /* If the first offset is 0 and the second is not,
+                                     then the intent must be for those offsets to
+                                     be relative to a boot section: */
+                                  (boot1_offset == 0) && (boot2_offset > 0));
 #endif
 
   boot1_offset += boot_offset;
@@ -235,9 +225,9 @@ static int bytes_main(int argc, char **argv,
   if (!boot_images_in_exe) {
     const char *fw_path = get_framework_path();
     if (fw_path) {
-      boot1_path = path_append(fw_path, "petite.boot");
-      boot2_path = path_append(fw_path, "scheme.boot");
-      boot3_path = path_append(fw_path, "racket.boot");
+      boot1_path = path_append_2(fw_path, "petite.boot");
+      boot2_path = path_append_2(fw_path, "scheme.boot");
+      boot3_path = path_append_2(fw_path, "racket.boot");
       boot1_offset = boot2_offset = boot3_offset = boot_end_offset = 0;
     }
   }
@@ -251,9 +241,9 @@ static int bytes_main(int argc, char **argv,
     /* No offsets have been set, so we must be trying to run
        something like `raw_racketcs` during the build process.
        Look for boot files adjacent to the executable. */
-    boot1_path = path_replace(boot_exe, "petite-v.boot");
-    boot2_path = path_replace(boot_exe, "scheme-v.boot");
-    boot3_path = path_replace(boot_exe, "racket-v.boot");
+    boot1_path = path_replace_filename(boot_exe, "petite-v.boot");
+    boot2_path = path_replace_filename(boot_exe, "scheme-v.boot");
+    boot3_path = path_replace_filename(boot_exe, "racket-v.boot");
   }
 
   {
@@ -293,7 +283,7 @@ static int bytes_main(int argc, char **argv,
     ba.is_gui = RACKET_IS_GUI;
     ba.wm_is_gracket_or_x11_arg_count = wm_is_gracket_or_x11_arg_count;
     ba.gracket_guid_or_x11_args = gracket_guid_or_x11_args;
-
+    
     racket_boot(&ba);
   }
 

@@ -21,14 +21,19 @@
                                (if (path? n)
                                    (unquoted-printing-string
                                     (path->string n))
-                                   in))))
+                                   in))
+                        "possible solution"
+                        (unquoted-printing-string "running `racket -y`, `raco make`, or `raco setup`")))
     (define vm-len (min 63 (read-byte in)))
     (define vm (read-bytes vm-len in))
     (define as-correlated-linklet? (equal? vm correlated-linklet-vm-bytes))
     (unless (or as-correlated-linklet?
-                (equal? vm vm-bytes))
+                (equal? vm vm-bytes)
+                ;; Assume that anything other than `racket` is a machine type
+                (equal? (equal? vm #"racket")
+                        (equal? vm-bytes #"racket")))
       (raise-read-error '|loading code|
-                        "virtual-machine mismatch"
+                        "machine mismatch"
                         "expected" (bytes->string/utf-8 vm-bytes)
                         "found" (bytes->string/utf-8 vm #\?)
                         "in" (let ([n (object-name in)])
@@ -42,7 +47,8 @@
        (define sha-1 (read-bytes 20 in))
        (define b-ht (if as-correlated-linklet?
                         (read-correlated-linklet-bundle-hash in)
-                        (read-linklet-bundle-hash in)))
+                        (read-linklet-bundle-hash in (and (not (equal? vm vm-bytes))
+                                                          (string->symbol (bytes->string/utf-8 vm #\?))))))
        (unless (hash? b-ht)
          (raise-read-error 'read-linklet-bundle-hash
                            "bad read result"

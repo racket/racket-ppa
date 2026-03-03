@@ -35,15 +35,20 @@
        (set! linux? #t)]
       #:once-any
       [("--m32") "build 32-bit mode x86/PowerPC"
-       (set! m32? #t)]
+       (set! m32? #t)
+       (set! aarch64? #f)]
       [("--m64") "build 64-bit mode x86_64/AArch64"
        (set! m32? #f)]
       [("--mppc") "build 32-bit mode PowerPC"
        (set! m32? #t)
-       (set! ppc? #t)]
+       (set! ppc? #t)
+       (set! aarch64? #f)]
       [("--maarch64") "build 64-bit mode AArch64"
        (set! m32? #f)
        (set! aarch64? #t)]
+      [("--mx86_64") "build 64-bit mode x86_64"
+       (set! m32? #f)
+       (set! aarch64? #f)]
       #:multi
       [("--archives") dir "Find archives in <dir>"
        (set! archives-dirs (cons dir (or archives-dirs null)))]
@@ -52,7 +57,7 @@
      (when (eq? win? 'unknown)
        (error 'build "please pick `--win`, `--mac`, or `--linux`"))
      (when (eq? m32? 'unknown)
-       (error 'build "please pick `--m32` or `--m64`"))
+       (error 'build "please pick `--m32`, `--m64`, `--mppc`, or `--maarch64`"))
      (when (and ppc? (not m32?))
        (error 'build "cannot use `--m64` on PowerPC"))
      (set! mac? (not (or win? linux?)))

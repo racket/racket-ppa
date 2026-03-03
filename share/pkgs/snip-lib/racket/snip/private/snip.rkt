@@ -6,6 +6,7 @@
          "load-one.rkt"
          "style.rkt"
          "private.rkt"
+         "grapheme.rkt"
          racket/draw/private/syntax
          (only-in racket/draw/private/bitmap specialize-unknown-kind)
          racket/draw)
@@ -27,6 +28,7 @@
 
          snip->admin
          snip->count
+         snip->grapheme-count
          snip->next
          snip->prev
          snip->flags
@@ -41,6 +43,7 @@
          set-snip-style!
          set-snip-flags!
          set-snip-count!
+         set-snip-grapheme-count!
          set-snip-prev!
          set-snip-next!
 
@@ -83,8 +86,9 @@
 (define IMAGE-VOID-SIZE 20.0)
 
 (define (replace-nuls s)
-  (if (for/or ([c (in-string s)]) (or (eq? #\nul c)
-                                      (eq? #\page c)))
+  (if (and (for/or ([c (in-string s)]) (or (eq? #\nul c)
+                                           (eq? #\page c)))
+           (= (string-length s) (string-grapheme-count s)))
       (regexp-replace* #rx"\f"
                        (regexp-replace* #rx"\0" s " ")
                        "^L")
@@ -123,12 +127,14 @@
   (define/public (set-s-line l) (set! s-line l))
 
   (field [s-admin #f]
-         [s-count 1]
+         [s-char-count 1]
+         [s-grapheme-count 1]
          [s-flags NO-FLAGS]
          [s-snipclass #f]
          [s-style (send the-style-list basic-style)])
   (define/public (set-s-admin a) (set! s-admin a))
-  (define/public (set-s-count v) (set! s-count v))
+  (define/public (set-s-char-count v) (set! s-char-count v) (set! s-grapheme-count v))
+  (define/public (set-s-grapheme-count v) (set! s-grapheme-count v))
   (define/public (set-s-flags v) (set! s-flags v))
   (define/public (set-s-snipclass v) (set! s-snipclass v))
   (define/public (set-s-style s) (set! s-style s))
@@ -137,8 +143,12 @@
     (set! s-snipclass c))
   (def/public (get-snipclass) s-snipclass)
 
-  (def/public (get-count) s-count)
+  (def/public (get-count) s-char-count)
+  (def/public (get-grapheme-count) s-grapheme-count)
   (def/public (get-flags) (flags->symbols s-flags))
+
+  (def/public (grapheme-position [exact-nonnegative-integer? i] [any? [end? #f]]) i)
+  (def/public (position-grapheme [exact-nonnegative-integer? i]) i)
 
   (super-new)
 
@@ -161,12 +171,20 @@
           (set! s-flags (add-flag OWNED s-flags)))))
 
   (def/public (set-count [exact-nonnegative-integer? new-count])
-    (let ([old-count s-count]
-          [new-count (max new-count 1)])
-      (set! s-count new-count)
+    (set-char-and-grapheme-count new-count new-count))
+
+  (def/public (set-char-and-grapheme-count [exact-nonnegative-integer? new-char-count]
+                                           [exact-nonnegative-integer? new-grapheme-count])
+    (let ([old-char-count s-char-count]
+          [old-grapheme-count s-grapheme-count]
+          [new-char-count (max new-char-count 1)]
+          [new-grapheme-count (max new-grapheme-count 1)])
+      (set! s-char-count new-char-count)
+      (set! s-grapheme-count new-grapheme-count)
       (when s-admin
         (unless (send s-admin recounted this #t)
-          (set! s-count old-count)))))
+          (set! s-char-count old-char-count)
+          (set! s-grapheme-count old-grapheme-count)))))
 
   (def/public (set-flags [(make-list (symbol-in is-text 
                                                 can-append 
@@ -216,7 +234,7 @@
 
   (def/public (match? [snip% other])
     (and (object-or-false=? s-snipclass (snip->snipclass other))
-         (= s-count (get-field s-count other))))
+         (= s-char-count (get-field s-char-count other))))
   
   (def/public (own-caret [any? own?])
     (void))
@@ -252,8 +270,9 @@
 
   (def/public (split [exact-nonnegative-integer? position] [box? first] [box? second])
     (let ([snip (new snip%)])
-      (send snip set-s-count position)
-      (set! s-count (- s-count position))
+      (send snip set-s-char-count position)
+      (set! s-char-count (- s-char-count position))
+      (set! s-grapheme-count (- s-grapheme-count position))
 
       (set-box! first snip)
       (set-box! second this)
@@ -275,7 +294,7 @@
 
   (def/public (get-text [exact-nonnegative-integer? offset] [exact-integer? num] 
                         [any? [flattened? #f]])
-    (make-string (min num (max 0 (- s-count (max 0 offset)))) #\.))
+    (make-string (min num (max 0 (- s-char-count (max 0 offset)))) #\.))
 
   (def/public (set-style [style<%> s])
     (unless (has-flag? s-flags OWNED)
@@ -290,7 +309,8 @@
       s))
 
   (define/public (do-copy-to dest)
-    (send dest set-s-count s-count)
+    (send dest set-s-char-count s-char-count)
+    (send dest set-s-grapheme-count s-grapheme-count)
     (send dest set-s-flags
           (remove-flag (remove-flag (remove-flag s-flags OWNED)
                                     CAN-DISOWN)
@@ -333,12 +353,16 @@
   (def/public (other-equal-to? [snip% that] [any? recur]) (object=? this that))
   (define/public (equal-hash-code-of recur) (eq-hash-code this))
   (define/public (equal-secondary-hash-code-of recur) 1))
- 
+
 (defclass internal-snip% snip%
   (super-new)
   (def/override (set-count [exact-integer? c])
     ;; reject change
+    (void))
+  (def/override (set-char-and-grapheme-count [exact-integer? cc] [exact-integer? gc])
+    ;; reject change
     (void)))
+
 ;; ------------------------------------------------------------
 
 (defclass string-snip-class% snip-class%
@@ -371,7 +395,8 @@
 
 (defclass string-snip% internal-snip%
   (inherit-field s-style
-                 s-count
+                 s-char-count
+                 s-grapheme-count
                  s-flags
                  s-admin
                  s-snipclass)
@@ -383,10 +408,45 @@
          [s-buffer ""])
 
   (super-new)
-  (set! s-count 0)
+  (set! s-char-count 0)
+  (set! s-grapheme-count 0)
 
   (define/public (set-str-w v) (set! str-metric v))
   (define/public (get-s-dtext) s-dtext)
+
+  ;; takes and returns char position
+  (define/private (align-to-grapheme pos end?)
+    (if (= s-char-count s-grapheme-count)
+        pos
+        (let loop ([i 0] [prev-i 0])
+          (cond
+            [(i . > . pos)
+             (if end? i prev-i)]
+            [(= i pos) i]
+            [else
+             (loop (+ i (string-grapheme-span s-buffer (+ s-dtext i) (+ s-dtext s-char-count))) i)]))))
+
+  (def/override (grapheme-position [exact-nonnegative-integer? i])
+    (if (= s-char-count s-grapheme-count)
+        i
+        (let loop ([g 0] [pos 0])
+          (cond
+            [(g . >= . i) pos]
+            [(pos . >= . s-char-count) s-char-count]
+            [else
+             (loop (add1 g) (+ pos (string-grapheme-span s-buffer (+ s-dtext pos) (+ s-dtext s-char-count))))]))))
+  
+  (def/override (position-grapheme [exact-nonnegative-integer? i]
+                                   [any? [end? #f]])
+    (if (= s-char-count s-grapheme-count)
+        i
+        (let loop ([g 0] [prev-g 0] [pos 0])
+          (cond
+            [(pos . = . i) g]
+            [(pos . > . i) (if end? g prev-g)]
+            [(pos . >= . s-char-count) g]
+            [else
+             (loop (add1 g) g (+ pos (string-grapheme-span s-buffer (+ s-dtext pos) (+ s-dtext s-char-count))))]))))
 
   (let-values ([(str len)
                 (cond
@@ -425,14 +485,14 @@
   (define/private (get-text-extent dc count)
     (let ([font (send s-style get-font)])
       (send dc get-text-extent (replace-nuls (substring s-buffer s-dtext (+ s-dtext count)))
-            font #f)))
+            font 'grapheme)))
 
   (def/override (get-extent [dc<%> dc] [real? ex] [real? ey] 
                             [maybe-box? [wo #f]] [maybe-box? [ho #f]]
                             [maybe-box? [dso #f]] [maybe-box? [so #f]]
                             [maybe-box? [ls #f]] [maybe-box? [rs #f]])
     (unless str-metric
-      (let ([count s-count])
+      (let ([count s-char-count])
         (if (or (has-flag? s-flags INVISIBLE)
                 (zero? count)
                 (and (= count 1) 
@@ -471,7 +531,7 @@
 
   (def/override (partial-offset [dc<%> dc] [real? ex] [real? ey] 
                                 [exact-nonnegative-integer? offset])
-    (let-values ([(w h d a) (get-text-extent dc (min offset s-count))])
+    (let-values ([(w h d a) (get-text-extent dc (align-to-grapheme (min offset s-char-count) #f))])
       w))
 
   (def/override (draw [dc<%> dc] [real? x] [real? y] 
@@ -481,45 +541,48 @@
       (if (and (pair? caret)
                (or (and s-admin (send s-admin get-selected-text-color))
                    (eq? 'solid (send dc get-text-mode))))
-          ;; Draw three parts: before selection, selection, after selection
-          (let ([before (replace-nuls
-                         (substring s-buffer 
-                                    s-dtext 
-                                    (+ s-dtext (min (car caret) s-count))))]
-                [sel (replace-nuls
-                      (substring s-buffer 
-                                 (+ s-dtext (min (car caret) s-count))
-                                 (+ s-dtext (min (cdr caret) s-count))))]
-                [after (replace-nuls
+          (let ([sel-start (align-to-grapheme (min (car caret) s-char-count) #f)]
+                [sel-end (align-to-grapheme (min (cdr caret) s-char-count) #t)])
+            ;; Draw three parts: before selection, selection, after selection
+            (let ([before (replace-nuls
+                           (substring s-buffer 
+                                      s-dtext 
+                                      (+ s-dtext sel-start)))]
+                  [sel (replace-nuls
                         (substring s-buffer 
-                                   (+ s-dtext (min (cdr caret) s-count))
-                                   (+ s-dtext s-count)))])
-            (let-values ([(bw bh bd ba) (if (string=? before "")
-                                            (values 0.0 0.0 0.0 0.0)
-                                            (send dc get-text-extent before))]
-                         [(sw sh sd sa) (send dc get-text-extent sel)]
-                         [(aw ah ad aa) (if (string=? after "")
-                                            (values 0.0 0.0 0.0 0.0)
-                                            (send dc get-text-extent after))])
-              (define (baseline-delta h d)
-                (- (max (- bh bd) (- sh sd) (- ah ad)) (- h d)))
-              (unless (string=? before "")
-                (send dc draw-text before x (+ y (baseline-delta bh bd)) #f))
-              (let ([col (send dc get-text-foreground)]
-                    [mode (send dc get-text-mode)])
-                (when (and s-admin (send s-admin get-selected-text-color))
-                  (send dc set-text-foreground (send s-admin get-selected-text-color)))
-                (send dc set-text-mode 'transparent)
-                (send dc draw-text sel (+ x bw) (+ y (baseline-delta sh sd)) #f)
-                (send dc set-text-foreground col)
-                (send dc set-text-mode mode)
-                (unless (string=? after "")
-                  (send dc draw-text after (+ x bw sw) (+ y (baseline-delta ah ad)) #f)))))
+                                   (+ s-dtext (min sel-start s-char-count))
+                                   (+ s-dtext (min sel-end s-char-count))))]
+                  [after (replace-nuls
+                          (substring s-buffer 
+                                     (+ s-dtext (min sel-end s-char-count))
+                                     (+ s-dtext s-char-count)))])
+              (let-values ([(bw bh bd ba) (if (string=? before "")
+                                              (values 0.0 0.0 0.0 0.0)
+                                              (send dc get-text-extent before))]
+                           [(sw sh sd sa) (send dc get-text-extent sel)]
+                           [(aw ah ad aa) (if (string=? after "")
+                                              (values 0.0 0.0 0.0 0.0)
+                                              (send dc get-text-extent after))])
+                (define (baseline-delta h d)
+                  (- (max (- bh bd) (- sh sd) (- ah ad)) (- h d)))
+                (unless (string=? before "")
+                  (send dc draw-text before x (+ y (baseline-delta bh bd)) 'grapheme))
+                (let ([col (send dc get-text-foreground)]
+                      [mode (send dc get-text-mode)])
+                  (when (and s-admin (send s-admin get-selected-text-color))
+                    (send dc set-text-foreground (send s-admin get-selected-text-color)))
+                  (send dc set-text-mode 'transparent)
+                  (send dc draw-text sel (+ x bw) (+ y (baseline-delta sh sd)) 'grapheme)
+                  (send dc set-text-foreground col)
+                  (send dc set-text-mode mode)
+                  (unless (string=? after "")
+                    (send dc draw-text after (+ x bw sw) (+ y (baseline-delta ah ad)) 'grapheme))))))
           ;; Just draw the string
-          (send dc draw-text (replace-nuls (substring s-buffer s-dtext (+ s-dtext s-count))) x y #f))))
+          (send dc draw-text (replace-nuls (substring s-buffer s-dtext (+ s-dtext s-char-count))) x y 'grapheme))))
 
   (def/override (split [exact-nonnegative-integer? position] [box? first] [box? second])
-    (let ([count s-count])
+    (let ([count s-char-count]
+          [grapheme-count s-grapheme-count])
       (unless (or (position . < . 0)
                   (position . > . count))
         
@@ -541,10 +604,17 @@
                         s-dtext
                         (+ position s-dtext))
           (set-snip-count! snip position)
+          (set-snip-grapheme-count! snip (if (= count grapheme-count)
+                                             position
+                                             (string-grapheme-count s-buffer s-dtext (+ position s-dtext))))
           (set! s-dtext (+ s-dtext position))
 
-          (let ([count (- count position)])
-            (set! s-count count)
+          (let ([old-char-count count]
+                [count (- count position)])
+            (set! s-char-count count)
+            (set! s-grapheme-count (if (= old-char-count grapheme-count)
+                                       count
+                                       (string-grapheme-count s-buffer s-dtext (+ s-dtext count))))
 
             (when ((string-length s-buffer) . > . (max MIN-WASTE-CHECK (* MAX-WASTE (add1 count))))
               (let ([s (make-string count)])
@@ -559,19 +629,27 @@
             (send s-admin resized this #t))))))
 
   (def/override (merge-with [snip% pred])
-    (set! str-metric #f)
-    (insert-with-offset (string-snip-buffer pred)
-                        (snip->count pred)
-                        (string-snip-dtext pred)
-                        0)
-    (when (not (has-flag? s-flags CAN-SPLIT))
-      (send s-admin resized this #t))
-    this)
+    (cond
+      [(grapheme-spans? (string-snip->buffer pred) (string-snip->dtext pred) (+ (string-snip->dtext pred)
+                                                                                (snip->count pred))
+                        s-buffer s-dtext (+ s-dtext s-char-count))
+       ;; merging would change the rendered result, so don't
+       #f]
+      [else
+       (set! str-metric #f)
+       (insert-with-offset (string-snip-buffer pred)
+                           (snip->count pred)
+                           (string-snip-dtext pred)
+                           0)
+       (when (not (has-flag? s-flags CAN-SPLIT))
+         (send s-admin resized this #t))
+       this]))
 
   (define/public (insert-with-offset s len delta pos)
     (unless (or (len . <= . 0)
                 (pos . < . 0))
-      (let ([count s-count])
+      (let ([count s-char-count]
+            [grapheme-count s-grapheme-count])
         (cond
          [((string-length s-buffer) . < . (+ count len))
           (let ([s (make-string (* 2 (+ count len)))])
@@ -591,12 +669,24 @@
                       s
                       delta 
                       (+ delta len))
-        (set! s-count (+ count len))
+        (set! s-char-count (+ count len))
+        (set! s-grapheme-count (if (or (grapheme-spans? s-buffer s-dtext (+ s-dtext pos)
+                                                        s delta (+ delta len))
+                                       (grapheme-spans? s delta (+ delta len)
+                                                        s-buffer (+ s-dtext pos len) (+ s-dtext s-char-count))
+                                       (grapheme-spans? s-buffer s-dtext (+ s-dtext pos)
+                                                        s-buffer (+ s-dtext pos len) (+ s-dtext s-char-count)))
+                                   ;; count from scratch (assuming rare for large strings):
+                                   (string-grapheme-count s-buffer s-dtext (+ s-dtext s-char-count))
+                                   ;; can adjust counting only inserted as graphemes:
+                                   (+ s-grapheme-count (string-grapheme-count s delta (+ delta len)))))
+
         (set! str-metric #f)
         (when (not (has-flag? s-flags CAN-SPLIT))
           (when s-admin
             (unless (send s-admin recounted this #t)
-              (set! s-count count)))))))
+              (set! s-char-count count)
+              (set! s-grapheme-count grapheme-count)))))))
 
   (def/public (insert [string? str] [exact-nonnegative-integer? len] 
                       [exact-nonnegative-integer? [pos 0]])
@@ -605,11 +695,11 @@
   (def/override  (get-text! [mutable-string? s] [exact-nonnegative-integer? offset] 
                             [exact-integer? num] [exact-nonnegative-integer? dt])
     (when (positive? num)
-      (string-copy! s dt s-buffer (+ s-dtext offset) (+ s-dtext (min (+ offset num) s-count)))))
+      (string-copy! s dt s-buffer (+ s-dtext offset) (+ s-dtext (min (+ offset num) s-char-count)))))
 
   (def/override (get-text [exact-nonnegative-integer? offset] [exact-integer? num] 
                           [any? [flat? #f]])
-    (let ([num (min num (max 0 (- s-count offset)))])
+    (let ([num (min num (max 0 (- s-char-count offset)))])
       (if (num . <= . 0)
           ""
           (let ([s (make-string num)])
@@ -624,7 +714,8 @@
   (def/override (do-copy-to [snip% snip])
     (super do-copy-to snip)
     (set-snip-count! snip 0)
-    (send snip insert-with-offset s-buffer s-count s-dtext 0))
+    (set-snip-grapheme-count! snip 0)
+    (send snip insert-with-offset s-buffer s-char-count s-dtext 0))
 
   (def/override (write [editor-stream-out% f])
     (let* ([write-flags s-flags]
@@ -632,7 +723,7 @@
            [write-flags (remove-flag write-flags CAN-DISOWN)]
            [write-flags (remove-flag write-flags CAN-SPLIT)])
       (send f put write-flags)
-      (let ([bytes (string->bytes/utf-8 s-buffer 0 s-dtext (+ s-dtext s-count))])
+      (let ([bytes (string->bytes/utf-8 s-buffer 0 s-dtext (+ s-dtext s-char-count))])
         (send f put (bytes-length bytes) bytes))))
 
   (def/public (read [exact-nonnegative-integer? len]
@@ -656,7 +747,8 @@
                          (bytes->string/latin-1 b #\? 0 len)
                          (bytes->string/utf-8 b #\? 0 len))])
               (string-copy! s-buffer 0 s 0 (string-length s))
-              (set! s-count (string-length s))))]
+              (set! s-char-count (string-length s))
+              (set! s-grapheme-count (string-grapheme-count s))))]
          [else
           ;; version 2 wrote out UTF-32 directly -- bad idea,
           ;; because it uses the machine's endianness.
@@ -1436,7 +1528,8 @@
 ;; ------------------------------------------------------------
 
 (define snip->admin (class-field-accessor snip% s-admin))
-(define snip->count (class-field-accessor snip% s-count))
+(define snip->count (class-field-accessor snip% s-char-count))
+(define snip->grapheme-count (class-field-accessor snip% s-grapheme-count))
 (define snip->next (class-field-accessor snip% s-next))
 (define snip->prev (class-field-accessor snip% s-prev))
 (define snip->flags (class-field-accessor snip% s-flags))
@@ -1450,9 +1543,13 @@
 (define set-snip-loc! (class-field-mutator snip% s-line))
 (define set-snip-style! (class-field-mutator snip% s-style))
 (define set-snip-flags! (class-field-mutator snip% s-flags))
-(define set-snip-count! (class-field-mutator snip% s-count))
+(define set-snip-count! (class-field-mutator snip% s-char-count))
+(define set-snip-grapheme-count! (class-field-mutator snip% s-grapheme-count))
 (define set-snip-prev! (class-field-mutator snip% s-prev))
 (define set-snip-next! (class-field-mutator snip% s-next))
+
+(define string-snip->buffer (class-field-accessor string-snip% s-buffer))
+(define string-snip->dtext (class-field-accessor string-snip% s-dtext))
 
 (define snip%-get-text (generic snip% get-text))
 

@@ -352,6 +352,8 @@ corresponding to @racket[trest], where @racket[bound]
 @deftypeconstr[(MListof t)]{Returns the type of a homogeneous @rtech{mutable list} of @racket[t].}
 @deftypeconstr[(MPairof t u)]{Returns the type of a @rtech{Mutable pair} of @racket[t] and @racket[u].}
 
+@deftypeconstr[(TreeListof t)]{Returns the type of @rtech{treelist} of @racket[t]}
+
 @deftype[MPairTop]{Is the type of a @rtech{mutable pair} with unknown
   element types and is the supertype of all mutable pair types.
   This type typically appears in programs via the combination of
@@ -513,10 +515,11 @@ type returned.  @ex[current-input-port current-directory]}
 
 @deftypeconstr[(Futureof t)]{Returns the type of @rtech{future} which produce a value of type @racket[t] when touched.}
 
-@deftypeconstr[(Sequenceof t t ...)]{Returns the type of @rtech{sequence} that produces
- @racket[(Values _t _t ...)] on each iteration. E.g., @racket[(Sequenceof String)]
-is a sequence of strings, @racket[(Sequenceof Number String)] is a sequence which
-produces two values---a number and a string---on each iteration, etc.}
+@deftypeconstr[(Sequenceof t ...)]{Returns the type of @rtech{sequence} that produces
+  @racket[(Values _t ...)] on each iteration. E.g., @racket[(Sequenceof)]
+  is a sequence which produces no values, @racket[(Sequenceof String)] is a
+  sequence of strings, @racket[(Sequenceof Number String)] is a sequence which
+  produces two values---a number and a string---on each iteration, etc.}
 
 @deftype[SequenceTop]{Is the type of a @rtech{sequence} with unknown element
   type and is the supertype of all sequences. This type typically
@@ -574,7 +577,7 @@ value of type @racket[t].}
 to @racket[(Syntaxof Symbol)].}
 
 @deftype[Syntax]{A syntax object containing only @rtech{symbol}s,
-@rtech{keyword}s, @rtech{string}s, @rtech{character}s, @rtech{boolean}s,
+@rtech{keyword}s, @rtech{string}s, @rtech{byte string}s, @rtech{character}s, @rtech{boolean}s,
 @rtech{number}s, @rtech{box}es containing @racket[Syntax], @rtech{vector}s of
 @racket[Syntax], or (possibly improper) @rtech{list}s of @racket[Syntax].
 Equivalent to @racket[(Syntaxof Syntax-E)].}
@@ -584,7 +587,7 @@ Applying @racket[syntax-e] to a value of type @racket[Syntax] produces a value
 of type @racket[Syntax-E].}
 
 @deftypeconstr[(Sexpof t)]{Returns the recursive union of @racket[t] with @rtech{symbol}s,
-@rtech{keyword}s, @rtech{string}s, @rtech{character}s, @rtech{boolean}s,
+@rtech{keyword}s, @rtech{string}s, @rtech{byte string}s, @rtech{character}s, @rtech{boolean}s,
 @rtech{number}s, @rtech{box}es, @rtech{vector}s, and (possibly improper)
 @rtech{list}s.}
 
@@ -753,12 +756,13 @@ delimited continuation functions and continuation mark functions.
   @margin-note{Currently, because explicit packing operations for existential types are
   not supported, existential type results are only used to annotate accessors
   for @racket[Struct-Property]}
-  @emph{(Some (a ...) type : #:+ proposition)} for @racket[rng] specifies an
+
+  @racket[(Some (a ...) type : #:+ proposition)] for @racket[rng] specifies an
   @deftech[#:key "Some"]{existential type result}, where the type variables @racket[a ...] may appear
   in @racket[type] and @racket[opt-proposition]. Unpacking the existential type
   result is done automatically while checking application of the function.
 
-  @history[#:changed "1.12" @elem{Added [#:key "Some"]{existential type results}}]
+  @history[#:changed "1.12" @elem{Added @tech[#:key "Some"]{existential type results}}]
 }
 
 @;; This is a trick to get a reference to ->* in another manual
@@ -1028,9 +1032,11 @@ prefab types with the (implicitly quoted) prefab-key
   structure type associcated with a @racket[Struct-Property] named @racket[prop].
 }
 
+@defalias[∪ U "type constructor"]
 @defalias[Union U "type constructor"]
 @defalias[Intersection ∩ "type constructor"]
 @defalias[→ -> "type constructor"]
+@defalias[→* ->* "type constructor"]
 @defalias[case→ case-> "type constructor"]
 @defalias[∀ All "type"]
 

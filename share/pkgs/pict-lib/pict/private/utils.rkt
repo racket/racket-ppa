@@ -67,6 +67,8 @@
   (provide/contract 
    [scale (case-> (-> pict-convertible? number? number? pict?)
                   (-> pict-convertible? number? pict?))]
+   [flip-x (-> pict-convertible? pict?)]
+   [flip-y (-> pict-convertible? pict?)]
    [scale-to-fit (->* (pict-convertible? (or/c number? pict-convertible?))
                       (number? #:mode (or/c 'preserve 'inset 'preserve/max 'inset/max 'distort))
                       pict?)]
@@ -1305,6 +1307,62 @@
                 (pict-last p))]
     [(p factor) (scale p factor factor)]))
 
+(define/match (compose-trans _t1 _t2)
+  [{(vector a d b e c f) (vector g j h k i l)}
+   (vector (+ (* a g) (* b j))   (+ (* d g) (* e j))
+           (+ (* a h) (* b k))   (+ (* d h) (* e k))
+           (+ (* a i) (* b l) c) (+ (* d i) (* e l) f))])
+
+(define (compose-trans* t0 . ts)
+  (foldl (λ (t acc) (compose-trans acc t)) t0 ts))
+
+(define (make-translate h k)
+  (vector 1 0 0 1 h k))
+
+(define (make-flip-x) ; around y-axis
+  (vector -1 0 0 1 0 0))
+
+(define (flip-x p)
+  (define w (pict-width p))
+  (define h (pict-height p))
+  (dc (λ (dc x y)
+        ;; ( x, y) is the top-left corner
+        ;; (cx,cy) is the center of the pict
+        (define cx (+ x (/ w 2)))
+        (define cy (+ y (/ h 2)))
+        (define old-t (send dc get-initial-matrix))
+        (define new-t (compose-trans*
+                        (make-translate cx cy)
+                        (make-flip-x)
+                        (make-translate (- cx) (- cy))
+                        old-t))
+        (send dc set-initial-matrix new-t)
+        (draw-pict p dc x y)
+        (send dc set-initial-matrix old-t))
+      w h))
+
+(define (make-flip-y)
+  (vector 1 0 0 -1 0 0))
+
+(define (flip-y p)
+  (define w (pict-width p))
+  (define h (pict-height p))
+  (dc (λ (dc x y)
+        ;; ( x, y) is the top-left corner
+        ;; (cx,cy) is the center of the pict
+        (define cx (+ x (/ w 2)))
+        (define cy (+ y (/ h 2)))
+        (define old-t (send dc get-initial-matrix))
+        (define new-t (compose-trans*
+                        (make-translate cx cy)
+                        (make-flip-y)
+                        (make-translate (- cx) (- cy))
+                        old-t))
+        (send dc set-initial-matrix new-t)
+        (draw-pict p dc x y)
+        (send dc set-initial-matrix old-t))
+      w h))
+
 (define (translate p dx dy #:extend-bb? [bb? #f])
   (define nw (if (not bb?) (pict-width p) (+ (pict-width p) (abs dx))))
   (define nh (if (not bb?) (pict-height p) (+ (pict-height p) (abs dy))))
@@ -1410,36 +1468,40 @@
    p 0
    (+ dy (- (pict-ascent p)))))
 
-  (define cellophane
-    (case-lambda
-     [(p alpha-factor)
-      (let ([p (pict-convert p)])
-        (cond
-          [(= 1.0 alpha-factor)
-           (inset p 0)]
-          [(zero? alpha-factor)
-           (ghost p)]
-          [else
-           (let ([drawer (make-pict-drawer p)])
-             (let ([new
-                    (dc
+(define (cellophane p alpha-factor
+                    #:composite? [composite? #t])
+  (let ([p (pict-convert p)])
+    (cond
+      [(= 1.0 alpha-factor)
+       (inset p 0)]
+      [(zero? alpha-factor)
+       (ghost p)]
+      [else
+       (let ([drawer (make-pict-drawer p)])
+         (let ([new
+                (dc
+                 (if composite?
+                     (lambda (dc x y)
+                       (send dc start-alpha alpha-factor)
+                       (drawer dc x y)
+                       (send dc end-alpha))
                      (lambda (dc x y)
                        (let ([a (send dc get-alpha)])
                          (send dc set-alpha (* a alpha-factor))
                          (drawer dc x y)
-                         (send dc set-alpha a)))
-                     (pict-width p)
-                     (pict-height p)
-                     (pict-ascent p)
-                     (pict-descent p))])
-               (make-pict (pict-draw new)
-                          (pict-width new)
-                          (pict-height new)
-                          (pict-ascent new)
-                          (pict-descent new)
-                          (list (make-child p 0 0 1 1 0 0))
-                          #f
-                          (pict-last p))))]))]))
+                         (send dc set-alpha a))))
+                 (pict-width p)
+                 (pict-height p)
+                 (pict-ascent p)
+                 (pict-descent p))])
+           (make-pict (pict-draw new)
+                      (pict-width new)
+                      (pict-height new)
+                      (pict-ascent new)
+                      (pict-descent new)
+                      (list (make-child p 0 0 1 1 0 0))
+                      #f
+                      (pict-last p))))])))
 
   (define inset/clip
     (case-lambda
@@ -1448,26 +1510,38 @@
 	     [drawer (make-pict-drawer p)]
 	     [w (pict-width p)]
 	     [h (pict-height p)])
-	(let ([new
-	       (dc
-		(lambda (dc x y)
-		  (let ([rgn (make-object region% dc)])
-		    (send rgn set-rectangle x y w h)
-		    (let ([r (send dc get-clipping-region)])
-		      (when r
-			(send rgn intersect r))
-		      (send dc set-clipping-region rgn)
-		      (drawer dc x y)
-		      (send dc set-clipping-region r))))
-		w h (pict-ascent p) (pict-descent p))])
-	  (make-pict (pict-draw new)
-		     (pict-width new)
-		     (pict-height new)
-		     (pict-ascent new)
-		     (pict-descent new)
-		     (list (make-child p 0 0 1 1 0 0))
-		     #f
-                     (pict-last p))))]
+	(define new
+          (dc
+           (λ (dc x y)
+             (define clip-rgn (send dc get-clipping-region))
+             (define-values (l t r b)
+               (if clip-rgn
+                   (send clip-rgn get-bounding-box)
+                   (values 0 0 0 0)))
+             (define clip-redundant?
+               (and (<= x l)
+                    (<= y t)
+                    (<= (+ x w) r)
+                    (<= (+ y h) b)))
+             (cond
+               [clip-redundant?
+                (drawer dc x y)]
+               [else
+                (define rgn (make-object region% dc))
+                (send rgn set-rectangle x y w h)
+                (when clip-rgn (send rgn intersect clip-rgn))
+                (send dc set-clipping-region rgn)
+                (drawer dc x y)
+                (send dc set-clipping-region clip-rgn)]))
+           w h (pict-ascent p) (pict-descent p)))
+        (make-pict (pict-draw new)
+                   (pict-width new)
+                   (pict-height new)
+                   (pict-ascent new)
+                   (pict-descent new)
+                   (list (make-child p 0 0 1 1 0 0))
+                   #f
+                   (pict-last p)))]
      [(p h v) (inset/clip p h v h v)]
      [(p a) (inset/clip p a a a a)]))
   

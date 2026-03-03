@@ -83,6 +83,7 @@
   (define -LoadFileKind (parse-type #'LoadFileKind)))
 
 (type-environment
+ #:default-T+ #t
  [bitmap% (parse-type #'Bitmap%)]
  [bitmap-dc% (parse-type #'Bitmap-DC%)]
  [brush% (parse-type #'Brush%)]
@@ -91,7 +92,7 @@
  [dc-path% (parse-type #'DC-Path%)]
  [font% (parse-type #'Font%)]
  [font-list% (parse-type #'Font-List%)]
- [get-current-gl-context (parse-type #'(-> (U #f GL-Context<%>)))]
+ [get-current-gl-context  (-> (parse-type #'(U #f GL-Context<%>)))]
  [gl-config% (parse-type #'GL-Config%)]
  [linear-gradient% (parse-type #'Linear-Gradient%)]
  [pdf-dc% (parse-type #'PDF-DC%)]
@@ -142,6 +143,8 @@
          #:smoothing -Font-Smoothing #f
          #:size-in-pixels? Univ #f
          #:hinting -Font-Hinting #f
+         #:feature-settings (-Immutable-HT -String -Integer) #f
+         #:font-list (-opt (-inst (parse-type #'Font-List%))) #f
          (-inst (parse-type #'Font%)))]
  [make-monochrome-bitmap
   (->* (list -Integer -Integer) (-opt -Bytes) (-inst -Bitmap%))]

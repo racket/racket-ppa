@@ -3,12 +3,14 @@
   (require parser-tools/lex
            racket/contract
            "lexer-contract.rkt"
-           (prefix-in : parser-tools/lex-sre))
+           (prefix-in : parser-tools/lex-sre)
+           "private/racket-tabify.rkt")
   
   (provide 
    (contract-out
     [racket-lexer lexer/c]
-    [racket-lexer* lexer*/c])
+    [racket-lexer* lexer*/c]
+    [current-lexeme->semantic-type-guess (parameter/c (string? . -> . (or/c #f symbol?)))])
    racket-lexer/status
    racket-nobar-lexer/status
    racket-lexer*/status
@@ -167,7 +169,7 @@
    [sharing (:or (:: "#" (make-uinteger digit10) "=")
                  (:: "#" (make-uinteger digit10) "#"))]
 
-   [list-prefix (:or "" "#hash" "#hasheq" "#hasheqv" "#s" (:: "#" (:* digit10)))])
+   [list-prefix (:or "" "#hash" "#hasheq" "#hasheqv" "#hashalw" "#s" (:: "#" (:* digit10)))])
   
   (define-lex-trans make-num
     (syntax-rules ()
@@ -415,6 +417,11 @@
   (define racket-lexer/status (lexer/status identifier keyword bad-id))
   (define racket-nobar-lexer/status (lexer/status nobar-identifier nobar-keyword nobar-bad-id))
 
+  (define current-lexeme->semantic-type-guess
+    (make-parameter (let ([lexeme->head-sexp-type (racket-tabify-table->head-sexp-type racket-tabify-default-table)])
+                      (lambda (lexeme)
+                        (and (lexeme->head-sexp-type lexeme) 'keyword)))))
+
   (struct comment-mode (prev balance) #:prefab)
   (define ((make-comment-tracking racket-lexer/status) in offset mode)
     (define-values (lexeme type paren start end status)
@@ -423,7 +430,16 @@
                              (not (eq? type 'eof)))
                         (hash 'type type 'comment? #t)
                         type))
-    (values lexeme attribs paren start end 0
+    (define attribs/keyword (cond
+                              [(and (eq? type 'symbol)
+                                    ((current-lexeme->semantic-type-guess) lexeme))
+                               => (lambda (guess)
+                                    (let ([attribs (if (hash? attribs)
+                                                       attribs
+                                                       (hash 'type type))])
+                                      (hash-set attribs 'semantic-type-guess guess)))]
+                              [else attribs]))
+    (values lexeme attribs/keyword paren start end 0
             (cond
               [(eq? type 'sexp-comment)
                (comment-mode mode 0)]

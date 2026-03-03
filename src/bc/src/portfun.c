@@ -9,6 +9,7 @@ static Scheme_Object *input_port_p (int, Scheme_Object *[]);
 static Scheme_Object *output_port_p (int, Scheme_Object *[]);
 static Scheme_Object *port_closed_p (int, Scheme_Object *[]);
 static Scheme_Object *string_port_p(int, Scheme_Object *[]);
+static Scheme_Object *pipe_port_p(int, Scheme_Object *[]);
 static Scheme_Object *current_input_port (int, Scheme_Object *[]);
 static Scheme_Object *current_output_port (int, Scheme_Object *[]);
 static Scheme_Object *current_error_port (int, Scheme_Object *[]);
@@ -97,6 +98,7 @@ static Scheme_Object *set_port_next_location(int, Scheme_Object **args);
 static Scheme_Object *filesystem_change_evt(int, Scheme_Object **args);
 static Scheme_Object *filesystem_change_evt_p(int, Scheme_Object **args);
 static Scheme_Object *filesystem_change_evt_cancel(int, Scheme_Object **args);
+static Scheme_Object *filesystem_change_evt_ready_p(int argc, Scheme_Object **argv);
 
 static Scheme_Object *sch_default_read_handler(void *ignore, int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_default_display_handler(int argc, Scheme_Object *argv[]);
@@ -222,25 +224,26 @@ scheme_init_port_fun(Scheme_Startup_Env *env)
   ADD_FOLDING_PRIM("string-port?",           string_port_p,              1, 1, 1, env);
   ADD_FOLDING_PRIM("terminal-port?",         scheme_terminal_port_p,     1, 1, 1, env);
   ADD_FOLDING_PRIM("port-waiting-peer?",     scheme_port_waiting_peer_p, 1, 1, 1, env);
+  ADD_FOLDING_PRIM("pipe-port?",             pipe_port_p,                1, 1, 1, env);
 
   ADD_NONCM_PRIM("port-closed?",             port_closed_p,          1, 1, env); 
   ADD_NONCM_PRIM("open-input-file",          open_input_file,        1, 3, env);
   ADD_NONCM_PRIM("open-input-bytes",         open_input_byte_string, 1, 2, env);
   ADD_NONCM_PRIM("open-input-string",        open_input_char_string, 1, 2, env);
-  ADD_NONCM_PRIM("open-output-file",         open_output_file,       1, 4, env);
+  ADD_NONCM_PRIM("open-output-file",         open_output_file,       1, 5, env);
   ADD_NONCM_PRIM("open-output-bytes",        open_output_string,     0, 1, env);
   ADD_NONCM_PRIM("open-output-string",       open_output_string,     0, 1, env);
   ADD_NONCM_PRIM("get-output-bytes",         get_output_byte_string, 1, 4, env);
   ADD_NONCM_PRIM("get-output-string",        get_output_char_string, 1, 1, env);
-  ADD_NONCM_PRIM("open-input-output-file",   open_input_output_file, 1, 4, env);
+  ADD_NONCM_PRIM("open-input-output-file",   open_input_output_file, 1, 5, env);
   ADD_NONCM_PRIM("close-input-port",         close_input_port,       1, 1, env);
   ADD_NONCM_PRIM("close-output-port",        close_output_port,      1, 1, env);
   ADD_NONCM_PRIM("make-input-port",          make_input_port,        4, 10, env);
   ADD_NONCM_PRIM("make-output-port",         make_output_port,       4, 11, env);
   
-  ADD_PRIM_W_ARITY2("call-with-output-file", call_with_output_file,  2, 5, 0, -1, env);
+  ADD_PRIM_W_ARITY2("call-with-output-file", call_with_output_file,  2, 6, 0, -1, env);
   ADD_PRIM_W_ARITY2("call-with-input-file",  call_with_input_file,   2, 3, 0, -1, env);
-  ADD_PRIM_W_ARITY2("with-output-to-file",   with_output_to_file,    2, 5, 0, -1, env);
+  ADD_PRIM_W_ARITY2("with-output-to-file",   with_output_to_file,    2, 6, 0, -1, env);
   ADD_PRIM_W_ARITY2("with-input-from-file",  with_input_from_file,   2, 3, 0, -1, env);
   ADD_PRIM_W_ARITY2("make-pipe",             sch_pipe,               0, 3, 2,  2, env);
   ADD_PRIM_W_ARITY2("port-next-location",    port_next_location,     1, 1, 3,  3, env);
@@ -249,6 +252,7 @@ scheme_init_port_fun(Scheme_Startup_Env *env)
   ADD_PRIM_W_ARITY("filesystem-change-evt",  filesystem_change_evt,   1, 2, env);
   ADD_NONCM_PRIM("filesystem-change-evt?",   filesystem_change_evt_p, 1, 1, env);
   ADD_NONCM_PRIM("filesystem-change-evt-cancel",  filesystem_change_evt_cancel, 1, 1, env);
+  ADD_NONCM_PRIM("filesystem-change-evt-ready?",  filesystem_change_evt_ready_p, 1, 1, env);
 
   ADD_NONCM_PRIM("read-char",                      read_char,                      0, 1, env);
   ADD_PRIM_W_ARITY2("read-char-or-special",        read_char_spec,                 0, 3, 0, -1, env);
@@ -307,6 +311,7 @@ scheme_init_port_fun(Scheme_Startup_Env *env)
   ADD_NONCM_PRIM("port-try-file-lock?",            scheme_file_try_lock,           2, 2, env);
   ADD_NONCM_PRIM("port-file-unlock",               scheme_file_unlock,             1, 1, env);
   ADD_NONCM_PRIM("port-file-identity",             scheme_file_identity,           1, 1, env);
+  ADD_NONCM_PRIM("port-file-stat",                 scheme_file_stat,               1, 1, env);
   ADD_NONCM_PRIM("port-count-lines!",              port_count_lines,               1, 1, env);
   ADD_NONCM_PRIM("port-counts-lines?",             port_counts_lines_p,            1, 1, env);
           
@@ -321,11 +326,12 @@ scheme_init_port_fun(Scheme_Startup_Env *env)
   scheme_addto_prim_instance("display", scheme_display_proc,  env);
   scheme_addto_prim_instance("print",   scheme_print_proc,    env);
 
-  ADD_IMMED_PRIM("pipe-content-length",              pipe_length,                1, 1, env);
+  ADD_IMMED_PRIM("pipe-content-length",  pipe_length,   1, 1, env);
 
   REGISTER_SO(scheme_default_global_print_handler);
   scheme_default_global_print_handler
     = scheme_make_prim_w_arity(sch_default_global_port_print_handler, "default-global-port-print-handler", 2, 3);
+  scheme_addto_prim_instance("default-global-port-print-handler", scheme_default_global_print_handler, env);
 
   ADD_PRIM_W_ARITY("sha1-bytes",                  sha1_bytes,                    1, 3, env);
   ADD_PRIM_W_ARITY("sha224-bytes",                sha224_bytes,                  1, 3, env);
@@ -1024,6 +1030,7 @@ user_get_or_peek_bytes(Scheme_Input_Port *port,
       uip->reuse_str = NULL;
     } else {
       char *vb;
+      if (size > 8191) size = 8191;
       vb = scheme_malloc_atomic(size + 1);
       memset(vb, 0, size + 1); /* must initialize for security */
       bstr = scheme_make_sized_byte_string(vb, size, 0);
@@ -2207,9 +2214,7 @@ static Scheme_Object *pipe_length(int argc, Scheme_Object **argv)
   }
 
   if (!pipe) {
-    scheme_wrong_contract("pipe-content-length",
-                          "(or/c pipe-input-port? pipe-output-port?)",
-		      0, argc, argv);
+    scheme_wrong_contract("pipe-content-length", "pipe-port?", 0, argc, argv);
     return NULL;
   }
     
@@ -2747,6 +2752,26 @@ string_port_p (int argc, Scheme_Object *argv[])
       return scheme_true;
   } else {
     scheme_wrong_contract("string-port?", "port?", 0, argc, argv);
+  }
+
+  return scheme_false;
+}
+
+static Scheme_Object *
+pipe_port_p (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *p = argv[0];
+
+  if (SCHEME_INPUT_PORTP(p)) {
+    if (SAME_OBJ(scheme_input_port_record(p)->sub_type,
+                 scheme_pipe_read_port_type))
+      return scheme_true;
+  } else if (SCHEME_OUTPUT_PORTP(p)) {
+    if (SAME_OBJ(scheme_output_port_record(p)->sub_type,
+                 scheme_pipe_write_port_type))
+      return scheme_true;
+  } else {
+    scheme_wrong_contract("pipe-port?", "port?", 0, argc, argv);
   }
 
   return scheme_false;
@@ -4385,6 +4410,16 @@ static Scheme_Object *filesystem_change_evt_cancel(int argc, Scheme_Object **arg
   scheme_filesystem_change_evt_cancel(argv[0], NULL);
 
   return scheme_void;
+}
+
+static Scheme_Object *filesystem_change_evt_ready_p(int argc, Scheme_Object **argv)
+{
+  if (!SAME_TYPE(scheme_filesystem_change_evt_type, SCHEME_TYPE(argv[0])))
+    scheme_wrong_contract("filesystem-change-evt-ready?", "filesystem-change-evt?", 0, argc, argv);
+
+  return (scheme_filesystem_change_evt_ready(argv[0], NULL)
+          ? scheme_true
+          : scheme_false);
 }
 
 static Scheme_Object *abs_directory_p(const char *name, Scheme_Object *d)

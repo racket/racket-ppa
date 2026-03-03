@@ -1,26 +1,28 @@
 #lang racket/base
 
-(require syntax/parse racket/pretty
-         "../utils/utils.rkt"
+(require racket/pretty
+         syntax/parse
+         (only-in "../utils/tc-utils.rkt" optional current-type-enforcement-mode)
          "../private/syntax-properties.rkt"
          "../types/type-table.rkt"
-         "utils.rkt"
-         "number.rkt"
-         "fixnum.rkt"
-         "float.rkt"
+         "../utils/utils.rkt"
+         "apply.rkt"
+         "box.rkt"
+         "dead-code.rkt"
          "extflonum.rkt"
+         "fixnum.rkt"
          "float-complex.rkt"
-         "vector.rkt"
-         "string.rkt"
+         "float.rkt"
+         "hidden-costs.rkt"
          "list.rkt"
+         "number.rkt"
          "pair.rkt"
          "sequence.rkt"
-         "box.rkt"
+         "string.rkt"
          "struct.rkt"
-         "dead-code.rkt"
-         "apply.rkt"
          "unboxed-let.rkt"
-         "hidden-costs.rkt")
+         "utils.rkt"
+         "vector.rkt")
 
 
 (provide optimize-top)
@@ -79,11 +81,16 @@
   (pattern (~and ((~or #%provide #%require begin-for-syntax define-syntaxes module module*)
                   . _)
                  opt))
-  (pattern (~and (~or (quote _) (quote-syntax . _) (#%top . _) :id) opt)))
+  (pattern (~and (~or (quote _) (quote-syntax . _) (#%top . _) :id) opt))
+  )
 
 (define (optimize-top stx)
+  (let ((te-mode (current-type-enforcement-mode)))
+    ;; check for bad context
+    (when (eq? te-mode optional)
+      (raise-optimizer-context-error te-mode)))
   (parameterize ([optimize (syntax-parser [e:opt-expr* #'e.opt])])
-    (let ((result ((optimize) stx)))
-      (when *show-optimized-code*
-        (pretty-print (syntax->datum result)))
-      result)))
+    (define result ((optimize) stx))
+    (when *show-optimized-code*
+      (pretty-print (syntax->datum result)))
+    result))

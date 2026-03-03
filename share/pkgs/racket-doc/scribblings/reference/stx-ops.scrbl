@@ -1,6 +1,7 @@
 #lang scribble/doc
 @(require "mz.rkt"
-          (for-label racket/syntax-srcloc))
+          (for-label racket/syntax-srcloc
+                     (only-in syntax/stx stx-list?)))
 
 @(define stx-eval (make-base-eval))
 @(stx-eval '(require (for-syntax racket/base)))
@@ -76,19 +77,23 @@ column is unknown. See also @secref["linecol"].
 @defproc[(syntax-position [stx syntax?])
          (or/c exact-positive-integer? #f)]{
 
-Returns the character position (positive exact integer)
+Returns the position (positive exact integer)
 of the @tech{source location} for the start
 of the @tech{syntax object} in its source, or @racket[#f] if the source
-position is unknown. See also @secref["linecol"].}
+position is unknown. The position is intended to be a character position,
+but reading from a port without line counting enabled will produce
+a position as a byte offset. See also @secref["linecol"].}
 
 
 @defproc[(syntax-span [stx syntax?])
          (or/c exact-nonnegative-integer? #f)]{
 
-Returns the span (non-negative exact integer) in characters
+Returns the span (non-negative exact integer)
 of the @tech{source location} for
 @tech{syntax object} in its source, or @racket[#f] if the span is
-unknown.}
+unknown. The span is intended to count in characters,
+but reading from a port without line counting enabled will produce
+a span in bytes. See also @secref["linecol"]. }
 
 
 @defproc[(syntax-original? [stx syntax?]) boolean?]{
@@ -246,8 +251,8 @@ needed to strip lexical and source-location information recursively.
 Converts the @tech{datum} @racket[v] to a @tech{syntax object}.
 If @racket[v] is already a @tech{syntax object}, then there is no conversion,
 and @racket[v] is returned unmodified.
-The contents of pairs, vectors, and boxes, the fields of @tech{prefab}
-structures, and the values of immutable hash tables are recursively converted.
+The contents of pairs, vectors, and boxes, the values of immutable hash tables,
+and the fields of immutable @tech{prefab} structures are recursively converted.
 The keys of @tech{prefab} structures and the keys of immutable hash tables are
 not converted. Mutable vectors and boxes are replaced by immutable vectors and
 boxes. For any kind of value other than a
@@ -366,18 +371,23 @@ if a former representative becomes otherwise unreachable, then
 Returns a syntax object that is like @racket[stx], but with all of its
 top-level and module bindings shifted by @racket[shift] @tech{phase
 levels}. If @racket[shift] is @racket[#f], then only bindings
-at @tech{phase level} 0 are shifted to the @tech{label phase level}.
-If @racket[shift] is @racket[0], then the result is @racket[stx].}
+at @tech{phase level} 0 are shifted to the @tech{label phase level};
+shifting by an integer @racket[shift] effectively shifts
+which phase has been moved into the @tech{label phase level}.
+If @racket[shift] is @racket[0], then the result is @racket[stx].
+
+@history[#:changed "9.0.0.1" @elem{Shifting by an integer phase level adjust which
+                                   original phase is seen in the
+                                   @tech{label phase level}.}]}
 
 
-@defproc[(generate-temporaries [stx-pair (or syntax? list?)]) 
+@defproc[(generate-temporaries [v stx-list?])
          (listof identifier?)]{
 
 Returns a list of identifiers that are distinct from all other
 identifiers. The list contains as many identifiers as
-@racket[stx-pair] contains elements. The @racket[stx-pair] argument
-must be a syntax pair that can be flattened into a list. The elements
-of @racket[stx-pair] can be anything, but string, symbol, keyword
+@racket[v] contains elements.
+The elements of @racket[v] can be anything, but string, symbol, keyword
 (possibly wrapped as syntax), and identifier elements will be embedded
 in the corresponding generated name, which is useful for debugging
 purposes.

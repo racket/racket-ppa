@@ -31,7 +31,7 @@
 
 (require (for-doc racket/base scribble/manual framework/private/mapdesc
                   setup/getinfo racket/pretty string-constants
-                  (for-label string-constants racket/pretty)))
+                  (for-label racket/file string-constants racket/pretty)))
 
 (provide-signature-elements
  (prefix application: framework:application-class^)
@@ -451,10 +451,37 @@
   @{Adds a font selection preferences panel to the preferences dialog.})
 
  (proc-doc/names
+  preferences:add-boolean-option-with-ask-me
+  (-> (or/c (is-a?/c area-container<%>) #f)
+      string?
+      string?
+      string?
+      symbol?
+      void?)
+  (parent label option1 option2 pref-key)
+
+  @{Adds a checkbox to @racket[parent] with three options; the first two are given by @racket[option1] and @racket[option2], and
+the third is "Ask me". The preference named by@racket[pref-key] is updated based on the selection in the checkbox.
+})
+
+ (proc-doc/names
   preferences:show-dialog
   (-> void?)
   ()
   @{Shows the preferences dialog.})
+
+ (proc-doc/names
+  preferences:show-tab-panel
+  (-> (listof string?) void)
+  (labels)
+  @{Shows the preferences dialog, making a particular panel visible.
+    The strings in the @racket[labels] argument control which one is visible.
+
+    The strings in the @racket[labels] argument correspond to the strings passed to
+    @racket[preferences:add-panel].
+
+    @history[#:added "1.76"]
+    })
 
  (proc-doc/names
   preferences:hide-dialog
@@ -532,13 +559,19 @@
  
  (proc-doc/names
   autosave:restore-autosave-files/gui
-  (-> void?)
-  ()
+  (->* () ((or/c #f (listof (list/c (or/c #f absolute-path?) absolute-path?)))) void?)
+  (() ((table #f)))
   @{Opens a GUI to ask the user about recovering any autosave files left around
-    from crashes and things.
+    from crashes or other catastrophic failures.
+
+If @racket[table] is not supplied, then the file in
+@racket[autosave:current-toc-path] is consulted to find the files to restore.
+If it is supplied, then it is used to find the files to recover. Each inner
+list names the original file and the autosave file. If the original file
+was never saved, then the first element of the list is @racket[#f].
     
     This function doesn't return until the user has finished restoring the
-    autosave files.  (It uses yield to handle events however.)})
+    autosave files. It uses @racket[yield] to handle events, however.)})
 
  (proc-doc/names
   exit:exiting?
@@ -984,31 +1017,41 @@
 
  (proc-doc/names
   handler:edit-file
-  (->* ((or/c path? false/c))
-       ((-> (is-a?/c frame:editor<%>)))
+  (->* ((or/c path? symbol? #f))
+       ((-> (is-a?/c frame:editor<%>))
+        #:start-pos (or/c exact-nonnegative-integer? #f)
+        #:end-pos (or/c exact-nonnegative-integer? #f))
        (or/c false/c (is-a?/c frame:editor<%>)))
   ((filename)
    ((make-default
-     (λ () ((handler:current-create-new-window) filename)))))
+     (λ () ((handler:current-create-new-window) (and (path? filename) filename))))
+    (start-pos #f)
+    (end-pos start-pos)))
   @{This function invokes the appropriate format handler to open the file (see
     @racket[handler:insert-format-handler]).
     
     @itemize[
-      @item{If @racket[filename] is a string, this function checks the result
-            of @racket[group:get-the-frame-group] to see if the
+      @item{If @racket[filename] is a string or a symbol, this function checks the result
+            of @racket[group:get-the-frame-group]'s @method[group:% locate-file] method to see if the
             @racket[filename] is already open by a frame in the group.
             @itemize[
               @item{If so, it returns the frame.}
-                   @item{If not, this function calls
+                   @item{If not and if @racket[filename] is a string, this function calls
                          @racket[handler:find-format-handler] with
                          @racket[filename].
                          @itemize[
                            @item{If a handler is found, it is applied to
                                  @racket[filename] and its result is the final
                                  result.}
-                           @item{If not, @racket[make-default] is used.}]}]}
+                           @item{If not, @racket[make-default] is used.}]}
+                   @item{If the file is not already open by a frame in the group
+                         and if @racket[filename] is a symbol,
+                         @racket[make-default] is used.}]}
       @item{If @racket[filename] is @racket[#f], @racket[make-default] is
-            used.}]})
+            used.}]
+
+@history[#:changed "1.75" @list{generalized the @racket[filename] argument to allow
+          symbols and added the @racket[start-pos] and @racket[end-pos] arguments.}]})
 
  (parameter-doc
   handler:current-create-new-window
@@ -1073,6 +1116,20 @@
   (num)
   @{Sizes the @racket['framework:recently-opened-files/pos] preference list
     length to @racket[num].})
+
+ (proc-doc/names
+  handler:update-currently-open-files
+  (-> void?)
+  ()
+
+  @{
+This is called when new files are opened or when files
+are closed or when the frontmost window changes. As long as the app
+is not currently exiting, it updates the
+preference with the key @racket['framework:last-opened-files] to
+hold a list of list of paths, to record the lists of files that
+are currently open in tabs.
+})
 
  (proc-doc/names
   icon:get-paren-highlight-bitmap
@@ -2012,7 +2069,7 @@
       void?)
   (pref-sym black-on-white-color white-on-black-color)
   @{Registers a preference whose value will be updated when the user clicks on
-    one of the color scheme default settings in the preferences dialog, but
+    one of the @tech{color scheme} default settings in the preferences dialog, but
     does not give it a name that can be configured by a color scheme; consider using
     @racket[color-prefs:add-color-scheme-entry] instead.
     
@@ -2030,7 +2087,7 @@
    ((white-on-black-color #f)
     (background #f)))
   @{This function registers a color preference but does not give it
-    a name that can be configured by a color scheme; consider using
+    a name that can be configured by a @tech{color scheme}; consider using
     @racket[color-prefs:add-color-scheme-entry] instead.
 
     This function calls @racket[preferences:set-default] and
@@ -2099,6 +2156,18 @@
     in the panel so users can see the results of their configuration.})
 
  (proc-doc/names
+  color-prefs:normalize-color-selection-button-widths
+  (-> (is-a?/c area-container<%>)
+      void?)
+  (parent)
+  @{Given a panel that was passed to @racket[color-prefs:build-color-selection-panel]
+(perhaps multiple times), @racket[color-prefs:normalize-color-selection-button-widths]
+will ensure that the panel contents line up with each other, by making sure that
+the color selection buttons all have the same size.
+
+@history[#:added "1.72"]})
+
+ (proc-doc/names
   color-prefs:marshall-style-delta
   (-> (is-a?/c style-delta%) printable/c)
   (style-delta)
@@ -2106,10 +2175,30 @@
 
  (proc-doc/names
   color-prefs:unmarshall-style-delta
-  (-> printable/c (or/c false/c (is-a?/c style-delta%)))
+  (-> printable/c (or/c #f (is-a?/c style-delta%)))
   (marshalled-style-delta)
   @{Builds a style delta from its printed representation.  Returns @racket[#f]
     if the printed form cannot be parsed.})
+
+ (proc-doc/names
+  color-prefs:white-on-black-color-scheme?
+  (-> boolean?)
+  ()
+  @{
+
+Returns @racket[#true] if the current @tech{color scheme} is in dark mode
+(i.e. has a light foreground with a dark background) and
+@racket[#false] if it is in light mode (i.e. a dark foreground with
+a light background).
+
+This function uses the @racket['framework:white-on-black-mode?] preference;
+returning its value if it is a boolean and using @racket[white-on-black-panel-scheme?] if
+it is set to @racket['platform]. This function is intended
+to be used in place of @racket[white-on-black-panel-scheme?]
+for code that supports @tech{color scheme}s.
+
+@history[#:added "1.79"]
+})
 
  (proc-doc/names
   color-prefs:white-on-black
@@ -2142,7 +2231,7 @@
                         #f)])
        [result void?])
   (#f #f #f #f #f)
-  @{Registers a new color or style named @racket[name] for use in the color schemes. 
+  @{Registers a new color or style named @racket[name] for use in the @tech{color schemes}.
     If @racket[style] is not @racket[#f], a new style is registered; if not a color is
     registered.
 
@@ -2160,7 +2249,7 @@
   (() ((extras void)))
   @{Adds a panel for choosing a color-scheme to the preferences dialog.
     
-    The @racket[extras] argument is called after the color schemes have been added
+    The @racket[extras] argument is called after the @tech{color schemes} have been added
     to the preferences panel. It is passed the panel containing the color schemes
     and can add items to it.})
  
@@ -2172,7 +2261,7 @@
     @index{framework:color-schemes}
     @racket['framework:color-schemes]. Each definition must bind
     a list of hash tables, each of which introduces a new
-    color scheme. Each hash table should have keys that specify
+    @deftech{color scheme}. Each hash table should have keys that specify
     details of the color scheme, as follows:
     @itemlist[@item{@racket['name]: must be either a string or a symbol;
                      it names the entire color scheme.
@@ -2184,6 +2273,11 @@
                @item{@racket['white-on-black-base?]: must be a boolean indicating if this
                       color-scheme is based on an inverted color scheme. If absent, it
                       is @racket[#f].}
+              @item{@racket['inverted-base-name]: must be a
+               symbol or @racket[#f]. This field is no longer used; in the past
+               it linked two color schemes and was used when switching between light
+               and dark modes. Now, two separate preferences are kept; the user's
+               choice for dark mode and their choice for light mode.}
                @item{@racket['example]: must be a string and is used in the preferences dialog
                       to show an example of the color scheme. If absent, the string used in
                       the ``Classic'' color scheme is used.}
@@ -2234,37 +2328,59 @@
     is called, it logs the active set of color names and style names to the @tt{color-scheme}
     logger at the info level. So, for example, starting up DrRacket like this:
     @tt{racket -W info@"@"color-scheme -l drracket} will print out the styles used in your
-    version of DrRacket.})
+    version of DrRacket.
+
+@history[#:changed "1.68" @list{Added @racket['inverted-base-name].}
+         #:changed "1.79" @list{Ignore @racket['inverted-base-name].}]
+})
  
  (proc-doc/names
   color-prefs:set-current-color-scheme
   (-> symbol? void?)
   (name)
-  @{Sets
-    the current color scheme to the scheme named @racket[name], 
-    if @racket[name] is one of the color schemes.
-    Otherwise, sets the color scheme to the default color scheme.})
+  @{
+Set's the user's preferred @tech{color scheme} to
+the one whose name is @racket[name].
+Also, updates the colors in DrRacket's GUI to the colors in
+that color scheme if the named color scheme matches the
+dark/light mode that the GUI is in.
+})
  
- (proc-doc
+ (proc-doc/names
   color-prefs:get-current-color-scheme-name
-  (-> symbol?)
-  @{Returns the current color scheme's name.})
+  (->* () (#:wob? boolean?) symbol?)
+  (() ((wob? (white-on-black-color-scheme?))))
+  @{Returns the name of either the user's preferred dark mode or light mode @tech{color scheme},
+based on the @racket[wob?] boolean. If the boolean is @racket[#true], returns the dark mode's name,
+otherwise the light mode's.})
  
  (proc-doc/names
   color-prefs:known-color-scheme-name?
   (-> any/c boolean?)
   (name)
   @{Returns @racket[#t] if the input is a @racket[symbol?] that names
- a color or style that is an entry in the current color scheme.
-            
+ a color or style that is an entry in the current @tech{color scheme}.
+
  In order to return @racket[#t], @racket[name] must have been
  passed as the first argument to @racket[color-prefs:add-color-scheme-entry].})
+
+ (proc-doc/names
+  color-prefs:get-inverted-base-color-scheme
+  (-> symbol? (or/c #f symbol?))
+  (name)
+  @{
+Returns the inverted-base @tech{color scheme} name
+of color scheme named @racket[name], if it has one.
+
+@history[#:added "1.68"
+         #:changed "1.79" @list{This function is no longer used.}]
+})
  
  (proc-doc/names
   color-prefs:color-scheme-style-name?
   (-> any/c boolean?)
   (name)
-  @{Returns @racket[#t] if @racket[name] is a known color scheme name,
+  @{Returns @racket[#t] if @racket[name] is a known @tech{color scheme} name,
             and is connected to a style. 
             
             In order to return @racket[#t], @racket[name] must have been
@@ -2275,21 +2391,22 @@
   color-prefs:color-scheme-color-name?
   (-> any/c boolean?)
   (name)
-  @{Returns @racket[#t] if @racket[name] is a known color scheme name,
+  @{Returns @racket[#t] if @racket[name] is a known @tech{color scheme} name,
             and is connected to a color. 
             
             In order to return @racket[#t], @racket[name] must have been
             passed as the first argument to @racket[color-prefs:add-color-scheme-entry]
             and the @racket[#:style] argument must have also been omitted or be @racket[#f].})
  
- (proc-doc 
+ (proc-doc
   color-prefs:lookup-in-color-scheme
   (->i ([name color-prefs:known-color-scheme-name?])
-       ()
+       (#:wob? [wob boolean?])
        [result (name)
                (if (color-prefs:color-scheme-style-name? name)
                    (is-a?/c style-delta%)
                    (is-a?/c color%))])
+  ((white-on-black-color-scheme?))
   @{Returns the current style delta or color associated with @racket[name].})
  
  (proc-doc
@@ -2302,7 +2419,7 @@
        ()
        [result void?])
   @{Updates the current color or style delta associated with 
-    @racket[name] in the current color scheme.})
+    @racket[name] in the current @tech{color scheme}.})
  
  (proc-doc
   color-prefs:register-color-scheme-entry-change-callback
@@ -2314,22 +2431,32 @@
                         (is-a?/c style-delta%)
                         (is-a?/c color%))
                     any))])
-       ([weak? boolean?])
+       ([weak? boolean?]
+        #:style-list [style-list (or/c #f (is-a?/c style-list%))])
        [result void?])
-  (#f)
+  (#f #f)
   @{Registers a callback that is invoked whenever the color mapped by
     @racket[name] changes. Changes may happen due to calls to
     @racket[color-prefs:set-in-color-scheme] or due to calls to 
     @racket[color-prefs:set-current-color-scheme].
     
     If @racket[weak?] is @racket[#t], the @racket[fn] argument is held
-    onto weakly; otherwise it is held onto strongly.})
+    onto weakly; otherwise it is held onto strongly.
+
+    If @racket[style-list] is not @racket[#f] then calls to all of the
+    registered callbacks (including @racket[fn]) are bracketed
+    by calls to @method[style-list% begin-style-change-sequence]
+    and @method[style-list% end-style-change-sequence] for the given
+    @racket[style-list%].
+
+    @history[#:changed "1.68" @list{added the @racket[style-list] argument}]
+})
  
  (proc-doc
   color-prefs:get-color-scheme-names
   (-> (values set? set?))
-  @{Returns two sets; the first is the known color scheme names that are just colors
-    and the second is the known color scheme names that are styles.
+  @{Returns two sets; the first is the known @tech{color scheme} names that are just colors
+    and the second is the known @tech{color scheme} names that are styles.
     
     These are all of the names that have been passed to @racket[color-prefs:add-color-scheme-entry].})
  )

@@ -342,7 +342,7 @@
          `(set! ,(make-live-info) ,t (asm ,info ,asm-add ,t ,y))
          `(set! ,(make-live-info) ,z ,t)))])
 
-  (define-instruction value (* */ovfl) ; */ovfl must set mulitply-overflow flag on overflow
+  (define-instruction value (* */ovfl) ; */ovfl must set multiply-overflow flag on overflow
     [(op (z ur) (x z) (y ur mem))
      `(set! ,(make-live-info) ,z (asm ,info ,asm-mul ,z ,y))]
     [(op (z ur) (x ur mem) (y z))
@@ -633,7 +633,7 @@
     ; CMP r/m, r
     ; CMP r, r/m
     ; the last format we may want to drop, since it uses a different
-    ; format from the one above it, but is interchangable with it,
+    ; format from the one above it, but is interchangeable with it,
     ; if we reverse the operands.
     [(op (x mem) (y ur imm32))
      (let ([info (make-info-condition-code op #f #t)])
@@ -894,7 +894,7 @@
   (define-op extad     byte-op     #b10011001)  ; extend eax to edx
 
   (define-op int3      byte-op     #b11001100)
-  
+
   (define-op rdtsc     two-byte-op     #b1111 #b00110001) ; read time-stamp counter
   (define-op rdpmc     two-byte-op     #b1111 #b00110011) ; read performance monitoring counter
   (define-op pause     two-byte-op #b11110011 #b10010000) ; equivalent to rep nop
@@ -1293,7 +1293,7 @@
              (emit-code (op disp code*)
                (build byte #b11101001)
                (build long offset)))]
-        [else 
+        [else
           (emit-code (op disp code*)
             (build byte #b11101001)
             (ax-ea-branch-disp disp))])))
@@ -1447,7 +1447,7 @@
                [(and (eqv? 0 size) (not (eq? base-reg %ebp))) #b00]
                [(ax-byte-size? size) #b01]
                [else #b10])]
-            [(literal@) stuff #b00]   
+            [(literal@) stuff #b00]
             [(disp) (size reg)
              (cond
                [(and (eqv? 0 size) (not (eq? reg %ebp))) #b00] ; indirect
@@ -2183,12 +2183,12 @@
   (define callee-expects-result-pointer?
     (lambda (result-type)
       (nanopass-case (Ltype Type) result-type
-        [(fp-ftd& ,ftd) (constant-case machine-type-name
-                          [(i3osx ti3osx i3nt ti3nt)
-                           (case ($ftd-size ftd)
-                             [(1 2 4 8) #f]
-                             [else #t])]
-                          [else ($ftd-compound? ftd)])]
+        [(fp-ftd& ,ftd ,fptd) (constant-case machine-type-name
+                                [(i3osx ti3osx i3nt ti3nt)
+                                 (case ($ftd-size ftd)
+                                   [(1 2 4 8) #f]
+                                   [else #t])]
+                                [else ($ftd-compound? ftd)])]
         [else #f])))
   (define callee-pops-result-pointer?
     (lambda (result-type)
@@ -2196,7 +2196,7 @@
   (define fill-result-pointer-from-registers?
     (lambda (result-type)
       (nanopass-case (Ltype Type) result-type
-        [(fp-ftd& ,ftd) (not (callee-expects-result-pointer? result-type))]
+        [(fp-ftd& ,ftd ,fptd) (not (callee-expects-result-pointer? result-type))]
         [else #f])))
 
   (module (push-registers pop-registers push-registers-size)
@@ -2297,12 +2297,12 @@
                            (cons (load-single-stack n) locs)
                            (fx+ n 4)
                            #f)]
-                        [(fp-ftd& ,ftd)
+                        [(fp-ftd& ,ftd ,fptd)
                          (do-stack (cdr types)
                            (cons (load-content n ($ftd-size ftd)) locs)
                            (fx+ n (fxlogand (fx+ ($ftd-size ftd) 3) -4))
                            #f)]
-                        [(fp-ftd ,ftd)
+                        [(fp-fptd ,fptd)
                          (cond
                           [(and result-type
                                 (fill-result-pointer-from-registers? result-type))
@@ -2341,7 +2341,7 @@
           (cond
            [fill-result-here?
             (let* ([ftd (nanopass-case (Ltype Type) result-type
-                          [(fp-ftd& ,ftd) ftd])]
+                          [(fp-ftd& ,ftd ,fptd) ftd])]
                    [size ($ftd-size ftd)])
               (case size
                 [(4)
@@ -2448,7 +2448,7 @@
                       (cond
                        [fill-result-here?
                         (let* ([ftd (nanopass-case (Ltype Type) result-type
-                                      [(fp-ftd& ,ftd) ftd])]
+                                      [(fp-ftd& ,ftd ,fptd) ftd])]
                                [size ($ftd-size ftd)])
                           (%seq
                            ,call
@@ -2463,14 +2463,14 @@
                               [(4)
                                (cond
                                 [(and (if-feature windows (not ($ftd-compound? ftd)) #t)
-				      (equal? '((float 4 0)) ($ftd->members ftd)))
+                                      (equal? '((float 4 0)) ($ftd->members ftd)))
                                  `(set! ,(%mref ,%ecx ,%zero 0 fp) ,(%inline fstps))]
                                 [else
                                  `(set! ,(%mref ,%ecx 0) ,%eax)])]
                               [(8)
                                (cond
                                 [(and (if-feature windows (not ($ftd-compound? ftd)) #t)
-				      (equal? '((float 8 0)) ($ftd->members ftd)))
+                                      (equal? '((float 8 0)) ($ftd->members ftd)))
                                  `(set! ,(%mref ,%ecx ,%zero 0 fp) ,(%inline fstpl))]
                                 [else
                                  `(seq
@@ -2598,7 +2598,7 @@
                    (do-stack (cdr types)
                      (cons (load-single-stack n) locs)
                      (fx+ n 4))]
-                  [(fp-ftd& ,ftd)
+                  [(fp-ftd& ,ftd ,fptd)
                    (do-stack (cdr types)
                      (cons (load-stack-address n) locs)
                      (fx+ n (fxlogand (fx+ ($ftd-size ftd) 3) -4)))]
@@ -2615,7 +2615,7 @@
                          (fx+ n 4)))]))))
           (define (do-result result-type init-stack-offset indirect-result-to-registers?)
             (nanopass-case (Ltype Type) result-type
-              [(fp-ftd& ,ftd)
+              [(fp-ftd& ,ftd ,fptd)
                (cond
                 [indirect-result-to-registers?
                  (cond
@@ -2707,7 +2707,7 @@
                                            ;; the extra 4 bytes may be used for the unactivate mode
                                            12])]
                  [init-stack-offset (fx+ 20 indirect-result-space)]
-		 [indirect-result-to-registers? (fill-result-pointer-from-registers? result-type)])
+                 [indirect-result-to-registers? (fill-result-pointer-from-registers? result-type)])
               (let-values ([(get-result result-regs result-num-fp-regs)
                             (do-result result-type init-stack-offset indirect-result-to-registers?)])
                 (with-values (do-stack (if indirect-result-to-registers?

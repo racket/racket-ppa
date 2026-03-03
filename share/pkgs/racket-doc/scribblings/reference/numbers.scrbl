@@ -6,8 +6,7 @@
                      racket/unsafe/ops
                      racket/require
                      racket/random
-                     racket/list
-                     math/flonum))
+                     racket/list))
 
 @(define math-eval (make-base-eval))
 @examples[#:hidden #:eval math-eval (require racket/math)]
@@ -408,10 +407,10 @@ Returns the @as-index{greatest common divisor} (a non-negative
 @mz-examples[(gcd 10) (gcd 12 81.0) (gcd 1/2 1/3)]}
 
 
-@defproc[(lcm [n rational?] ...) rational?]{
+@defproc[(lcm [n rational?] ...) (or/c rational? +inf.0)]{
 
 Returns the @as-index{least common multiple} (a non-negative number)
- of the @racket[n]s; non-integer @racket[n]s, the result is
+ of the @racket[n]s. For two non-integer @racket[n]s, the result is
  the absolute value of the product divided by the
  @racket[gcd]. If no arguments are provided, the result is
  @racket[1]. If any argument is zero, the result is zero; furthermore,
@@ -522,7 +521,7 @@ Among the real numbers within @racket[(abs tolerance)] of @racket[x],
 @history/arity[]}
 
 
-@defproc[(> [x real?] [y real?] ...+) boolean?]{ Returns @racket[#t] if
+@defproc[(> [x real?] [y real?] ...) boolean?]{ Returns @racket[#t] if
  the arguments in the given order are strictly decreasing,
  @racket[#f] otherwise.
 
@@ -680,8 +679,8 @@ Returns the natural logarithm of @racket[z].  The result is normally
  can potentially run faster. If @racket[b] is exact
  @racket[1], @exnraise[exn:fail:contract:divide-by-zero].
 
- Consider using @racket[fllogb] instead when accuracy is
- important.
+ Consider using @racketidfont{fllogb} from @racketmodname[math/flonum #:indirect]
+ instead when accuracy is important.
 
 @mz-examples[(log (exp 1)) (log 2+3i) (log 1) (log 100 10) (log 8 2) (log 5 5)]
 
@@ -867,6 +866,18 @@ but it is faster and runs in constant time when @racket[n] is positive.
 @mz-examples[(bitwise-bit-set? 5 0) (bitwise-bit-set? 5 2) (bitwise-bit-set? -5 (expt 2 700))]}
 
 
+@defproc[(bitwise-first-bit-set [n exact-integer?])
+         exact-integer?]{
+
+Returns @racket[-1] if @racket[n] is @racket[0], otherwise returns the
+smallest @racket[_m] for which @racket[(bitwise-bit-set? n _m)]
+produces @racket[#t].
+
+@mz-examples[(bitwise-first-bit-set 128)]
+
+@history[#:added "8.16.0.4"]}
+
+
 @defproc[(bitwise-bit-field [n exact-integer?]
                             [start exact-nonnegative-integer?]
                             [end (and/c exact-nonnegative-integer?
@@ -919,8 +930,6 @@ both in binary and as integers.
 @; ------------------------------------------------------------------------
 @subsection{Random Numbers}
 
-@margin-note{When security is a concern, use @racket[crypto-random-bytes] instead of @racket[random].}
-
 @defproc*[([(random [k (integer-in 1 4294967087)]
                     [rand-gen pseudo-random-generator?
                                (current-pseudo-random-generator)])
@@ -929,7 +938,7 @@ both in binary and as integers.
                     [max (integer-in (+ 1 min) (+ 4294967087 min))]
                     [rand-gen pseudo-random-generator?
                               (current-pseudo-random-generator)])
-            exact-nonnegative-integer?]
+            exact-integer?]
            [(random [rand-gen pseudo-random-generator?
                               (current-pseudo-random-generator)])
             (and/c real? inexact? (>/c 0) (</c 1))])]{
@@ -949,6 +958,14 @@ generator (which defaults to the current one, as produced by
 internal state for generating numbers. The random number generator
 uses L'Ecuyer's MRG32k3a algorithm @cite["L'Ecuyer02"] that has a
 state space of practically 192 bits.
+
+When security is a concern, use @racket[crypto-random-bytes]
+instead of @racket[random].
+
+The @racketmodname[math/base #:indirect] library provides @seclink[
+ #:indirect? #t #:doc '(lib "math/scribblings/math.scrbl") "Random_Number_Generation"]{
+  additional functions for random number generation}
+without the limit of @racket[4294967087].
 
 @history[#:changed "6.4"]{Added support for ranges.}}
 

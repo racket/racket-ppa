@@ -8,6 +8,7 @@
          "../types/substitute.rkt"
          "../types/type-table.rkt"
          "../utils/tc-utils.rkt"
+         "tc-funapp.rkt"
          "../rep/type-rep.rkt"
          "../rep/core-rep.rkt"
          "../rep/values-rep.rkt"
@@ -49,15 +50,24 @@
 
   ;; Raises an error message for the case that the arguments do not match any of the domains
   (define (failure)
-    (match f-ty
-      [(tc-result1:
-         (and t (AnyPoly-names: _ _
-                                (Fun: (list (Arrow: doms rests (list (Keyword: _ _ #f) ...) rngs) ..1)))))
-       (domain-mismatches f args t doms rests rngs arg-tres full-tail-ty #f
-                          #:msg-thunk (lambda (dom)
-                                        (string-append
-                                         "Bad arguments to function in `apply':\n"
-                                         dom)))]))
+    (match-define (tc-result1: (and t
+                                    (AnyPoly-names:
+                                     _
+                                     _
+                                     (Fun: (list (Arrow: doms rests (list (Keyword: _ _ #f) ...) rngs)
+                                                 ..1)))))
+      f-ty)
+    (domain-mismatches f
+                       args
+                       t
+                       doms
+                       rests
+                       rngs
+                       arg-tres
+                       full-tail-ty
+                       #f
+                       #:msg-thunk
+                       (lambda (dom) (string-append "Bad arguments to function in `apply':\n" dom))))
 
   (match f-ty
     ;; apply of a simple function or polymorphic function
@@ -73,15 +83,19 @@
            ;; Takes a possible substitution and computes
            ;; the substituted range type if it is not #f
            (define (finish substitution)
-             (begin0
-               (and substitution (do-ret (subst-all substitution rng)))
-               (add-typeof-expr f (ret (make-Fun (list arrow))))))
+             (and substitution (do-ret (subst-all substitution rng))))
+           (add-typeof-expr f (ret (make-Fun (list arrow))))
            (finish
             (infer vars dotted-vars
                    (list (-Tuple* arg-tys full-tail-ty))
                    (list (-Tuple* domain (Rest->Type rst)))
                    rng))]))
-       (failure))]
+      (failure))]
+    [(tc-result1: (and (? Intersection? f-ty^)))
+     (tc/funapp f args f-ty^ (append arg-tres
+                                     (match full-tail-ty
+                                       [(List: ty) (list (ret ty))]))
+                #f)]
     [(tc-result1: (AnyPoly: _ _ (Fun: '())))
      (tc-error/expr "Function has no cases")]
     [(tc-result1: f-ty)

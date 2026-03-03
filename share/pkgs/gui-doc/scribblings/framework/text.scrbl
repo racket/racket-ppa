@@ -8,7 +8,9 @@
   functionality needed by the framework.
   @defmethod[(highlight-range [start exact-nonnegative-integer?]
                               [end exact-nonnegative-integer?]
-                              [color (or/c string? (is-a?/c color%))]
+                              [color (or/c string?
+                                           (is-a?/c color%)
+                                           color-prefs:color-scheme-color-name?)]
                               [caret-space boolean? #f]
                               [priority (or/c 'high 'low) 'low]
                               [style (or/c 'rectangle 'ellipse 'hollow-ellipse 'dot) 'rectangle]
@@ -20,12 +22,23 @@
     This function highlights a region of text in the buffer.
 
     The range between @racket[start] and @racket[end] will be highlighted with
-    the given @racket[color], if the style is @racket['rectangle] (the default).  If
-    the style is @racket['ellipse], then an ellipse is drawn around the range
+    the given @racket[color]. If the @racket[color] is a
+    @racket[color-prefs:color-scheme-color-name?] then the color is looked up
+    each time the rectangle is drawn, so that changes to the color scheme are
+    reflected in the highlighted range.
+
+    If the style is @racket['rectangle] (the default), then the highlighted region
+    is drawn as a rectangle, highlighting all of the text between the start and end.
+    If the style is @racket['ellipse], then an ellipse is drawn around the range
     in the editor, using the color.  If the style is @racket['hollow-ellipse],
     then the outline of an ellipse is drawn around the range in the editor,
     using the color.
-
+    If the style is @racket['single-rectangle] then a rectangle whose upper-left
+    corner is the starting position of the range and whose lower-right corner is
+    the ending position of the range; this may not highlight some of the text in the
+    range, as the first and last position may be in different paragraphs and
+    the intermediate paragraphs may be wider than the distance from the start to
+    the end.
     If the style is @racket['dot], then @racket[start] and @racket[end] must be
     the same, and a dot is drawn at the bottom of that position in the editor.
 
@@ -67,12 +80,17 @@
     @method[text:basic<%> unhighlight-ranges/key], or
     @method[text:basic<%> unhighlight-ranges]
     must be called directly to remove the highlighting.
+
+    @history[#:changed "1.68" @list{Allow the @racket[color] argument to be
+                @racket[color-prefs:color-scheme-color-name?]}]
   }
 
   @defmethod[(unhighlight-range
               (start exact-nonnegative-integer?)
               (end exact-nonnegative-integer?)
-              (color (or/c string? (is-a?/c color%)))
+              (color (or/c string?
+                           (is-a?/c color%)
+                           color-prefs:color-scheme-color-name?))
               (caret-space boolean? #f)
               (style (or/c 'rectangle 'ellipse 'hollow-ellipse) 'rectangle))
              void?]{
@@ -85,6 +103,9 @@
     If you expect to call this method many times (when there are many 
     ranges set)
     consider instead calling @method[text:basic<%> unhighlight-ranges].
+
+  @history[#:changed "1.68" @list{Allow the @racket[color] argument to be
+              @racket[color-prefs:color-scheme-color-name?]}]
   }
 
   @defmethod[(unhighlight-ranges/key [key any/c]) void?]{
@@ -270,6 +291,26 @@
   }
 }
 
+@definterface[text:indent-guides<%> (text%)]{
+ Classes implementing this interface provide indent guides
+ as thin vertical lines, showing which columns where earlier
+ lines started.
+
+ @history[#:added "1.69"]
+
+ @defmethod[#:mode public-final (show-indent-guides! [on? any/c]) void?]{
+  Enables or disables indent guides in this editor. Defaults to enabled.
+ }
+
+ @defmethod[#:mode public-final (show-indent-guides?) boolean?]{
+  Returns a boolean indicating if indent guides are shown in the current editor.
+ }
+}
+
+@defmixin[text:indent-guides-mixin (text%) (text:indent-guides<%>)]{
+
+}
+
 @definterface[text:inline-overview<%> (text%)]{
  Classes implementing this interface provide an overview
  along the right-hand side of the @racket[text%]'s view, showing
@@ -290,9 +331,9 @@
  }
 }
 
-@defmixin[text:inline-overview-mixin (text%) (text:inline-overview<%>)]{
+@defmixin[text:inline-overview-mixin (text%) (text:inline-overview<%>)]{}
 
-}
+@defmixin[text:inline-overview-mpw-mixin (text% text:max-width-paragraph<%>) (text:inline-overview<%>)]{}
 
 @definterface[text:line-spacing<%> (text:basic<%>)]{
    Objects implementing this interface adjust their
@@ -309,6 +350,48 @@
   Also registers a callback (via @racket[preferences:add-callback]) to call
   @method[text% set-line-spacing] when the @racket['framework:line-spacing-add-gap?]
   preference changes.
+}
+
+@definterface[text:max-width-paragraph<%> ()]{
+
+ Text objects implementing this interface track the width of
+ the widest line.
+
+ @defmethod[#:mode public-final (get-max-width-paragraph) natural?]{
+  Returns the index of the widest paragraph, i.e. the value of
+  @racket[para] that maximizes the expression
+  @racketblock[(- (#,(method text% paragraph-end-position) para)
+                  (#,(method text% paragraph-start-position) para))]
+
+  This method will, in some cases, loop over every line of
+  the editor to get its answer but it will cache the result
+  and track when edits happen that do not invalidate its
+  previous response. In those cases, it will just return its
+  cached result.
+
+  }
+
+ @defmethod[#:mode augment (after-max-width-paragraph-change) any]{
+
+  This method is called whenever the result of
+  @method[text:max-paragraph-width<%> get-max-width-paragraph]
+  would change.
+
+  If the current cache for the result of
+  @method[text:max-paragraph-width<%> get-max-width-paragraph]
+  is invalid, then this method will be called, even if the actual
+  maximum width may not have changed. In other words, this method
+  is guaranteed to be called at least as often as the result of
+  @method[text:max-paragraph-width<%> get-max-width-paragraph]
+  changes, but it may be called more often than that.
+
+ }
+
+ @history[#:added "1.78"]
+}
+
+@defmixin[text:max-width-paragraph-mixin (text%) (text:max-paragraph-width<%>)]{
+ @history[#:added "1.78"]
 }
 
 @definterface[text:ascii-art-enlarge-boxes<%> ()]{
@@ -615,7 +698,7 @@
     @racket['framework:anchored-search] preference is on.
   }
 
-  @defmethod[(get-search-hit-count) (values number? number?)]{
+  @defmethod[(get-search-hit-count) (values natural? natural?)]{
     Returns the number of hits for the search in the buffer before the
     insertion point and the total number of hits. Both are based on the count
     found last time that a search completed.
@@ -628,7 +711,7 @@
 
   }
 
-  @defmethod[(get-replace-search-hit) (or/c number? #f)]{
+  @defmethod[(get-replace-search-hit) (or/c (list*of (is-a?/c text%) natural?) #f)]{
     Returns the position of the nearest search hit that comes after the
     insertion point.
 
@@ -639,7 +722,7 @@
   @method[text:searching<%> finish-pending-search-work].
 }
 
-  @defmethod[(set-replace-start [pos (or/c number? #f)]) void?]{
+  @defmethod[(set-replace-start [pos (or/c natural? #f)]) void?]{
     This method is ignored. (The next replacement start is now
     tracked via the @method[text% after-set-position] method.)
   }
@@ -675,7 +758,7 @@
 }
 
 @defmixin[text:searching-mixin (editor:keymap<%> text:basic<%>) (text:searching<%>)]{
-  This @racket[text%] can be searched.
+  This @racket[text%] can be searched. See also @racket[text:searching-embedded-mixin]
 
   The result of this mixin uses the same initialization arguments as the
   mixin's argument.
@@ -701,6 +784,44 @@
   }
 }
 
+@definterface[text:searching-embedded<%> ()]{
+ Classes that implement this interface are produced by
+ @racket[text:searching-exmbedded-mixin] and have overridden
+ observer methods that forward information about changes to the editor
+ that can affect the searching results state.
+
+@history[#:added "1.80"]
+
+}
+
+@defmixin[text:searching-embedded-mixin (text%) (text:searching-embedded<%>)]{
+ This mixin is expected to be used with editors that appear inside @racket[editor-snip%]s
+ and that can have search results. I cooperates with the enclosing @racket[text:searching<%>]
+ object to inform it when a change to the editor has occurred that can affect
+ the current search results and how they are displayed.
+
+@history[#:added "1.80"]
+
+  @defmethod[#:mode augment (after-insert [start exact-nonnegative-integer?]
+                                          [len exact-nonnegative-integer?]) void?]{
+    Tells the outermost enclosing editor that the contents
+    of the editor has changed, which can affect the way
+    search results are displayed.
+  }
+
+  @defmethod[#:mode augment (after-delete [start exact-nonnegative-integer?]
+                                          [len exact-nonnegative-integer?]) void?]{
+    Tells the outermost enclosing editor that the contents
+    of the editor has changed, which can affect the way
+    search results are displayed.
+  }
+
+  @defmethod[#:mode augment (after-set-position) void?]{
+    Tells the outermost enclosing editor that the position
+    of the editor has changed, which can affect the way
+    search results are displayed.
+  }
+}
 @definterface[text:return<%> (text%)]{
   Objects supporting this interface were created by @racket[text:return-mixin].
 }

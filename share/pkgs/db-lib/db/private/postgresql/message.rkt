@@ -35,6 +35,7 @@
          (struct-out EmptyQueryResponse)
          (struct-out Execute)
          (struct-out Flush)
+         (struct-out NegotiateProtocolVersion)
          (struct-out NoData)
          (struct-out NotificationResponse)
          (struct-out ParameterDescription)
@@ -75,6 +76,11 @@
 ;; Writes a 16-bit integer, network byte order
 (define (io:write-int16 port val)
   (write-bytes (integer->integer-bytes val 2 #t #t) port))
+
+;; write-uint16 : port integer -> (void)
+;; Writes an unsigned 16-bit integer, network byte order
+(define (io:write-uint16 port val)
+  (write-bytes (integer->integer-bytes val 2 #f #t) port))
 
 ;; write-int32 : port integer -> void
 ;; Writes a 32-bit integer, network byte order
@@ -154,6 +160,12 @@
 ;; ========================================
 ;; The strange structures
 
+(define PROTO_3_0 #x00030000)
+(define PROTO_3_2 #x00030002)
+
+(define PROTO_CANCEL 80877102) ;; 1234<<16 + 5678
+(define PROTO_SSL    80877103) ;; 1234<<16 + 5679
+
 (define-struct AuthenticationOk () #:transparent)
 (define-struct AuthenticationKerberosV5 () #:transparent)
 (define-struct AuthenticationCleartextPassword () #:transparent)
@@ -191,7 +203,7 @@
 (define-struct StartupMessage (parameters) #:transparent)
 (define (write:StartupMessage p v)
   (with-length-out p #f
-    (io:write-int32 p 196608)
+    (io:write-int32 p PROTO_3_0)
     (for-each (lambda (param)
                 (io:write-null-terminated-string p (car param))
                 (io:write-null-terminated-string p (cdr param)))
@@ -201,14 +213,14 @@
 (define-struct SSLRequest () #:transparent)
 (define (write:SSLRequest p v)
   (io:write-int32 p 8)
-  (io:write-int32 p 80877103))
+  (io:write-int32 p PROTO_SSL))
 
 (define-struct CancelRequest (process-id secret-key) #:transparent)
 (define (write:CancelRequest p v)
   (io:write-int32 p 16)
-  (io:write-int32 p 80877102)
+  (io:write-int32 p PROTO_CANCEL)
   (io:write-int32 p (CancelRequest-process-id v))
-  (io:write-int32 p (CancelRequest-secret-key v)))
+  (write-bytes (CancelRequest-secret-key v) p))
 
 (define-struct ErrorResponse (properties) #:transparent)
 (define (parse:ErrorResponse p)
@@ -240,7 +252,9 @@
 (define (parse:BackendKeyData p)
   (with-length-in p #\K
     (let* ([process-id (io:read-int32 p)]
-           [secret-key (io:read-int32 p)])
+           ;; Before protocol v3.2 (PostgreSQL 18), secret-key is int32;
+           ;; after, var-length up to 256 bytes. So just read to EOM, keep as bytes.
+           [secret-key (read-bytes 256 p)])
       (make-BackendKeyData process-id secret-key))))
 
 (define-struct Bind (portal statement param-formats values result-formats) #:transparent)
@@ -250,10 +264,10 @@
      (with-length-out p #\B
        (io:write-null-terminated-string p portal)
        (io:write-null-terminated-string p statement)
-       (io:write-int16 p (length param-formats))
+       (io:write-uint16 p (length param-formats))
        (for ([param-format (in-list param-formats)])
          (io:write-int16 p param-format))
-       (io:write-int16 p (length values))
+       (io:write-uint16 p (length values))
        (for ([value (in-list values)])
          (cond [(bytes? value)
                 (io:write-int32 p (bytes-length value))
@@ -264,7 +278,7 @@
                   (io:write-bytes p value))]
                [(sql-null? value)
                 (io:write-int32 p -1)]))
-       (io:write-int16 p (length result-formats))
+       (io:write-uint16 p (length result-formats))
        (for ([result-format (in-list result-formats)])
          (io:write-int16 p result-format)))]))
 
@@ -355,6 +369,19 @@
 (define (write:Flush p v)
   (with-length-out p #\H))
 
+;; Added in PostgreSQL 9.3
+(define-struct NegotiateProtocolVersion (major minor unrecognized-options) #:transparent)
+(define (parse:NegotiateProtocolVersion p)
+  (with-length-in p #\v
+    (define last-version (io:read-int32 p))
+    (define n-options (io:read-int32 p))
+    (define unrecognized-options
+      (for/list ([i (in-range n-options)])
+        (io:read-null-terminated-string p)))
+    (NegotiateProtocolVersion (bitwise-bit-field last-version 16 32)
+                              (bitwise-bit-field last-version 0 16)
+                              unrecognized-options)))
+
 (define-struct NoData () #:transparent)
 (define (parse:NoData p)
   (with-length-in p #\n
@@ -371,10 +398,16 @@
 (define-struct ParameterDescription (type-oids) #:transparent)
 (define (parse:ParameterDescription p)
   (with-length-in p #\t
+    (define param-count (io:read-uint16 p))
     (let* ([type-oids
-            (for/list ([i (in-range (io:read-uint16 p))])
+            (for/list ([i (in-range param-count)])
               (io:read-int32 p))])
-      (make-ParameterDescription type-oids))))
+      ;; If the statement has 2^16 or more parameters, then PostgreSQL sends an inaccurate
+      ;; param-count (masked to 16 LSBs), but it sends *all* of the parameter types.
+      ;; So detect when message has content left over after param-count types.
+      (cond [(eof-object? (peek-byte p))
+             (make-ParameterDescription type-oids)]
+            [else 'too-many-parameters]))))
 
 (define-struct ParameterStatus (name value) #:transparent)
 (define (parse:ParameterStatus p)
@@ -428,8 +461,9 @@
 (define-struct RowDescription (fields) #:transparent)
 (define (parse:RowDescription p)
   (with-length-in p #\T
+    (define field-count (io:read-uint16 p))
     (let* ([fields
-            (for/list ([i (in-range (io:read-int16 p))])
+            (for/list ([i (in-range field-count)])
               (let* ([name (io:read-null-terminated-string p)]
                      [table-oid (io:read-int32 p)]
                      [column-attid (io:read-int16 p)]
@@ -438,7 +472,10 @@
                      [type-mod (io:read-int32 p)]
                      [format-code (io:read-int16 p)])
                 (vector name table-oid column-attid type-oid type-size type-mod format-code)))])
-      (make-RowDescription fields))))
+      ;; See comment for ParameterDescription
+      (cond [(eof-object? (peek-byte p))
+             (make-RowDescription fields)]
+            [else 'too-many-fields]))))
 
 (define-struct SASLInitialResponse (method content) #:transparent)
 (define (write:SASLInitialResponse p v)
@@ -473,34 +510,24 @@
 ;; ========================================
 
 (define (write-message msg port)
-  (define-syntax (gen-cond stx)
-    (syntax-case stx ()
-      [(gen-cond type ...)
-       (with-syntax ([((pred write) ...)
-                      (for/list ([type (in-list (syntax->list #'(type ...)))])
-                        (list (datum->syntax type
-                                (string->symbol (format "~a?" (syntax-e type))))
-                              (datum->syntax type
-                                (string->symbol (format "write:~a" (syntax-e type))))))])
-         #'(cond [(pred msg) (write port msg)] ...
-                 [else
-                  (error/internal* 'write-message "unknown message type"
-                                   '("message" value) msg)]))]))
-  (gen-cond Sync
-            Parse
-            Describe
-            Bind
-            Execute
-            Flush
-            Query
-            Close
-            Terminate
-            StartupMessage
-            PasswordMessage
-            SSLRequest
-            CancelRequest
-            SASLInitialResponse
-            SASLResponse))
+  (cond
+    [(Sync? msg) (write:Sync port msg)]
+    [(Parse? msg) (write:Parse port msg)]
+    [(Describe? msg) (write:Describe port msg)]
+    [(Bind? msg) (write:Bind port msg)]
+    [(Execute? msg) (write:Execute port msg)]
+    [(Flush? msg) (write:Flush port msg)]
+    [(Query? msg) (write:Query port msg)]
+    [(Close? msg) (write:Close port msg)]
+    [(Terminate? msg) (write:Terminate port msg)]
+    [(StartupMessage? msg) (write:StartupMessage port msg)]
+    [(PasswordMessage? msg) (write:PasswordMessage port msg)]
+    [(SSLRequest? msg) (write:SSLRequest port msg)]
+    [(CancelRequest? msg) (write:CancelRequest port msg)]
+    [(SASLInitialResponse? msg) (write:SASLInitialResponse port msg)]
+    [(SASLResponse? msg) (write:SASLResponse port msg)]
+    [else (error/internal* 'write-message "unknown message type"
+                           '("message" value) msg)]))
 
 (define (parse-server-message p)
   (let ([c (read-char p)])
@@ -516,6 +543,7 @@
       ((#\H) (parse:CopyOutResponse p))
       ((#\D) (parse:DataRow p))
       ((#\I) (parse:EmptyQueryResponse p))
+      ((#\v) (parse:NegotiateProtocolVersion p))
       ((#\n) (parse:NoData p))
       ((#\A) (parse:NotificationResponse p))
       ((#\t) (parse:ParameterDescription p))
@@ -542,6 +570,7 @@
 (define (char->message-tag c)
   (case c
     [(#\S) 'severity]
+    [(#\V) 'severity*]
     [(#\C) 'code]
     [(#\M) 'message]
     [(#\D) 'detail]
@@ -550,6 +579,11 @@
     [(#\p) 'internal-position]
     [(#\q) 'internal-query]
     [(#\W) 'where]
+    [(#\s) 'schema]
+    [(#\t) 'table]
+    [(#\c) 'column]
+    [(#\d) 'datatype]
+    [(#\n) 'constraint]
     [(#\F) 'file]
     [(#\L) 'line]
     [(#\R) 'routine]))

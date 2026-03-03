@@ -264,11 +264,13 @@ All @tech{strings} @racket[display] as their literal character sequences.
 
 The @racket[write] or @racket[print] form of a string starts with @litchar{"} and ends
 with another @litchar{"}. Between the @litchar{"}s, each character is
-represented. Each graphic or blank character is represented as itself,
+represented. Each graphic or blank character (according to @racket[char-graphic?] and
+@racket[char-blank?]) is represented as itself,
 with two exceptions: @litchar{"} is printed as @litchar{\"}, and
-@litchar{\} is printed as @litchar{\\}. Each non-graphic, non-blank
-character (according to @racket[char-graphic?] and
-@racket[char-blank?]) is printed using the escape sequences described
+@litchar{\} is printed as @litchar{\\}. A non-graphic, non-blank character
+that is part of a grapheme sequence that starts with a graphic character
+is also represented as itself. Each other non-graphic, non-blank
+character is printed using the escape sequences described
 in @secref["parse-string"], using @litchar{\a}, @litchar{\b},
 @litchar{\t}, @litchar{\n}, @litchar{\v}, @litchar{\f}, @litchar{\r},
 or @litchar{\e} if possible, otherwise using @litchar{\u} with four
@@ -550,10 +552,10 @@ unreadably nevertheless counts as @tech{quotable}.
 @section[#:tag "print-compiled"]{Printing Compiled Code}
 
 Compiled code as produced by @racket[compile] prints using
-@litchar{#~}. Compiled code printed with @litchar{#~} is essentially
-assembly code for Racket, and reading such a form produces a compiled
-form when the @racket[read-accept-compiled] parameter is set to
-@racket[#t].
+@as-index{@litchar{#~}}. Compiled code printed with @litchar{#~} is
+essentially assembly code for Racket, and reading such a form produces
+a compiled form when the @racket[read-accept-compiled] parameter is
+set to @racket[#t].
 
 Compiled code parsed from @litchar{#~} is marked as non-runnable if
 the current code inspector (see @racket[current-code-inspector]) is

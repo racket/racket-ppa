@@ -2,13 +2,14 @@
 @(require scribble/manual "utils.rkt"
           (for-syntax racket/base)
           (for-label setup/main-collects
-          racket/runtime-path))
+                     racket/runtime-path
+                     scribble/manual-struct))
 
 @(define-syntax def-section-like
    (syntax-rules ()
      [(_ id result/c x ...)
       (defproc (id [#:tag tag (or/c #f string? (listof string?)) #f]
-                   [#:tag-prefix tag-prefix (or/c #f string? module-path?) #f]
+                   [#:tag-prefix tag-prefix (or/c #f string? module-path? hash?) #f]
                    [#:style style (or/c style? #f string? symbol? (listof symbol?)) #f]
                    [pre-content pre-content?] (... ...+))
         result/c
@@ -62,7 +63,7 @@ have @racketmodname[scribble/manual]).
 @section{Document Structure}
 
 @defproc[(title [#:tag tag (or/c #f string? (listof string?)) #f]
-                [#:tag-prefix tag-prefix (or/c #f string? module-path?) #f]
+                [#:tag-prefix tag-prefix (or/c #f string? module-path? hash?) #f]
                 [#:style style (or/c style? #f string? symbol? (listof symbol?)) #f]
                 [#:version vers (or/c string? #f) #f]
                 [#:date date (or/c string? #f) #f]
@@ -87,7 +88,14 @@ multi-page HTML output.
 The @racket[tag-prefix] argument is propagated to the generated
 structure (see @secref["tags"]). If @racket[tag-prefix] is a module
 path, it is converted to a string using
-@racket[module-path-prefix->string].
+@racket[module-path-prefix->string]. Similarly, if @racket[tag-prefix]
+is a hash table with @racket['tag-prefix] mapped to a module path,
+then it is replaced with a hash table where @racket['tag-prefix] is
+mapped to a string. When @racket[tag-prefix] as a hash table is
+used for the main part in a document rendered by @exec{raco setup},
+@exec{raco setup} uses some keys to configure the document's
+rendering; see @racket[scribblings] in @secref[#:doc '(lib
+"scribblings/raco/raco.scrbl") "setup-info"] for more information.
 
 The @racket[vers] argument is propagated to the @racket[title-decl]
 structure. Use @racket[""] as @racket[vers] to suppress version
@@ -114,10 +122,12 @@ removed.}
 @def-section-like[subsubsection part-start?]{ Like @racket[section], but
  generates a @racket[part-start] of depth @racket[2].}
 
-@def-section-like[subsubsub*section paragraph?]{ Similar to
- @racket[section], but merely generates a paragraph that looks like an
- unnumbered section heading (for when the nesting gets too deep to
- include in a table of contents).}
+@defproc[(subsubsub*section [#:tag tag (or/c #f string? (listof string?)) #f]
+                            [pre-content pre-content?] ...+)
+         paragraph?]{
+Similar to @racket[section], but merely generates a paragraph that
+ looks like an unnumbered section heading (for when the nesting gets
+ too deep to include in a table of contents).}
 
 @defform[(include-section module-path)]{ Requires @racket[module-path]
  and returns its @racket[doc] export (without making any imports
@@ -196,7 +206,8 @@ Produces a @tech{nested flow} whose content is centered.}
 
 
 @defproc[(margin-note [pre-flow pre-flow?] ...
-                      [#:left? left? any/c #f])
+                      [#:left? left? any/c #f]
+                      [#:footnote? footnote? any/c #f])
          block?]{
 
 Produces a @tech{nested flow} that is typeset in the margin, instead
@@ -204,17 +215,24 @@ of inlined.
 
 If @racket[left?] is true, then the note is shown on the opposite as
 it would normally be shown (which is the left-hand side for HTML
-output). Beware of colliding with output for a table of contents.}
+output). Beware of colliding with output for a table of contents.
+
+If @racket[footnote?] is true, then the Latex renderer typesets the
+content as a footnote instead of a margin note.
+
+@history[#:changed "1.55" @elem{Added the @racket[#:footnote?] argument.}]}
 
 
 @defproc[(margin-note* [pre-content pre-content?] ...
-                       [#:left? left? any/c #f]) 
+                       [#:left? left? any/c #f]
+                       [#:footnote? footnote? any/c #f]) 
          element?]{
 
-Produces an @racket[element] that is typeset in the margin, instead of
-inlined. Unlike @racket[margin-note], @racket[margin-note*] can be
-used in the middle of a paragraph; at the same time, its content is
-constrained to form a single paragraph in the margin.}
+Like @racket[margin-note], but @racket[margin-note*] can be
+used in the middle of a paragraph. At the same time, its content is
+constrained to form a single paragraph in the margin.
+
+@history[#:changed "1.55" @elem{Added the @racket[#:footnote?] argument.}]}
 
 
 @defproc[(itemlist [itm items/c] ...
@@ -258,6 +276,7 @@ Returns @racket[#t] if @racket[v] is an item produced by
 
 @defproc[(tabular [cells (listof (listof (or/c block? content? 'cont)))]
                   [#:style style (or/c style? string? symbol? #f) #f]
+                  [#:pad pad (or/c real? (list/c real? real?) (list/c real? real? real? real?)) 0]
                   [#:sep sep (or/c block? content? #f) #f]
                   [#:column-properties column-properties (listof any/c) '()]
                   [#:row-properties row-properties (listof any/c) '()]
@@ -277,8 +296,17 @@ cell in a row.
 The @racket[style] argument is handled the same as @racket[para].
 See @racket[table] for a list of recognized @tech{style names} and @tech{style properties}.
 
-The default style places no space between table columns. If
-@racket[sep] is not @racket[#f], it is inserted as a new column
+The default style places no space between table columns. Specify a
+@racket[pad] list to add padding around each cell's content, where the
+numbers in a @racket[pad] list are in ``ex'' units (roughly
+corresponding to the size of a character). If @racket[pad] is a single
+number, it is used for all sides of the cell. If @racket[pad] is a
+list of two numbers, the first is used on the left and right, and the
+last is used on the top and bottom. If @racket[pad] is a list of four
+numbers, they are used in order for left, top, right, and bottom
+padding.
+
+If @racket[sep] is not @racket[#f], it is inserted as a new column
 between every column in the table; the new column's properties are the
 same as the preceding column's, unless @racket[sep-properties]
 provides a list of @tech{style properties} to use. When @racket[sep]
@@ -340,21 +368,17 @@ redundant information. In that case, @racket[column-attributes]
 properties will be used from @racket[table-columns], while other
 properties will be used from the merger into @racket[table-cells].}
 
-@history[#:changed "1.1" @elem{Added the @racket[#:column-properties],
-                               @racket[#:row-properties],
-                               and @racket[#:cell-properties] arguments.}
-         #:changed "1.12" @elem{Changed @racket[sep] insertion before a
-                                @racket['cont].}
-         #:changed "1.28" @elem{Added @racket[sep-properties] and made
-                                the preceding column's properties used
-                                consistently if not specified.}]
-
 Examples:
 @codeblock[#:keep-lang-line? #f]|{
 #lang scribble/manual
 @tabular[#:sep @hspace[1]
          (list (list "soup" "gazpacho")
                (list "soup" "tonjiru"))]
+
+@tabular[#:pad '(1 0)
+         #:column-properties '(border)
+         (list (list "gazpacho" "cold")
+               (list "tonjiru"  "hot"))]
 
 @tabular[#:style 'boxed
          #:column-properties '(left right)
@@ -369,6 +393,11 @@ Examples:
            (list (list "soup" "gazpacho")
                  (list "soup" "tonjiru"))]
 
+  @tabular[#:pad '(1 0)
+           #:column-properties '(border)
+           (list (list "gazpacho" "cold")
+                 (list "tonjiru"  "hot"))]
+
   @tabular[#:style 'boxed
            #:column-properties '(left right)
            #:row-properties '(bottom-border ())
@@ -376,6 +405,16 @@ Examples:
                  (list "caldo verde"   "kale")
                  (list "kinpira gobō"  "burdock")
                  (list "makizushi"     'cont))]]
+
+@history[#:changed "1.1" @elem{Added the @racket[#:column-properties],
+                               @racket[#:row-properties],
+                               and @racket[#:cell-properties] arguments.}
+         #:changed "1.12" @elem{Changed @racket[sep] insertion before a
+                                @racket['cont].}
+         #:changed "1.28" @elem{Added the @racket[sep-properties] argument and made
+                                the preceding column's properties used
+                                consistently if not specified.}
+         #:changed "1.59" @elem{Added the @racket[pad] argument.}]
 }
 
 @defproc[(verbatim [#:indent indent exact-nonnegative-integer? 0] [elem content?] ...+)
@@ -439,7 +478,7 @@ See also @racket[literal].}
                [#:style style (or/c style? string? symbol? #f) #f])
         element?]{
 
-Wraps the @tech{decode}d @racket[pre-content] as an element with style
+Wraps the @tech{decode}d @racket[pre-content] as an @racket[element] with style
 @racket[style].}
 
 
@@ -694,7 +733,8 @@ the section hyperlink's resolution in HTML is potentially delayed; see
          element?]{
 
 Like @racket[secref] for the document's implicit @racket["top"]
-tag. Use this function to refer to a whole manual instead of
+tag that @exec{raco setup} adds to every document that it renders.
+Use this function to refer to a whole manual instead of
 @racket[secref], in case a special style in the future is used for
 manual titles.
 
@@ -733,7 +773,8 @@ which is normally defined using @racket[elemtag].}
 @section[#:tag "base-indexing"]{Indexing}
 
 @defproc[(index [words (or/c string? (listof string?))]
-                [pre-content pre-content?] ...)
+                [pre-content pre-content?] ...
+                [#:extras extras desc-extras/c (hash)])
          index-element?]{
 
 Creates an index element given a plain-text string---or list of
@@ -742,37 +783,51 @@ strings for a hierarchy, such as @racket['("strings" "plain")] for a
 the strings are ``cleaned'' using @racket[clean-up-index-string]. The
 strings (without clean-up) also serve as the text to render in the
 index. The @tech{decode}d @racket[pre-content] is the text to appear
-inline as the index target.
+inline as the index target. The @racket[extras] argument is included
+in the generated index element as wrapped by @racket[index-desc].
 
 Use @racket[index] when an index entry should point to a specific word
 or phrase within the typeset document (i.e., the
 @racket[pre-content]). Use @racket[section-index], instead, to create
 an index entry that leads to a section, instead of a specific word or
-phrase within the section.}
+phrase within the section.
+
+@history[#:changed "1.54" @elem{Added the @racket[extras] argument.}]}
 
 
 @defproc[(index* [words (listof string?)]
                  [word-contents (listof list?)]
-                 [pre-content pre-content?] ...)
+                 [pre-content pre-content?] ...
+                 [#:extras extras desc-extras/c (hash)])
          index-element?]{
 Like @racket[index], except that @racket[words] must be a list, and
 the list of contents render in the index (in parallel to
 @racket[words]) is supplied as @racket[word-contents].
-}
 
-@defproc[(as-index [pre-content pre-content?] ...)
+@history[#:changed "1.54" @elem{Added the @racket[extras] argument.}]}
+
+
+@defproc[(as-index [pre-content pre-content?] ...
+                   [#:extras extras desc-extras/c (hash)])
          index-element?]{
 
 Like @racket[index], but the word to index is determined by applying
-@racket[content->string] on the @tech{decode}d @racket[pre-content].}
+@racket[content->string] on the @tech{decode}d @racket[pre-content].
+
+@history[#:changed "1.54" @elem{Added the @racket[extras] argument.}]}
 
 
-@defproc[(section-index [word string?] ...)
+@defproc[(section-index [word string?] ...
+                        [#:extras extras desc-extras/c (hash)])
          part-index-decl?]{
 
-Creates a @racket[part-index-decl] to be associated with the enclosing
+Creates a @racket[part-index-decl*] to be associated with the enclosing
 section by @racket[decode]. The @racket[word]s serve as both the keys
-and as the rendered forms of the keys within the index.}
+and as the rendered forms of the keys within the index. The @racket[extras]
+hash table is wrapped with @racket[index-desc] for the generated
+@racket[part-index-decl*].
+
+@history[#:changed "1.54" @elem{Added the @racket[extras] argument.}]}
 
 
 @defproc[(index-section [#:tag tag (or/c #f string?) "doc-index"])

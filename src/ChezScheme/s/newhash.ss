@@ -26,7 +26,7 @@ Documentation notes:
   pairs, and then uses a weak or ephemeron eq hashtable to map the key
   to its value; use the size of the eq hashtable as the generic hashtable's
   size
-- an eqv hashtabble pairs an eq hashtable and an generic hashtable
+- an eqv hashtable pairs an eq hashtable and an generic hashtable
 |#
 
 #|
@@ -94,7 +94,7 @@ Documentation notes:
 ;;; eqv-hashtable operators
 (define make-weak-eqv-hashtable)         ; [k], k >= 0
   
-;;; unsafe eq-hashtable operators
+;;; unsafe hashtable operators
 (define $make-eq-hashtable)              ; fxminlen subtype, fxminlen = 2^n, n >= 0
 (define $eq-hashtable-keys)              ; eq-hashtable
 (define $eq-hashtable-values)            ; eq-hashtable
@@ -102,6 +102,7 @@ Documentation notes:
 (define $eq-hashtable-cells)             ; eq-hashtable
 (define $eq-hashtable-copy)              ; eq-hashtable [mutableflag]
 (define $eq-hashtable-clear!)            ; eq-hashtable [fxminlen]
+(define $hashtable-cells)                ; hashtable [fxminlen]
 
 ;;; inspection
 (define $hashtable-veclen)
@@ -723,10 +724,12 @@ Documentation notes:
         ($oops 'eq-hashtable-ref "~s is not an eq hashtable" h))
       (#3%eq-hashtable-ref h x v)))
 
-  (set! eq-hashtable-ref-cell
+  (set-who! eq-hashtable-ref-cell
     (lambda (h x)
       (unless (eq-ht? h)
-        ($oops 'eq-hashtable-ref-cell "~s is not an eq hashtable" h))
+        ($oops who "~s is not an eq hashtable" h))
+      (unless (xht-mutable? h)
+        ($oops who "~s is not mutable" h))
       (#3%eq-hashtable-ref-cell h x)))
 
   (set! eq-hashtable-contains?
@@ -753,16 +756,20 @@ Documentation notes:
         ($oops 'eq-hashtable-update! "~s is not a procedure" p))
       (#3%eq-hashtable-update! h x p v)))
 
-  (set! eq-hashtable-cell
+  (set-who! eq-hashtable-cell
     (lambda (h x v)
       (unless (eq-ht? h)
-        ($oops 'eq-hashtable-cell "~s is not an eq hashtable" h))
+        ($oops who "~s is not an eq hashtable" h))
+      (unless (xht-mutable? h)
+        ($oops who "~s is not mutable" h))
       (#3%eq-hashtable-cell h x v)))
 
-  (set! eq-hashtable-try-atomic-cell
+  (set-who! eq-hashtable-try-atomic-cell
     (lambda (h x v)
       (unless (eq-ht? h)
-        ($oops 'eq-hashtable-try-atomic-cell "~s is not an eq hashtable" h))
+        ($oops who "~s is not an eq hashtable" h))
+      (unless (xht-mutable? h)
+        ($oops who "~s is not mutable" h))
       (#3%eq-hashtable-try-atomic-cell h x v)))
 
   (set! eq-hashtable-delete!
@@ -812,6 +819,7 @@ Documentation notes:
     (set-who! symbol-hashtable-ref-cell
       (lambda (h x)
         (unless (symbol-ht? h) ($oops who "~s is not a symbol hashtable" h))
+        (unless (xht-mutable? h) ($oops who "~s is not mutable" h))
         (unless (symbol? x) ($oops who "~s is not a symbol" x))
         (#3%symbol-hashtable-ref-cell h x)))
 
@@ -824,15 +832,15 @@ Documentation notes:
   (set-who! symbol-hashtable-set!
     (lambda (h x v)
       (unless (symbol-ht? h) ($oops who "~s is not a symbol hashtable" h))
-      (unless (symbol? x) ($oops who "~s is not a symbol" x))
       (unless (xht-mutable? h) ($oops who "~s is not mutable" h))
+      (unless (symbol? x) ($oops who "~s is not a symbol" x))
       (#3%symbol-hashtable-set! h x v)))
 
   (set-who! symbol-hashtable-update!
     (lambda (h x p v)
       (unless (symbol-ht? h) ($oops who "~s is not a symbol hashtable" h))
-      (unless (symbol? x) ($oops who "~s is not a symbol" x))
       (unless (xht-mutable? h) ($oops who "~s is not mutable" h))
+      (unless (symbol? x) ($oops who "~s is not a symbol" x))
       (unless (procedure? p)
         ($oops who "~s is not a procedure" p))
       (#3%symbol-hashtable-update! h x p v)))
@@ -840,14 +848,15 @@ Documentation notes:
   (set-who! symbol-hashtable-cell
     (lambda (h x v)
       (unless (symbol-ht? h) ($oops who "~s is not a symbol hashtable" h))
+      (unless (xht-mutable? h) ($oops who "~s is not mutable" h))
       (unless (symbol? x) ($oops who "~s is not a symbol" x))
       (#3%symbol-hashtable-cell h x v)))
 
   (set-who! symbol-hashtable-delete!
     (lambda (h x)
       (unless (symbol-ht? h) ($oops who "~s is not a symbol hashtable" h))
-      (unless (symbol? x) ($oops who "~s is not a symbol" x))
       (unless (xht-mutable? h) ($oops who "~s is not mutable" h))
+      (unless (symbol? x) ($oops who "~s is not a symbol" x))
       (#3%symbol-hashtable-delete! h x)))
 
   (set-who! hashtable-ref
@@ -866,6 +875,7 @@ Documentation notes:
     (lambda (h x)
       (unless (xht? h)
         ($oops who "~s is not a hashtable" h))
+      (unless (xht-mutable? h) ($oops who "~s is not mutable" h))
       (case (xht-type h)
         [(eq) (#3%eq-hashtable-ref-cell h x)]
         [(symbol)
@@ -920,6 +930,7 @@ Documentation notes:
     (lambda (h x v)
       (unless (xht? h)
         ($oops who "~s is not a hashtable" h))
+      (unless (xht-mutable? h) ($oops who "~s is not mutable" h))
       (case (xht-type h)
         [(eq) (#3%eq-hashtable-cell h x v)]
         [(symbol)
@@ -1052,7 +1063,7 @@ Documentation notes:
           [(generic) ($gen-hashtable-entries h (most-positive-fixnum))]
           [else ($ht-hashtable-entries h (most-positive-fixnum))])))
 
-    (set-who! hashtable-cells
+    (set-who! $hashtable-cells
       (hashtable-content-dispatch who
                                   $eq-hashtable-cells
                                   $eqv-hashtable-cells
@@ -1064,6 +1075,8 @@ Documentation notes:
      [(h max-sz)
       (unless (xht? h)
         ($oops who "~s is not a hashtable" h))
+      (unless (xht-mutable? h)
+        ($oops who "~s is not mutable" h))
       (unless (and (integer? max-sz) (exact? max-sz) (not (negative? max-sz)))
         ($oops who "~s is not a valid length" max-sz))
       (let ([max-sz (if (fixnum? max-sz) max-sz (hashtable-size h))])
@@ -1072,7 +1085,8 @@ Documentation notes:
           [(eqv) ($eqv-hashtable-cells h max-sz)]
           [(generic) ($gen-hashtable-cells h max-sz)]
           [else ($ht-hashtable-cells h max-sz)]))]
-     [(h) (hashtable-cells h (hashtable-size h))]))
+     [(h)
+      (hashtable-cells h (and (xht? h) (hashtable-size h)))]))
 
   (set! hashtable-size
     (let ([$gen-ht-size (lambda (h)
@@ -1216,15 +1230,15 @@ Documentation notes:
                  (let-values ([(hc i^) (f (car x) (update hc 119001092) i/2)])
                    (f (cdr x) hc (fx+ (fx- i i/2) i^))))]
               [(vector? x) (vector-hash 513566316 vector-length vector-ref)]
-              [(stencil-vector? x)
-               (let ([n (stencil-vector-length x)] [hc (update hc 517766377)])
+              [($stencil-vector? x)
+               (let ([n ($stencil-vector-length x)] [hc (update hc 517766377)])
                  (if (fx= n 0)
                      (values hc i)
                      (let g ([j 0] [hc hc] [i i])
                        (if (or (fx= j n) (fx= i 0))
                            (values hc i)
                            (let ([i/2 (fxsrl (fx+ i 1) 1)])
-                             (let-values ([(hc i^) (f (stencil-vector-ref x j) hc i/2)])
+                             (let-values ([(hc i^) (f ($stencil-vector-ref x j) hc i/2)])
                                (g (fx+ j 1) hc (fx+ (fx- i i/2) i^))))))))]
               [(null? x) (values (update hc 496904691) i)]
               [(box? x) (f (unbox x) (update hc 410225874) i)]
@@ -1282,10 +1296,12 @@ Documentation notes:
   (set! $eq-hashtable-keys
     (lambda (h max-sz)
       (let ([vec (ht-vec h)] [size (fxmin max-sz (ht-size h))])
-        (let ([n (vector-length vec)] [keys (make-vector size)])
+        (let ([n (vector-length vec)] [keys ($make-vector/no-interrupt-trap size)])
           (let outer ([i 0] [j 0])
             (if (or (fx= i n) (fx= j size))
-                keys
+                (begin
+                  ($use-trap-fuel size (constant fuel-word-count-shift))
+                  keys)
                 (let inner ([b (vector-ref vec i)] [j j])
                   (if (or (fixnum? b) (fx= j size))
                       (outer (fx+ i 1) j)
@@ -1296,10 +1312,12 @@ Documentation notes:
   (set! $eq-hashtable-values
     (lambda (h max-sz)
       (let ([vec (ht-vec h)] [size (fxmin max-sz (ht-size h))])
-        (let ([n (vector-length vec)] [vals (make-vector size)])
+        (let ([n (vector-length vec)] [vals ($make-vector/no-interrupt-trap size)])
           (let outer ([i 0] [j 0])
             (if (or (fx= i n) (fx= j size))
-                vals
+                (begin
+                  ($use-trap-fuel size (constant fuel-word-count-shift))
+                  vals)
                 (let inner ([b (vector-ref vec i)] [j j])
                   (if (or (fixnum? b) (fx= j size))
                       (outer (fx+ i 1) j)
@@ -1311,11 +1329,13 @@ Documentation notes:
     (lambda (h max-sz)
       (let ([vec (ht-vec h)] [size (fxmin max-sz (ht-size h))])
         (let ([n (vector-length vec)]
-              [keys (make-vector size)]
-              [vals (make-vector size)])
+              [keys ($make-vector/no-interrupt-trap size)]
+              [vals ($make-vector/no-interrupt-trap size)])
           (let outer ([i 0] [j 0])
             (if (or (fx= i n) (fx= j size))
-                (values keys vals)
+                (begin
+                  ($use-trap-fuel size (constant fuel-word-count-shift))
+                  (values keys vals))
                 (let inner ([b (vector-ref vec i)] [j j])
                   (if (or (fixnum? b) (fx= j size))
                       (outer (fx+ i 1) j)
@@ -1327,10 +1347,12 @@ Documentation notes:
   (set! $eq-hashtable-cells
     (lambda (h max-sz)
       (let ([vec (ht-vec h)] [size (fxmin max-sz (ht-size h))])
-        (let ([n (vector-length vec)] [cells (make-vector size)])
+        (let ([n (vector-length vec)] [cells ($make-vector/no-interrupt-trap size)])
           (let outer ([i 0] [j 0])
             (if (or (fx= i n) (fx= j size))
-                cells
+                (begin
+                  ($use-trap-fuel size (constant fuel-word-count-shift))
+                  cells)
                 (let inner ([b (vector-ref vec i)] [j j])
                   (if (or (fixnum? b) (fx= j size))
                       (outer (fx+ i 1) j)
@@ -1347,7 +1369,9 @@ Documentation notes:
                [h2 (make-eq-ht 'eq mutable? vec2 (ht-minlen h1) (ht-size h1) subtype)])
           (let outer ([i 0])
             (if (fx= i n)
-                h2
+                (begin
+                  ($use-trap-fuel n (constant fuel-word-count-shift))
+                  h2)
                 (begin
                   (vector-set! vec2 i
                     (let inner ([b (vector-ref vec1 i)])
@@ -1376,7 +1400,8 @@ Documentation notes:
                   (loop next)))))
         (ht-size-set! h 0)
         (unless (fx= n minlen)
-          (ht-vec-set! h ($make-eqhash-vector minlen))))))
+          (ht-vec-set! h ($make-eqhash-vector minlen)))
+        ($use-trap-fuel n (constant fuel-word-count-shift)))))
   
   (let ()
     ;; An equal/hash mapping contains an equal or hash procedure (or #f)

@@ -77,6 +77,13 @@
 
     Returns @racket[#f].
   }
+ @defmethod[(get-all-open-files) (listof path?)]{
+  Indicates the files that are currently open in this frame.
+
+  Returns @racket['()].
+
+  @history[#:added "1.74"]
+ }
   @defmethod*[(((get-filename (temp (or/c #f (box boolean?)) #f)) (or/c #f path?)))]{
     This returns the filename that the frame is currently being saved as,
     or @racket[#f] if there is no appropriate filename.
@@ -86,11 +93,21 @@
     If @racket[temp] is a box, it is filled with @racket[#t] or @racket[#f],
     depending if the filename is a temporary filename.
   }
-  @defmethod*[(((make-visible (filename string?)) void?))]{
+  @defmethod[(make-visible [filename (or/c path-string? symbol?)]
+                           [#:start-pos start-pos #f (or/c #f exact-nonnegative-integer?)]
+                           [#:end-pos end-pos start-pos (or/c #f exact-nonnegative-integer?)])
+             void?]{
     Makes the file named by @racket[filename] visible (intended for
-    use with tabbed editing).
+    use with tabbed editing), using @method[text:basic<%> port-name-matches?]
+    to find the editor if @racket[filename] is a @racket[symbol?].
 
-  }
+  If both @racket[start-pos] and @racket[end-pos]
+  are numbers, sets the insertion point to the range from
+  @racket[start-pos] and @racket[end-pos].
+
+@history[#:changed "1.75" @list{generalized the @racket[filename] argument to allow
+            symbols and added the @racket[start-pos] and @racket[end-pos] arguments.}]
+ }
 }
 @defmixin[frame:basic-mixin (frame%) (frame:basic<%>)]{
   This mixin provides the basic functionality that the framework expects. It
@@ -232,11 +249,11 @@
     height. The preferences key is the one passed
     to the initialization argument of the class.
   }
-  @defmethod[#:mode override (on-move (width position-integer?)
-                                      (height position-integer?))
+  @defmethod[#:mode override (on-move (x position-integer?)
+                                      (y position-integer?))
                     void?]{
-    Updates the preferences according to the width and
-    height, if @racket[position-preferences-key] is not @racket[#f], using
+    Updates the preferences according to the x,y position,
+    if @racket[position-preferences-key] is not @racket[#f], using
     it as the preferences key.
   }
 }
@@ -607,9 +624,15 @@
     @method[frame:editor<%> get-editor].
   }
 
-  @defmethod*[#:mode override (((editing-this-file? (filename path?)) boolean?))]{
+  @defmethod[#:mode override (editing-this-file? [filename path?]) boolean?]{
     Returns @racket[#t] if the filename is the file that this frame is editing.
   }
+
+ @defmethod[#:mode override (get-all-open-files) (listof path?)]{
+  Returns a list of all the paths for files that are open in this frame.
+
+  @history[#:added "1.74"]
+ }
 
   @defmethod*[#:mode augment (((on-close) void?))]{
     Calls the @racket[editor:basic<%>]'s method @method[editor:basic<%>

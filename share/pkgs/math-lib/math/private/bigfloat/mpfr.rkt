@@ -12,8 +12,6 @@
          racket/runtime-path
          racket/promise
          racket/serialize
-         (only-in rnrs/arithmetic/bitwise-6
-                  bitwise-first-bit-set)
          "gmp.rkt"
          "utils.rkt")
 
@@ -687,6 +685,9 @@ There's no reason to allocate new limbs for an _mpfr without changing its precis
  [bfbesy0 'mpfr_y0]
  [bfbesy1 'mpfr_y1]
  [bfrint 'mpfr_rint]
+ [bffloor 'mpfr_rint_floor]
+ [bfceiling 'mpfr_rint_ceil]
+ [bftruncate 'mpfr_rint_trunc]
  [bffrac 'mpfr_frac]
  [bfcopy 'mpfr_set])
 
@@ -699,8 +700,15 @@ There's no reason to allocate new limbs for an _mpfr without changing its precis
         [else  (force -1.bf)]))
 
 (define (bfround x)
-  (parameterize ([bf-rounding-mode  'nearest])
-    (bfrint x)))
+  (if (>= (bigfloat-exponent x) 0)
+      ;; In this case, `x` is already an integer, so no rounding needs
+      ;; to be performed; we use bfcopy to change precision while
+      ;; respecting rounding mode
+      (bfcopy x)
+      ;; In this case, `x` is known not to be near infinity, so
+      ;; `bfrint` will do the right thing.
+      (parameterize ([bf-rounding-mode 'nearest])
+        (bfrint x))))
 
 (provide bfsgn bfround)
 (begin-for-syntax
@@ -726,24 +734,6 @@ There's no reason to allocate new limbs for an _mpfr without changing its precis
   y)
 
 (provide bfsum)
-
-(define-syntax-rule (provide-1ary-fun/noround name c-name)
-  (begin
-    (define cfun (get-mpfr-fun c-name (_fun _mpfr-pointer _mpfr-pointer _rnd_t -> _int)))
-    (define (name x)
-      (define y (new-mpfr (bf-precision)))
-      (cfun y x (bf-rounding-mode))
-      y)
-    (provide name)
-    (begin-for-syntax (set! 1ary-funs (cons #'name 1ary-funs)))))
-
-(define-syntax-rule (provide-1ary-funs/noround [name c-name] ...)
-  (begin (provide-1ary-fun/noround name c-name) ...))
-
-(provide-1ary-funs/noround
- [bfceiling 'mpfr_ceil]
- [bffloor 'mpfr_floor]
- [bftruncate 'mpfr_trunc])
 
 (define-for-syntax 1ary2-funs (list))
 (provide (for-syntax 1ary2-funs))
@@ -814,17 +804,8 @@ There's no reason to allocate new limbs for an _mpfr without changing its precis
 (define (bfnegative? x)
   (bflt? x (force 0.bf)))
   
-;; The `bfodd?` and `bfeven?` in math/bigfloat (as of Racket 7.7) is super slow
 (define (bfeven? x)
-  (define-values (sig exp) (bigfloat->sig+exp x))
-  ; x = sig << exp
-  ; x | 1 = (sig << exp) | 1 = sig | 1 << -exp
-  (cond
-   [(not (bfinteger? x)) #f]
-   [(> exp 0) #t]
-   [(= sig 0) #t]
-   [(> (- exp) (log (abs sig) 2)) #t] ; Avoid constructing large "1"s
-   [else (= (bitwise-and (abs sig) (expt 2 (- exp))) 0)]))
+  (and (bfinteger? x) (bfinteger? (bfshift x -1))))
 
 (define (bfodd? x) (and (bfinteger? x) (not (bfeven? x))))
 
@@ -899,12 +880,17 @@ There's no reason to allocate new limbs for an _mpfr without changing its precis
   (mpfr-nextbelow y)
   y)
 
+
+(define mpfr-mul-2si
+  (get-mpfr-fun 'mpfr_mul_2si (_fun _mpfr-pointer _mpfr-pointer _exp_t _rnd_t -> _int)))
+
+; Inline an unusual FFI signature redefinition
 (define (bfshift x n)
-  (unless (fixnum? n) (raise-argument-error 'bfshift "Fixnum" 1 x n))
-  (cond [(bfzero? x)  x]
-        [(not (bfrational? x))  x]
-        [else  (define-values (sig exp) (bigfloat->sig+exp x))
-               (bf sig (+ n exp))]))
+  (unless (fixnum? n)
+    (raise-argument-error 'bfshift "Fixnum" 1 x n))
+  (define y (new-mpfr (bigfloat-precision x)))
+  (mpfr-mul-2si y x n (bf-rounding-mode))
+  y)
 
 (define (infinite-ordinal p)
   (+ 1 (arithmetic-shift #b1111111111111111111111111111111 (- p 1))))

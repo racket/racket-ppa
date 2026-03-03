@@ -1,6 +1,7 @@
 #lang racket/unit
 
 (require "../utils/utils.rkt"
+         "../utils/plambda-utils.rkt"
          racket/list syntax/parse syntax/stx
          racket/match syntax/private/id-table
          racket/sequence
@@ -96,7 +97,7 @@
 ;;                 and returns the resulting Arrow?.
 ;; arg-names: The identifiers of the positional args
 ;; arg-types: The types of the positional args
-;; rest-arg+type: Either #f for no rest argument or (cons rest-id rest-type)
+;; rest-arg+type: Either #f for no rest argument or (list rest-id rest-type (Listof rest-type))
 ;;                where rest-id is the identifier of the rest arg,
 ;;                and (ListOf rest-type) is the type that identifier would
 ;;                have in the function body
@@ -125,6 +126,7 @@
          #:types types]
       (tc-body/check body expected))
     arg-names #:rest-id rst-id)
+   #:T+ #true ;; shallow can trust the results of a literal lambda
    #:rest rst-type))
 
 ;; check-clause: Checks that a lambda clause has arguments and body matching the expected type
@@ -263,6 +265,7 @@
 (define/cond-contract (tc/opt-lambda-clause arg-list body aux-table)
   (-> (listof identifier?) syntax? free-id-table?
       (listof Arrow?))
+
   ;; arg-types: Listof[Type?]
   (define arg-types
     (for/list ([a (in-list arg-list)])
@@ -276,7 +279,31 @@
                                      ty)]
                                 [else Univ])))))
 
-  (list (tc-lambda-body arg-list arg-types body)))
+
+  (list
+   (match (and (not (null? arg-list))
+               (free-id-table-ref aux-table (last arg-list) #f))
+     [id #:when (and id (rst-arg-property id))
+      ;; when an opt-lambda with a rest parameter is expanded, the resulting
+      ;; expression contains a generated lambda, which is being checked and whose
+      ;; last positional parameter `new-rest` corresponds to the rest parameter of the original
+      ;; function.
+
+      ;; we use `arg-types` to make the arrow consistent with the original type
+      ;; annotation, i.e. `new-rest` needs to have the same type as the original
+      ;; function's the rest parameter. In order to check the function body, we
+      ;; duplicate `arg-types` with the last element changed from `ty` to
+      ;; `(Listof ty`)
+      (Arrow-update
+       (tc-lambda-body arg-list
+                       (list-update arg-types (sub1 (length
+                                                     arg-types))
+                                    (lambda (ty) (make-Listof ty)))
+                       body)
+       dom
+       (lambda (dom)
+         arg-types))]
+     [_ (tc-lambda-body arg-list arg-types body)])))
 
 ;; restrict-to-arity : Arrow? nat -> (or/c #f Arrow?)
 ;; either produces a new arrow which is a subtype of arr with arity n,
@@ -309,7 +336,7 @@
       [_ #f]))
 
   (cond
-    [(and (> (free-id-table-count aux-table) 0) (not rest-id))
+    [(and (positive? (free-id-table-count aux-table)) (not rest-id))
      (tc/opt-lambda-clause arg-list body aux-table)]
     [else
      (define arg-types (get-types arg-list #:default (lambda () #f)))
@@ -657,40 +684,6 @@
            (cons (make-formals f not-in-poly) b))
          expected))]))
 
-(define (plambda-prop stx)
-  (define d (plambda-property stx))
-  (and d (car (flatten d))))
-
-(define (has-poly-annotation? form)
-  (or (plambda-prop form) (pair? (lookup-scoped-tvar-layer form))))
-
-(define (remove-poly-layer tvarss)
-  (filter pair? (map rest tvarss)))
-
-(define (get-poly-layer tvarss)
-  (map car tvarss))
-
-(define (get-poly-tvarss form)
-  (let ([plambda-tvars
-          (let ([p (plambda-prop form)])
-            (match (and p (map syntax-e (syntax->list p)))
-              [#f #f]
-              [(list var ... dvar '...)
-               (list (list var dvar))]
-              [(list id ...)
-               (list id)]))]
-        [scoped-tvarss
-          (for/list ((tvarss (in-list (lookup-scoped-tvar-layer form))))
-            (for/list ((tvar (in-list tvarss)))
-              (match tvar
-                [(list (list v ...) dotted-v)
-                 (list (map syntax-e v) (syntax-e dotted-v))]
-                [(list v ...) (map syntax-e v)])))])
-    (if plambda-tvars
-        (cons plambda-tvars scoped-tvarss)
-        scoped-tvarss)))
-
-
 ;; tc/plambda syntax tvarss-list syntax-list syntax-list type -> Poly
 ;; formals and bodies must by syntax-lists
 (define/cond-contract (tc/plambda form tvarss-list formals bodies expected)
@@ -804,7 +797,9 @@
 ;; Returns both the tc-results of the function and of the body
 (define (tc/rec-lambda/check formals* body name args return)
   (define formals (syntax->list formals*))
-  (define ft (t:->* args (tc-results->values return)))
+  (define ft (if return
+		 (t:->* args (tc-results->values return))
+		 (t:->* args ManyUniv)))
   (define names (cons name formals))
   (with-extended-lexical-env
     [#:identifiers (cons name formals)

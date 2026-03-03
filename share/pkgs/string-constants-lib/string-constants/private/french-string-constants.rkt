@@ -418,6 +418,7 @@
   ;; Help Desk
   (help "Aide")
   (racket-documentation "Documentation Racket")
+  (racket-documentation "Documentation ~a") ;; ~a is filled with a language family name, eg Racket, Rhombus, or HtDP
   (help-desk "Aide")
   (plt:hd:search "Chercher")
   (plt:hd:feeling-lucky "D'humeur chanceuse")
@@ -521,7 +522,7 @@
   ; ... line 2. (Anyone need more lines?)
   (browser-cmdline-expl-line-2 "et du suffixe, sans espace additionel entre eux.)")
   (install? "Installer ?")  ;; if a .plt file is found (title of dialog)
-  (you-have-selected-an-installable-package "Vous avez sélectionné un logiciel qui peut être installé.") ; package => paquetage, pas tres clair...
+  (you-have-selected-an-installable-package "Vous avez sélectionné un paquetage qui peut être installé.")
   (do-you-want-to-install-it? "Voulez-vous l'installer ?")
   (paren-file-size "(Le fichier fait ~a octets)")
   (download-and-install "Télécharger && Installer") ;; button label
@@ -530,7 +531,7 @@
   (save-downloaded-file "Sauvegarder le fichier téléchargé sous le nom")  ;; label for get-file dialog
   (downloading "Téléchargement") ;; dialog title
   (downloading-file... "Téléchargement du fichier en cours…")
-  (package-was-installed "Le logiciel à été installé.")
+  (package-was-installed "Le paquetage à été installé.")
   (download-was-saved "Le fichier téléchargé à été sauvegardé.")
 
   (install-plt-file-menu-item... "Installer un fichier .plt…")
@@ -606,17 +607,19 @@
   (editor-prefs-panel-label "Edition")
   (general-prefs-panel-label "Général")
   (editor-general-prefs-panel-label "Edition générale")
-  (highlight-parens "Surligner les paires de parenthèses.")
+  (highlight-parens "Surligner les paires de parenthèses")
   (fixup-open-brackets "Ajuster automatiquement les crochets ouvrants")
   (fixup-close-parens "Ajuster automatiquement les parenthèses fermantes")
-  (flash-paren-match "Montrer la parenthèse correspondante.")
-  (map-delete-to-backspace "La touche Delete génére Backspace.")
-  (verify-exit "Confirmation pour quitter.")
-  (ask-before-changing-format "Confirmation avant de changer le format de sauvegarde.")
-  (wrap-words-in-editor-buffers "Continuer une longue ligne sur la ligne suivante, dans les éditeurs.")
-  (show-status-line "Montrer la barre de status.")
-  (count-columns-from-one "Compter les lignes et colonnes à partir de un.")
-  (display-line-numbers "Montrer les numéros de ligne et de colonne, pas la distance depuis le début de l'éditeur.")
+  (flash-paren-match "Montrer la parenthèse correspondante")
+  (backup-unsaved-files "Créer des auto-sauvegardes pour les fichiers modifiés")
+  (first-change-files "Créer des fichiers à la première modification")
+  (map-delete-to-backspace "La touche Delete génére Backspace")
+  (verify-exit "Confirmation pour quitter")
+  (ask-before-changing-format "Confirmer avant de changer le format de sauvegarde")
+  (wrap-words-in-editor-buffers "Continuer une longue ligne sur la ligne suivante, dans les éditeurs")
+  (show-status-line "Montrer la barre de status")
+  (count-columns-from-one "Compter les lignes et colonnes à partir de un")
+  (display-line-numbers "Montrer les numéros de ligne et de colonne, pas la distance depuis le début de l'éditeur")
   ; used for popup menu; right click on line/column box in bottom of drs window
   (show-line-and-column-numbers "Montrer les numéros de ligne et de colonne")
   ; used for popup menu; right click on line/column box in bottom of drs window
@@ -634,19 +637,27 @@
   (basic-gray-paren-match-color "Couleur grise simple de surlignage des parenthèses") ; in prefs dialog
   (online-coloring-active "Colorier la syntaxe interactivement")
   (open-files-in-tabs "Ouvrir les fichiers dans de nouveaux onglets (pas dans de nouvelles fenêtres)")
+  (restore-open-files-from-previous-session? "Restaurer les fichiers ouverts durant la session précédente ?")
+  (startup-open-files "Fichiers ouverts au démarrage")
+  (restore-open-files-from-previous-session "Restaurer les fichiers ouverts durant la session précédente")
+  (ask-me-each-time "Demander à chauque fois")
+  (open-a-blank-window "Ouvrir une fenêtre vide")
   (show-interactions-on-execute "Automatiquement montrer la fenêtre d'interaction lors de l'exécution d'un programme")
   (switch-to-module-language-automatically
    "Automatiquement utiliser le langage « module » lors de l'ouverture d'un fichier contenant un module")
   ;; in preferences, below the checkbox one line above this one
   (interactions-beside-definitions "Mettre la fenêtre d'interaction à côté de la fenêtre de définition")
-  ;; just like the above, but capitalized for appearance in a menu item
   (show-line-numbers "Montrer les numéros de lignes")
+  ;; just like the above, but capitalized for appearance in a menu item
   (show-line-numbers/menu "Montrer les &numéros de lignes")  ;; just like the above, but capitalized for appearance in a menu item
   (hide-line-numbers/menu "Cacher les &numéros de lignes")
   (show-line-numbers-in-definitions "Numéros de ligne dans la fenêtre de définition")
   ;; the constant above shows up in the popup menu item in the bottom of
   ;; the drracket window; controls the line numbers on each line in the definitions;
   ;; used in a checkable menu item
+  ;; Capitalized for appearance in a menu item
+  (show-indent-guides/menu "Montrer les &Guides d'indentation")
+  (hide-indent-guides/menu "Cacher les &Guides d'indentation")
   (reflow-paragraph-maximum-width "Largeur maximale lors de la refusion des paragraphes")
   (maximum-char-width-guide-pref-check-box "Guide pour la largeur maximum de texte")
   (hide-column-width-guide "Cacher le guide de largeur de texte pour les fichiers avec ~a colonnes")
@@ -816,6 +827,7 @@
   (file-dne "Ce fichier n'existe pas.")
   (empty-filename "Le nom de fichier doit contenir au moins quelques lettres.")
   (that-is-dir-name "Ceci est un nom de répertoire.")
+  (use-platform-specific-file-dialogs "Utiliser les dialogues de sélection de fichiers qui sont spécifiques à la plateforme") ;; a preferences option
 
   ;;; raw menu names -- these must match the
   ;;; versions below, once the &s have been stripped.
@@ -1020,7 +1032,7 @@
   ;;; autosaving
   (error-autosaving "Erreur durant l'auto-sauvegarde de « ~a ».")
   (autosaving-turned-off "L'auto-sauvegarde est suspendue\njusqu'à ce que le fichier soit sauvegardé.")
-  ;(recover-autosave-files-frame-title "Recouvrer des fichiers auto-sauvegardés")
+  (recover-autosave-files-frame-title "Recouvrer des fichiers auto-sauvegardés")
   (autosave-details "Détails")
   (autosave-recover "Recouvrer")
   (autosave-unknown-filename "« inconnu »")
@@ -1063,15 +1075,15 @@
   ;; (also, do this with an unsaved file). Wait for the autosave
   ;; files to appear (typically 5 minutes). Kill DrRacket
   ;; and restart it. You'll see the dialog
-  ;(autosave-autosave-label: "Fichier auto-sauvegardé :")
+  (autosave-autosave-label: "Fichier auto-sauvegardé :")
   (autosave-original-label: "Fichier original :")
-  ;(autosave-autosave-label "Fichier auto-sauvegardé")
+  (autosave-autosave-label "Fichier auto-sauvegardé")
   (autosave-original-label "Fichier original")
-  ;(autosave-compare-files "Comparer les fichiers auto-sauvegardés")
+  (autosave-compare-files "Comparer les fichiers auto-sauvegardés")
 
-  ;(autosave-show-autosave "Auto-sauvegarder un fichier") ;; title of a window showing the autosave file
+  (autosave-show-autosave "Auto-sauvegarder un fichier") ;; title of a window showing the autosave file
 
-  ;(autosave-explanation "DrRacket a trouvé des fichiers auto-sauvegardés, qui peuvent contenir votre travail non-sauvegardé.")
+  (autosave-explanation "DrRacket a trouvé des fichiers auto-sauvegardés, qui peuvent contenir votre travail non-sauvegardé.")
 
   (autosave-recovered! "Recouvré !") ;; status of an autosave file
   (autosave-deleted "Effacé")       ;; status of an autosave file
@@ -1083,7 +1095,7 @@
   (autosave-done "Continuer")
 
   ;; appears in the file dialog
-  ;(autosave-restore-to-where? "Sélectionnez un répertoire où sauvegarder le fichier auto-sauvegardé.")
+  (autosave-restore-to-where? "Sélectionnez un répertoire où sauvegarder le fichier auto-sauvegardé.")
 
   ;;; file modified warning
   (file-has-been-modified
@@ -1186,6 +1198,7 @@
   (close-tab "Fermer l'onglet")
    ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
   (close-tab-amp "Fermer l'onglet")
+  (reopen-closed-tab "Rouvrir un onglet qui a été fermé")
 
   ;;; edit menu
   (split-menu-item-label "Di&viser")
@@ -1225,6 +1238,12 @@
   (reindent-menu-item-label "&Réindenter")
   (reindent-all-menu-item-label "Réindenter &tout")
   (semicolon-comment-out-menu-item-label "&Commenter à l'aide de points-virgules")
+  ;; the ~a is filled with the characters that'll be used to comment out a line,
+  ;; inserted at the start of the line
+  (comment-out-with-line-start "&Commenter à l'aide de “~a”")
+  ;; the two '~a's are filled with the characters that'll be used to comment out
+  ;; the start and end of a region
+  (comment-out-with-region "&Commenter à l'aide de “~a” et de “~a”")
   (box-comment-out-menu-item-label "Commenter à l'aide d'une &boite")
   (uncomment-menu-item-label "&Décommenter")
 
@@ -1407,17 +1426,11 @@
 
 
   ;;; languages
-  (beginning-student "Etudiant niveau débutant")
   (beginning-one-line-summary "define, cond, structs, constantes, et primitives")
-  (beginning-student/abbrev "Etudiant niveau débutant avec abréviations pour les listes")
   (beginning/abbrev-one-line-summary "Débutant, avec impression des résultats dans le REPL sous forme de listes")
-  (intermediate-student "Etudiant niveau intermédiaire")
   (intermediate-one-line-summary "Débutant plus portée lexicale")
-  (intermediate-student/lambda "Etudiant niveau intermédiaire, plus lambda")
   (intermediate/lambda-one-line-summary "Intermédiaire plus fonctions d'ordre supérieur")
-  (advanced-student "Etudiant niveau avancé")
   (advanced-one-line-summary "Intermédiaire plus lambda et mutation")
-  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "Assez gros Scheme")
   (pretty-big-scheme-one-line-summary
    "Ajoute de la syntaxe et des fonctions provenants des languages HtDP, mzscheme, et mred/mred")
@@ -1660,6 +1673,11 @@
     ;; like 'Long' but shows the phases where this file is loaded
   (module-browser-name-very-long "longs, avec phases")
   (module-browser-open-all "Ouvrir tous les fichiers montrés ici")
+  (module-browser-main-collects "Collections principales")
+  (module-browser-unknown-pkg "Paquetage inconnu")
+  (module-browser-visible-pkgs "Paquetages visibles")
+  (module-browser-visible-submodules "Sous-modules visibles")
+  (module-browser-top-level-module "Module principal") ; in the "which submodules?" filter; this is used for when there are no submodules
 
   (happy-birthday-matthias "Joyeux anniversaire, Matthias !")
   (happy-birthday-matthew "Joyeux anniversaire, Matthew !")
@@ -2002,7 +2020,7 @@
   ;; the user switches to a tab where planet hasn't been used
   (planet-no-status "PLaneT")
 
-  (bug-report-field-pkg "Information système du logiciel") ; package -> paquetage, bibliothèque ?
+  (bug-report-field-pkg "Information système du paquetage")
 
   ;; string normalization. To see this, paste some text with a ligature into DrRacket
   ;; the first three strings are in the dialog that appears. The last one is in the preferences dialog
@@ -2197,5 +2215,21 @@
    " PATH par défaut a été configuré pour tous les utilisateurs en ajoutant le fichier"
    " ~a, pour pointer vers ~a. Voud pouvez annuler ce"
    " changement en supprimant ~a.")
+  (adding-racket/bin-no-paths.d
+   "Impossible d'ajouter racket à la ligne de commande car /etc/paths.d n'existe"
+   " pas.\n\nVous pouvez essayer d'exécuter la commande suivante dans une fenêtre de terminal pour"
+   " créer le répertoire :\n"
+   "    sudo mkdir /etc/paths.d\net ensuite essayer à nouveau.")
+  (added-racket/bin-to-path/windows
+   "Vous devez maintenant être capable d'utiliser racket et ses outils à partir de la"
+   " ligne de commande.\n\nLe"
+   " %PATH% par défaut à été configuré via l'entrée de registre"
+   " HKEY_CURRENT_USER\\Environment\\Path"
+   " pour pointer vers ~a et ~a.")
+  (didnt-add-racket/bin-to-path/unix
+   "DrRacket ne peut pas changer votre PATH sous unix, mais si vous"
+   " savez comment changer votre PATH vous-même,"
+   " ajoutez-y\n\n  ~a\n\n"
+   " .")
   (add-racket/bin-to-path "Configurer la ligne de commande pour racket…") ;; menu item label
   ); aâàbcçdeéêèëfghiîïjklmnoôpqrstuûùüvwxyz AÂÀBCÇDEÉÊÈËFGHIÎÏJKLMNOÔPQRSTUÛÙÜVWXYZ “” «  » …

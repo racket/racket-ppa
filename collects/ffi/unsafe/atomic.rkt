@@ -9,7 +9,15 @@
                       start-breakable-atomic
                       end-breakable-atomic
                       call-as-atomic
-                      call-as-nonatomic))
+                      call-as-nonatomic
+                      start-uninterruptible
+                      end-uninterruptible
+                      call-as-uninterruptible
+                      make-uninterruptible-lock
+                      uninterruptible-lock-acquire
+                      uninterruptible-lock-release
+                      uninterruptible-custodian-lock-acquire
+                      uninterruptible-custodian-lock-release))
 
 (define (start-atomic)
   (unsafe-start-atomic))
@@ -25,6 +33,24 @@
 
 (define (in-atomic-mode?)
   (unsafe-in-atomic?))
+
+(define (start-uninterruptible)
+  (unsafe-start-uninterruptible))
+
+(define (end-uninterruptible)
+  (unsafe-end-uninterruptible))
+
+(define (make-uninterruptible-lock)
+  (unsafe-make-uninterruptible-lock))
+(define (uninterruptible-lock-acquire lock)
+  (unsafe-uninterruptible-lock-acquire lock))
+(define (uninterruptible-lock-release lock)
+  (unsafe-uninterruptible-lock-release lock))
+
+(define (uninterruptible-custodian-lock-acquire)
+  (unsafe-uninterruptible-custodian-lock-acquire))
+(define (uninterruptible-custodian-lock-release)
+  (unsafe-uninterruptible-custodian-lock-release))
 
 ;; ----------------------------------------
 
@@ -132,3 +158,9 @@
                       (loop (sub1 i))))
                   (set! extra-atomic-depth extra-depth)
                   (set! monitor-owner (current-thread)))))))))))
+
+(define (call-as-uninterruptible f)
+  (unless (and (procedure? f)
+               (procedure-arity-includes? f 0))
+    (raise-type-error 'call-as-uninterruptible "procedure (arity 0)" f))
+  (dynamic-wind unsafe-start-uninterruptible f unsafe-end-uninterruptible))

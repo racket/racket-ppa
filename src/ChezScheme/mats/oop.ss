@@ -107,9 +107,9 @@ products:
   - consider exposing query-interface somehow
     - (interface I x) => version of x to which I's methods are applicable
     - (interface->instance (interface I x)) => x
-  - interfaces and inheritence
+  - interfaces and inheritance
     - either require parent for define-interface or hide <root-interface>
-    - consider allowing multiple inheritence (including zero parents) for interfaces
+    - consider allowing multiple inheritance (including zero parents) for interfaces
 |#
 
 #|
@@ -188,6 +188,7 @@ reaching into Chez Scheme's internals for:
     (#%$make-record-type #!base-rtd #!base-rtd
       "root-vtable-rtd"
       '((immutable ptr interfaces))
+      #f
       #f
       #f))
 
@@ -686,12 +687,14 @@ reaching into Chez Scheme's internals for:
                                               name
                                               flds
                                               #f
+                                              #f
                                               #f)]
                                      [vtable-rtd (#%$make-record-type
                                                    #!base-rtd
                                                    ($class-vtable-rtd bc)
                                                    "compile-time-vtable-rtd"
                                                    (syntax->datum (map minfo-mname #'(generic ...)))
+                                                   #f
                                                    #f
                                                    #f)])
                          (with-syntax ([(ivar ...) ivar*]
@@ -726,6 +729,7 @@ reaching into Chez Scheme's internals for:
                                                     parent-rtd
                                                     name
                                                     'flds
+                                                    #f
                                                     #f
                                                     #f
                                                     (list iface-elt ...)

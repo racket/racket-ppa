@@ -350,12 +350,12 @@
 
   (define-syntax-rule (using-admin body ...)
     (let ([oldadmin (send media get-admin)])
-      (unless (eq? admin oldadmin)
+      (unless (object-or-false=? admin oldadmin)
         (send media set-admin admin))
       (begin0
        (begin body ...)
        (when media
-         (unless (eq? admin oldadmin)
+         (unless (object-or-false=? admin oldadmin)
            ;; FIXME: how do we know that this adminstrator
            ;; still wants the editor?
            (send media set-admin oldadmin))))))
@@ -1104,7 +1104,7 @@
   (define/public (get-editor) media)
 
   (define/public (set-editor m [update? #t])
-    (unless (eq? media m)
+    (unless (object-or-false=? media m)
       (when media
         (when (object/bool=? admin (send media get-admin))
           (send media set-admin 
@@ -1345,7 +1345,8 @@
                   (let-boxes ([dx 0.0]
                               [dy 0.0])
                       (send canvas get-dc-and-offset dx dy)
-                    (send canvas popup-menu m (->long (- x dx)) (->long (- y dy)))))))))
+                    (send canvas popup-menu m (->long (- x dx)) (->long (- y dy)))
+                    #t))))))
   
   (define/public (adjust-std-flag)
     ;; 1 indicates that this is the sole, main admin. 

@@ -9,7 +9,7 @@ found in the "c" directory.
 
 Some key files in "s":
 
- * "cmacro.ss": object layouts and other global constants, including
+ * "cmacros.ss": object layouts and other global constants, including
    constants that are needed by both the compiler and the kernel
 
  * "syntax.ss": the macro expander
@@ -25,7 +25,7 @@ Some key files in "s":
 
  * "ppc32osx.def", "tppc32osx.def", etc., with common combinations
    produced from the "unix.def" and "tunix.def" templates: provides
-   platform-specific constants that feed into "cmacro.ss" and selects
+   platform-specific constants that feed into "cmacros.ss" and selects
    the backend used by "cpnanopass.ss" and "cpprim.ss"
 
 Chez Scheme is a bootstrapped compiler, meaning you need a Chez Scheme
@@ -44,7 +44,7 @@ related to the fasl format that is exposed by `fasl-write` and
 `fasl-read`, but you can't compile Scheme code to some value that is
 written with `fasl-write`. Instead, `compile-file` and related
 functions directly generate compiled code in a fasled form that
-includes needed linking information.
+includes needed linking information (described more below in "Linking").
 
 A boot file, usually with the suffix ".boot", has the same format as a
 compiled file, but with an extra header that identifies it as a boot
@@ -63,7 +63,7 @@ form. The build scripts do not convert boot files to vfasl format.
 Chez Scheme assigns a `machine-type` name to each platform it runs on.
 The `machine-type` name carries three pieces of information:
 
- * *whether the system threaded*: A `t` indicates that it is, and an
+ * *whether the system threaded*: `t` indicates that it is, and an
     absence indicates that it's not threaded;
 
  * *the hardware platform*: `i3` for x86, `a6` for x86_64, `arm32` for
@@ -74,39 +74,52 @@ The `machine-type` name carries three pieces of information:
 
 When you run "configure", it looks for boot and header files as the
 directory "boot/*machine-type*". (If it doesn't find them, then
-configuration cannot continue.)
+configuration cannot continue.) For information on `pb` machine types,
+see "Portable Bytecode" below.
 
 The supported machine types are listed in "cmacros.ss" and reflected
 by a "boot/*machine-type*" directory for boot and headers files and a
-combination of "s/*kind*.def" files to describe the platform. There
-may also be a "s/Mf-*machine-type*" makefile to select relevant files
-in "s", a "c/Mf-*machine-type*" makefile for configration in "c", and
-a "mats/Mf-*machine-type*" makefile to configure testing, but Unix
-machine types are handled by Mf-unix and variables configured in the
-"configure" and "workarea" scripts.
+combination of "s/*kind*.def" files to describe the platform. Files
+for Unix machine types can be generated from "s/unix.def" or
+"s/tunix.def" with variables configured by the "configure" script.
 
-The "workarea" script in the root of the Chez Scheme project is used
-to generate a subdirectory with the appropriate contents to build for
-that particular machine. This is the script that "configure" runs when
-configuring for doing the build, but you can also run the "workarea"
-script on your own, supplying the machine type you'd like to build.
-The directory where you run "configure" or "workarea" is the "build
-directory", while the directory named "*machine-type*" created by
-"workarea" is the "workarea directory".
+When you run "configure" it creates a new directory in the current
+directory to hold the build. The directory where you run "configure"
+is the "build directory", while the directory named "*machine-type*"
+created by "configure" is the "workarea directory".
 
-Bootstrap from scratch by running the Racket program
-"rktboot/main.rkt", which should work even with a relatively old
-version of Racket. Output is written directly to a "boot"
-subdirectory.
+Although "configure" generates "Makefile" in the build directory, that
+makefile just ensures that a local copy of `zuo` is built, and then it
+runs `zuo`. The "configure" script creates "main.zuo" alongside
+"Makefile", and that's what `zuo` uses by default. You can run `zuo`
+directly instead of `make`, especially if you have `zuo` installed
+already. When you run "configure", it stores configuration choices in
+a "Mf-config" file in the workarea directory, and it creates a
+"main.zuo" that reads "Mf-config" for the build configuration. So,
+anything you can do with `make` or `zuo` in the place where
+"configure" is run, you can also do with `zuo` in the workarea
+directory. When you run "configure" with different arguments to create
+different workareas, the top-level "Makefile" is replaced to point to
+a different workarea each time, but existing workareas remain set up
+for running `zuo`. The "main.zuo" in a workarea directory is anchored
+to that directory, so the current directory doesn't have to be the
+workarea directory to build there; so, for example, `zuo ta6le` would
+build in the "ta6le" workarea (since `zuo` accepts a directory
+argument to run "main.zuo" there) independent of where "Makefile"
+currently points.
+
+Bootstrap from scratch by using `make re.boot`, which should work even
+with a relatively old version of Chez Scheme. Output is written
+directly to a "boot" subdirectory.
 
 If you have a working Chez Scheme build for the current sources and
 you want to cross-compile to generate *machine-type* boot and header
-files, the fastest approach is `make` *machine-type*`.boot`. The
+files, the fastest approach is `zuo . bootquick` *machine-type*. The
 output is written to the "boot/*machine-type*" directory.
 
 # Porting to a New Platform
 
-Porting to a new system requires both getting the C run time compiled
+Porting to a new system requires both getting the C runtime compiled
 on the new platform and updating the Scheme compiler to generate
 machine code for the platform. There are several places where the C
 kernel and code generated by the compiler need to work in harmony in
@@ -126,10 +139,11 @@ Most of the work of porting to a new architecture is producing a new
 "*ISA*.ss" compiler backend, and there will be a "*arch*.def" file to
 go with it. For all ports, including a new operating system on an
 already-supported architecture, you'll need to update "configure",
-"workarea", "cmacro.ss", and possibly "version.h". If the generic
-"unix.def" and/or "tunix.def" templates do not work for the
-OS--architecture combination, you'll need to create a new
-"*machine-type*.def" file.
+"cmacros.ss", and possibly "version.h". If the generic "unix.def"
+and/or "tunix.def" templates do not work for the OS--architecture
+combination, you'll need to create a new "*machine-type*.def" file or
+update the way that "s/machine.zuo" synthesizes a ".def" file from
+templates.
 
 Once you have all of the pieces working together, you cross-compile
 boot files, then copy them over to the the new machine to start
@@ -157,15 +171,15 @@ proc]` group in "primdata.ss".
 There's usually not much of a bootstrapping problem with new bindings,
 since you can add declarations in "primdata.ss" and implement them any
 time afterward. If you get into a bad state, however, you can always
-bootstrap from scratch using "rktboot/main.rkt". In the rare case that
-your new functionality is needed to compile Chez Scheme itself, you'll
-have to implement a copy of the functionality (or enough of it) in
-"rktboot".
+bootstrap from a relatively old Chez Scheme using `make re.boot`. In
+the rare case that your new functionality is needed to compile Chez
+Scheme itself, you'll have to implement a copy of the functionality
+(or enough of it) in "s/reboot.ss".
 
 Take care to implement a new functionality as safe, which means
 checking arguments fully. Keep in mind that your implementation itself
 will be compiled as unsafe. While testing and debugging your
-additions, however, you'll probably want to use `make o=0` in the
+additions, however, you'll probably want to use `zuo . o=0` in the
 "*machine-type*/s" workarea space, which compiles in safe mode.
 
 # Writing and Running Tests
@@ -181,14 +195,13 @@ below.
 
 ### Running One Set of Tests (no expected-error checking)
 
-Runs tests in a ".ms" file by going to your build's
-"*machine-type*/mats" directory, then `make` with a ".mo" target. For
-example, use `make 7.mo` to build and run `7.ms`. Delete `7.mo` to run
-`7.ms` again. Makefile variables like `o` control the way tests are
-run; for example, use `make 7.mo o=3` to test in unsafe mode. See the
-source file "mats/Mf-base" for information about the configuration
-options. Running tests to make a ".mo" file prints a lot of output, so
-you'll likely want to redirect stdout and stderr to a file.
+Run tests in a ".ms" file by going to your build's
+"*machine-type*/mats" directory, then `zuo .` with a ".mo" target. For
+example, use `zuo . 7.mo` to build and run `7.ms`. Unless there are
+failures, delete `7.mo` to run `7.ms` again.  Argument variables like
+`o` control the way tests are run; for example, use `zuo . 7.mo o=3` to
+test in unsafe mode. See the source file "mats/main.zuo" for
+information about the configuration options.
 
 A test failure is recorded in a ".mo" file as a line that contains
 `Bug`, `Error`, or `invalid memory`. That's why the target for making
@@ -197,26 +210,26 @@ the output `Expected error`, but there's not currently a way to check
 that the exception tests of an individual ".ms" file produce the
 expected error message.
 
+You can make all ".mo" files with just `zuo` or `zuo . each` within
+your build's "*machine-type*/mats". You can provide configuration
+arguments, too, such as `zuo . o=3` to make all ".mo" files in unsafe
+mode. A ".mo" file is rebuilt if configuration arguments are different
+from the previous run.
+
 ### Running Tests in One Configuration (with expected-error checking)
 
-You can make all ".mo" files with just `make` within your build's
-"*machine-type*/mats". You can provide configuration arguments, too,
-such as `make o=3` to make all ".mo" files in unsafe mode.
-
-In this mode, output ".mo" files are written to a subdirectory that is
+Use `zuo . all` to output ".mo" files to a subdirectory that is
 partially configuration-specific, such as "compile-0-f-f-f" for
 `compile` (as opposed to `interpret`) in safe mode (`0` instead of
 `3`), without `suppress-primitive-inlining` enabled (first `f`),
 without cp0 enabled (second `f`), and without
-`compile-interpret-simple` enabled (last `f`). Note that a set of
-tests is not run again if an up-to-date ".mo" file is in the output
-directory, so use `make clean` as needed.
+`compile-interpret-simple` enabled (last `f`).
 
 The combination of all ".mo" error messages (from both expected
-exceptions and test failures) is compared against a list of expected
-errors messages for a configuration using `diff`. The `diff` result is
-written to "report-*config*", where *config* is the name of the
-configuration. So, an empty "report-*config*" means success.
+exceptions and test failures) is then compared against a list of
+expected errors messages for a configuration using `diff`. The `diff`
+result is written to "report-*config*", where *config* is the name of
+the configuration. So, an empty "report-*config*" means success.
 
 The set of expected error messages for a given configuration is
 generated by starting with either "mats/root-experr-compile-0-f-f-f"
@@ -232,72 +245,60 @@ check that an exception is correctly raised), then
 "mats/root-experr-*config*" and/or "mats/patch-*config*" files need to
 change. Modifying those files by hand is not practical. Instead, the
 strategy is to make sure that the output diff in "record-*config*" is
-correct, and then use targets like `make root-experr` and `make
-patches` to generate new "root-experr-..." and "patch-..." files:
+correct, and then use `zuo . experr` to generate new expected-error
+root and patch files.
 
- * Run `make` and then `make root-experr` to generate a new
-   "root-experr-compile-0-f-f-f", then copy the generated file in the
-   workarea to the source "mats" directory. Often, this step is all
-   that is needed to update expected errors, since expected errors
-   tend to happen only in safe mode, and they tend not to change among
-   other configuration options.
-
- * If you need to update "root-experr-compile-3-f-f-f", use `make
-   root-experr o=3` after running with `make o=3` and then copy the
-   file from the workarea to the "mats" source directory.
-
- * After running tests for a configuration with `make` plus
-   configuration options, you may be able to recreate the
-   corresponding patch file using `make xpatch-*config*` with the same
-   configuration options. However, some configurations involve layers
-   of patch files, so it's tricky to get this right by running test
-   configurations one at a time, and it's better to run tests for all
-   configurations.
+The `experr` target can only generated expected-error files based on
+tests configurations that you've run. Often, it's enough to just run
+`zuo . all` before `zuo . experr`, since expected errors tend to
+happen only in safe mode, and they tend not to change among other
+configuration options. To make sure that all combinations are covered,
+see the next section on running more tests.
 
 ### Running Tests for All Configurations
 
-To run tests for all configurations, use `make allx` within your
-build's "*machine-type*/mats" directory. Add `-j` followed by *N* to
-run tests using *N* parallel jobs. Using `make allx` implicitly uses
-`make clean` before it runs tests. You can also use `make test`
-directly in your build directory, since that's a shortcut for `make
-allx` in the "*machine-type*/mats" directory.
+The "mats/main.zuo" script has several sets of configurations
+available for convenient testing, in order of increasing length:
 
-To support parallel tests, `make allx` write its output in a
-collection of "output-*i*-*o*" directories within
+ * `zuo . test-one`
+
+ * `zuo . test-some-fast`
+
+ * `zuo . test-some`
+
+ * `zuo . test`
+
+ * `zuo . test-more`
+
+ * `zuo . test-experr`
+
+As its name suggests, the `test` group is a good default set of
+configurations. The `test-some` target is mostly a subset of `test`,
+and `test-some-fast` further omits interpreter mode. The `test-more`
+target includes combinations with slower and more aggressive checking.
+The `test-experr` set includes one configuration for every combination
+of options that might have different expected errors.
+
+To run *N* configurations in parallel, supply `-j` *N* to `zuo`, as in
+`zuo . -j 6 test`, or set the `ZUO_JOBS` environment variable. You can
+also use the `test-some`, `test`, and `test-more` targets directly in
+your build directory, since that's a shortcut for running them in the
+"*machine-type*/mats" directory.
+
+To support parallel tests, targets like `test` write output in a
+collection of "output-*config*-*name*" directories within
 "*machine-type*/mats", so you can look for "report-*config*" files in
-those subdirectories. As its last step, `make allx` combines a summary
-of reports to a `summary` file directly in "*machine-type*/mats", and
-then it shows that summary as output. As long as that output shows
-only configurations (i.e., no errors), then all tests passed for all
-configurations.
+those subdirectories. As its last step, a target like `test` prints a
+summary of reports. As long as that output shows only configurations
+(i.e., no errors), then all tests passed for all configurations.
 
-After running `make allx`, if the summary shows only errors that
-reflect out-of-date expectations from "root-experr-..." or "patch-..."
-files, you can use the sequence
-
-```bash
-make root-experr o=0
-make root-experr o=3
-make patches
-```
-
-to create new vesions of the files in the workarea directory. Copy
-changed files to the "mats" source directory; if the only change to a
-patch file is to the line-number hints, then it's probably not worth
-keeping the update (as long as the line numbers are not too far off).
-After copying to source, delete any "root-experr-..." or "patch-..."
-files, and then links are recreated on demand in the workarea space to
-"root-experr-..." or "patch-..." files when they are needed to
-generate expexted-error diffs.
-
-You can run a smaller set of tests using `make partialx` or using
-`make test-some` directly in your build directory. Despite its name,
-`make allx` does not run all available tests. Use `make bullyx` or
-`make test-more` to run a different, more stressfull set of tests. The
-bully tests may cover more configurations than `allx`, so `make
-patches` after `make bullyx` may pick up additional "patch-..." file
-changes.
+If the summary shows only errors that reflect out-of-date expectations
+from exception messages, use `zuo . experr` to update
+"root-experr-..." and "patch-..." files. The updates files are written
+to the source directory, so use your revision control system to make
+sure the changes look right. If the only change to a patch file is to
+the line-number hints, then it's probably not worth keeping the update
+(as long as the line numbers are not too far off).
 
 # Scheme Objects
 
@@ -314,7 +315,7 @@ See also:
 > Indiana University TR #400, 1994.
 > [PDF](http://www.cs.indiana.edu/ftp/techreports/TR400.pdf)
 
-For example, if "cmacro.ss" says
+For example, if "cmacros.ss" says
 
 ```scheme
   (define-constant type-pair         #b001)
@@ -338,21 +339,21 @@ of a Scheme record, that first word will be a record-type descriptor
 --- that is, a pointer to a record type, which is itself represented
 as a record. The based record type, `#!base-rtd` has itself as its
 record type. Since the type bits are all ones, on a 64-bit machine,
-every object tagged with an additional type workd will end in "F" in
+every object tagged with an additional type word will end in "F" in
 hexadecimal, and adding 1 to the pointer produces the address
 containing the record content (which starts with the record type, so
 add 9 instead to get to the first field in the record).
 
 As another example, a vector is represented as `type-typed-object`
-pointer where the first word is a fixnum. That is, a fixnum used a
+pointer where the first word is a fixnum. That is, a fixnum used as a
 type word indicates a vector. The fixnum value is the vector's length
 in words/objects, but shifted up by 1 bit, and then the low bit is set
 to 1 for an immutable vector.
 
-Most kinds of Scheme values are represented records, so the layout is
+Most kinds of Scheme values are represented as records, so the layout is
 defined by `define-record-type` and similar. For the primitive object
 types that are not records (and even a few that are), the layouts are
-defined in "camcros.ss". For example, an `exactnum` (i.e., a complex
+defined in "cmacros.ss". For example, an `exactnum` (i.e., a complex
 number with exact real and imaginary components) is defined as
 
 ```scheme
@@ -366,7 +367,7 @@ The `type-typed-object` in the first line indicates that an `exactnum`
 is represented by a pointer that is tagged with `type-typed-object`,
 and so we should expect the first field to be a type word. That's why
 the first field above is `type`, and it turns out that it will always
-contain the value `type-inexactnum`. The `iptr` type for `type` means
+contain the value `type-exactnum`. The `iptr` type for `type` means
 "a pointer-sized signed integer". The `ptr` type for `real` and `imag`
 means "pointer" or "Scheme object".
 
@@ -382,13 +383,13 @@ the vfasl writer (in "vfasl.ss"), and the inspector (in "inspect.ss").
 Scheme code does not use the C stack, except to the degree that it
 interacts with C functions. Instead, the Scheme continuation is a
 separate, heap-allocated, linked list of stack segments. Locally, you
-can just view the continuatiton as a stack and assume that overflow
+can just view the continuation as a stack and assume that overflow
 and continuation operations are handled as needed at the boundaries.
 
 See also:
  
 > *Representing Control in the Presence of First-Class Continuations*
-> bby Robert Hieb, R. Kent Dybvig, and Carl Bruggeman,
+> by Robert Hieb, R. Kent Dybvig, and Carl Bruggeman,
 > Programming Language Design and Implementation, 1990.
 > [PDF](https://legacy.cs.indiana.edu/~dyb/pubs/stack.pdf)
 
@@ -402,7 +403,7 @@ is in the thread context (so, it's thread-local), which we'll
 abbreviate as "TC". Some machine register is designated as the `%tc`
 register, and it's initialized on entry to Scheme code. For the
 definition of TC, see `(define-primitive-structure-disps tc ...)` in
-"cmacro.ss".
+"cmacros.ss".
 
 The first several fields of TC are virtual registers that may be
 assigned to machine registers, in which case the TC and registers are
@@ -448,15 +449,15 @@ function, installs the return address as a pointer within the current
 function, and then jumps to the called function. Function calls and
 returns do not use machine "call" and "return" instructions;
 everything is just a "jump". ("Call" and "return" instructions are
-used for C interactions.) It's the caller's responsibity to reset
+used for C interactions.) It's the caller's responsibility to reset
 SFP back on return, since the caller knows how much it moved SFP
 before calling.
 
 The compiler can use a register for the return address instead of
 immediately installing it in SFP[0] on a call. That mode is triggered
-by giving one of the regisers the name `%ret` (as described in
+by giving one of the registers the name `%ret` (as described in
 "Machine Registers" below). Currently, however, the called Scheme
-function will immediatelly copy the register into SFP[0], and it will
+function will immediately copy the register into SFP[0], and it will
 always return by jumping to SFP[0]. So, until the compiler improves to
 deal with leaf functions differently, using a return register can help
 only with hand-coded leaf functions that don't immediately move the
@@ -486,7 +487,7 @@ little later, and there's some data just before that return address
 that describes the calling function's stack frame. The GC needs that
 information, for example, to know which part of the current Scheme
 stack is populated by live variables. The data is represented by
-either the `rp-header` or `rp-compact-header` (see "cmacro.ss") shape.
+either the `rp-header` or `rp-compact-header` (see "cmacros.ss") shape.
 So, when you disassemble code generated by the Chez Scheme compiler,
 you may see garbage instructions mingled with the well-formed
 instructions, but the garbage will always be jumped over.
@@ -506,7 +507,7 @@ For example, the definition of `set-car!` is in "prims.ss" is
 ```
 
 This turns out not to be a circular definition, because the compiler
-recogizes an immediate application of the `set-car!` primitive and
+recognizes an immediate application of the `set-car!` primitive and
 inlines its implementation. The `#2%` prefix instructs the compiler to
 inline the safe implementation of `set-car!`, which checks whether its
 first argument is a pair. Look for `define-inline 2 set-car!` in
@@ -539,7 +540,7 @@ Every library function has to be declared in "cmacros.ss" in the
 (as inserted into machine code via `build-libcall`) with the run-time
 address of the library function. The vector is filled in by loading
 "library.ss". Since some library functions can refer to others, the
-order is important; the linker encouters the forms of "library.ss" one
+order is important; the linker encounters the forms of "library.ss" one
 at a time, and a library entry must be registered before it is
 referenced.
 
@@ -553,8 +554,8 @@ in "cmacros.ss" with `declare-c-entries`.
 
 Adding a new library entry or C entry shifts indices that are
 generated by the Scheme compiler. If you change the set of entries,
-it's usually easiest to re-bootstrap from scratch using
-"rktboot/main.rkt". To avoid confusion, be sure to change the version
+it's usually easiest to re-bootstrap from sources using
+`make re.boot`. To avoid confusion, be sure to change the version
 number first (see "Changing the Version Number" below).
 
 Some primitives are implemented directly in the compiler but should
@@ -575,6 +576,44 @@ definition in "prims.ss".
 
 If you're looking for math primitives, see "mathprims.ss" instead of
 "prims.ss".
+
+# Linking
+
+Before generated code can be run, it must be linked with primitives,
+library entries, and C entries as they exist in memory within the
+current OS process. Even when code is compiled and then run in the same
+OS process, linking is a separate, post-install step (by `c-mkcode` in
+"compile.ss"). More typically, compiled code is written to a ".so" or
+".boot" fasl file and loaded later. The fasl format is mostly a
+generic serialization and deserialization format for Scheme objects,
+but writing (via `c-build-fasl` in "compile.ss" plus "fasl.ss") and
+fasl reading (via "fasl.c") are asymmetric for code: fasl writing
+works only on unlinked code objects, while reading a fasl file produces
+linked code objects by linking as it loads. (Utilities in "strip.ss"
+can read and re-write file content without linking. Those tools
+use a reader and writer that are completely separate from "fasl.ss" and
+"fasl.c".) There's currently no support for writing linked code, as
+represented by a procedure value, to a fasl stream.
+
+Chez Scheme has its own custom linker and does not use the OS linker.
+To support linking, each code object is paired with a relocation
+table. Each table entry specifies an offset in the code object, the
+value that should be linked at that offset, and the encoding that is
+used at the offset. The value to link can be a Scheme object, such as
+a bignum, symbol, or list, or an index of a library entry or C entry.
+The encoding is machine-specific, and might indicate a literal word in
+the code that is loaded by PC-relative addressing or a sequence of
+instructions that load a value through moves and shifts. Except for
+code that is moved to the "static" GC generation, the relocation table
+is preserved with a code object in memory, because it is needed by the
+garbage collector to relink when code and linked values are moved in
+memory.
+
+When a function directly calls another function compiled at the same
+time, the a reference from one function is often directly to the code
+object of another function. Predefined functions are typically
+referenced by linking to a symbol, and generated code accesses the
+function by looking at the function or value slot of the symbol.
 
 # Compilation Pipeline
 
@@ -599,7 +638,7 @@ Compilation
 It's worth noting that Chez Scheme produces machine code directly,
 instead of relying on a system-provided assembler. Chez Scheme also
 implements its own linker to connect compiled code to runtime kernel
-facilaties and shared symbols.
+facilities and shared symbols.
  
 See also:
 
@@ -619,7 +658,7 @@ represented as calls to functions. In later passes in "cpnanopass.ss",
 some primitive operations get inlined into a combination of core
 forms, some of which are `inline` forms. The `inline` forms eventually
 get delivered to a backend for instruction selection. For example, a
-use of safe `fx+` is inlines as argument checks that guard an
+use of safe `fx+` is inlined as argument checks that guard an
 `(inline + ...)`, and the `(inline + ...)` eventually becomes a
 machine-level addition instruction.
 
@@ -695,7 +734,7 @@ real machine registers:
  * `%trap` - counter for when to check signals, including GC signal
 
 
- * `%eap` - end of bump-allocatable region
+ * `%eap` - end of bump-allocation region
 
  * `%esp` - end of current stack segment
 
@@ -720,7 +759,7 @@ is not mapped to a register, it exists only as a TC slot.
 A few more names are recognized to direct the compiler in different
 ways:
 
- * `%ret` - use a return register insteda of just SFP[0]
+ * `%ret` - use a return register instead of just SFP[0]
 
  * `%reify1`, `%reify2` - a kind of manual allocation of registers for
                           certain hand-coded routines, which otherwise could
@@ -728,7 +767,7 @@ ways:
 
 # Variables and Register Allocation
 
-A variables in Scheme code can be allocated either to a register or to
+Variables in Scheme code can be allocated either to a register or to
 a location in the stack frame, and the same goes for temporaries that
 are needed to evaluate subexpressions. Naturally, variables and
 temporaries with non-overlapping extents can be mapped to the same
@@ -739,10 +778,10 @@ same frame location.
 An early pass in the compiler converts mutable variables to
 pair-valued immutable variables, but assignment to variables is still
 allowed within the compiler's representation. (The early conversion of
-mutables variables ensures that mutation is properly shared for, say,
+mutable variables ensures that mutation is properly shared for, say,
 variables in captured continuations.) That is, even though variables
 and temporaries are typically assigned only once, the compiler's
-intermediate representation is not a single-asssignment form like
+intermediate representation is not a single-assignment form like
 SSA.
 
 Each variable or temporary will be allocated to one spot for it's
@@ -771,7 +810,7 @@ Intermediate code in later passes of the compiler can also refer to
 registers directly, and those uses are taken into account by the
 register allocator.
 
-Overall, the allocator see several kinds of "variables":
+Overall, the allocator sees several kinds of "variables":
 
  * real registers;
 
@@ -779,7 +818,7 @@ Overall, the allocator see several kinds of "variables":
    which is eventually allocated to a real register or to a frame
    location;
 
- * unspillable varriables, each of which must be allocated to a real
+ * unspillable variables, each of which must be allocated to a real
    register; these are introduced by a backend during the
    instruction-selection pass, where an instruction may require a
    register argument; and
@@ -804,7 +843,7 @@ that
 ```scheme
         (set! %r1 v1)
         (set! %r1 v2)
-        ... use %r1, sometimes expecting v1 and sometimess v2 ...
+        ... use %r1, sometimes expecting v1 and sometimes v2 ...
 ```
 
 looks fine, and it may optimize away the first assignment. [Note:
@@ -814,7 +853,7 @@ results of register-use mistakes.]
 At the point where the register allocator runs, a Scheme program has
 been simplified to a sequence of assignment forms and expression
 forms, where the latter are either value-producing and sit on the
-right-hand side of an assignment or they are effectful and sit by
+right-hand side of an assignment or they have effects and sit by
 themselves. The register allocator sees the first assignment to a
 variable/register as the beginning of its live range and the last
 reference as the end of its live range. In some cases, an instruction
@@ -860,14 +899,14 @@ creates a `uvar` (that may eventually be spilled to a stack-frame
 slot). A `make-tmp` in the instruction-selection pass, however, makes
 an unspillable. In earliest passes of the compiler, new temporaries
 must be bound with a `let` form (i.e., a `let` in the intermediate
-repressentation) before they can be used; in later passes, a `set!`
+representation) before they can be used; in later passes, a `set!`
 initializes a temporary.
 
 In all but the very earliest passes, an `mref` form represents a
 memory reference. Typically, a memory reference consists of a
 variable and an offset. The general form is two variables and an
 offset, all of which are added to obtain an address, because many
-machine support indexed memory references of that form. The `%zero`
+machines support indexed memory references of that form. The `%zero`
 pseudo-register is used as the second variable in an general `mref`
 when only one variable is needed. A variable or memory reference also
 has a type, 'uptr or 'fp, in the same way as a register. So, a
@@ -875,12 +914,12 @@ variable of a given type may be allocated to a register of that type,
 or it may be spilled to a frame location and then referenced through
 an `%sfp`-based `mref` using that type. In early passes of the
 compiler, `mref`s can be nested and have computed pieces (such as
-calulating the offset), but a later pass will introduce temporaries to
+calculating the offset), but a later pass will introduce temporaries to
 flatten `mref`s into just variable/register and immediate-integer
 components.
 
 A backend may introduce an unspillable to hold an `mref` value for
-various reasons: because the relevant instruction suports only one
+various reasons: because the relevant instruction supports only one
 register plus an offset instead of two registers, because the offset
 is too big, because the offset does not have a required alignment, and
 so on.
@@ -998,7 +1037,7 @@ all of the current backends use a particular internal structure:
    machine-level operations, where the functions for machine-level
    operations typically have names ending in `-op`.
 
-Consider the "arm64.ss" definition fo `%logand`, which should accept a
+Consider the "arm64.ss" definition of `%logand`, which should accept a
 destination (here called "z") and two arguments:
 
 ```scheme
@@ -1061,7 +1100,7 @@ on memory references to load an integer/pointer (e.g., on "arm32.ss").
 Note that `%logand` generates a use of the same `(asm-logand #f)`
 instruction for the register--register and the register--immediate
 cases. A more explicit distinction could be made in the output of
-instruction selection, but delaying the choice is anologous to how
+instruction selection, but delaying the choice is analogous to how
 assembly languages often use the same mnemonic for related
 instructions. The `asm-move` and `asm-fpmove` must accommodate
 register--memory, memory--register, and register--register cases,
@@ -1079,8 +1118,8 @@ The `asm-logand` instruction for "arm64.ss" is implemented as
             [else (emit and set-cc? and src0 src1 code*)]))))
 ```
 
-The `set-cc?` argument coresponds to the `#f` in `(asm-logand #f)`.
-The inner lambda reprsents the instruction --- that is, it's the
+The `set-cc?` argument corresponds to the `#f` in `(asm-logand #f)`.
+The inner lambda represents the instruction --- that is, it's the
 function in an `asm` form. The function takes `code*` first, which is
 a list of machine codes for all instructions after the `asm-logand`.
 The `dest` argument corresponds to the result register, and `src0` and
@@ -1103,8 +1142,8 @@ binds `andi-op`, and `(emit andi arg2 ...)` turns into `(logical-op
 `emit`. The last argument is conventionally `code*`, which is the code
 list to be extended with new code at its beginning (because the
 machine-code list is built end to start). The bounce from `andi-op` to
-`logicial-op` is because many instructions follow a similar encoding,
-such as different bitwise-logicial operations like `and` and `or`.
+`logical-op` is because many instructions follow a similar encoding,
+such as different bitwise-logical operations like `and` and `or`.
 Meanwhile, `logical-op` uses an `emit-code` form, which is also in
 "arm64.ss" and other backends, that calls `aop-cons` with a suitable
 human-readable addition.
@@ -1112,16 +1151,17 @@ human-readable addition.
 All of that could be done with just plain functions, but the macros
 help with boilerplate and arrange some helpful compile-time checking.
 
-# Linking
+# Directives for Linking
 
 Besides actual machine code in the output of the assembly step,
-machine-specific linking dierctives can appear. In the case of
+machine-specific linking directives can appear. In the case of
 "arm32.ss", the linking options are `arm32-abs` (load an absolute
-address), `arm32-call` (call an asolute address while setting the link
-register), and a`arm32-jump` (jump to an asolute address). These are
+address), `arm32-call` (call an absolute address while setting the link
+register), and a`arm32-jump` (jump to an absolute address). These are
 turned into relocation entries associated with compiled code by steps
 in "compile.ss". Relocation entries are used when loading and GCing
-with update routines implemented in "fasl.c".
+with update routines implemented in "fasl.c" as described above in
+"Linking".
 
 Typically, a linking directive is written just after some code that is
 generated as installing a dummy value, and then the update routine in
@@ -1153,12 +1193,12 @@ an extra pointer type at the start of the argument list, but the "&"
 type is also left for the result type as an indication about that
 first argument. In other words, the result type is effectively
 duplicated in the result (matching the C view) and an argument
-(mathing the Scheme view) --- so, overall, the given type matches
+(matching the Scheme view) --- so, overall, the given type matches
 neither the C nor Scheme view, but either view can be reconstructed.
 
 The compiler creates wrappers to take care of further conversion
 to/from these primitive shapes. You can safely ignore the
-foreign-callable support, at first, when porting to a new platforrm,
+foreign-callable support, at first, when porting to a new platform,
 but foreign-callable support is needed for generated code to access
 runtime kernel functionality.
 
@@ -1176,7 +1216,7 @@ The `asm-foreign-call` function returns 5 values:
 
    If the result type is "&", then `c-arg`s must include a function to
    accept the pointer that receives the function result (i.e., the
-   length of `c-args` should match the length of the agument-type list
+   length of `c-args` should match the length of the argument-type list
    in the given `info-foreign`). The pointer may need to be stashed
    somewhere by the generated code for use after the function returns.
 
@@ -1190,7 +1230,7 @@ The `asm-foreign-call` function returns 5 values:
 
    Generate code to call the C function whose address is in the given
    register. The boolean if #t if the call can assume that the C
-   function is not a varargs function on platformss where varargs
+   function is not a varargs function on platforms where varargs
    support is the default.
 
  * `c-result : uvar/reg -> L13.Effect`
@@ -1269,13 +1309,154 @@ value, then there must be some function that provides the value. If
 you need the target machine's value, then it must be accessed using
 `constant`.
 
+# Portable Bytecode
+
+The "portable bytecode" virtual machine uses a 32-bit instruction set
+that is interpreted by a loop defined in "c/pb.c", where many of the
+instruction implementations are in "c/pb.h". The instruction set is
+custom, but inspired by Arm64. Of course, since the instructions are
+interpreted, it does not run nearly as fast a native code that Chez
+Scheme normally generates, but it runs fast enough to be useful for
+bootstrapping a Chez Scheme build from one portable set of boot files.
+The pb machine type is also potentially useful in a setting that
+disallows code generation or where there's not yet a machine-code
+backend for Chez Scheme.
+
+A `machine-type` name for a pb build follows a variant of the normal
+conventions:
+
+ * *whether the system threaded*: `t` indicates that it is threaded;
+
+ * `pb`;
+
+ * *word side*: `64`, `32`, or blank for basic; and
+
+ * *endianness*: `l` for little-endian, `b` for big-endian, or blank
+    for basic.
+
+Compiled files (including boot files) for a basic pb build work on all
+platforms, while compiled files for a non-basic pb build have a
+specific word size and endianness for improved performance. Run
+"configure" with `--pb` for a basic build, or run "configure" with
+`--pbarch` or `-m=<pb-machine-type>` for a non-basic build.
+
+A basic build can work on all platforms because it assumes a 64-bit
+representation of Scheme values. On a 32-bit platform, the kernel is
+compiled to use a 64-bit integer type for `ptr`, even though the high
+half of a `ptr` value will always be zeros. The `TO_VOIDP` and
+`TO_PTR` macros used in the kernel tell a C compiler that conversions
+between 64-bit `ptr`s and (potentially) 32-bit pointers are
+intentional. A basic build also avoids a compile-time assumption of
+endianness, turning any such Scheme-level decisions into a run-time
+branch. Bytecode instructions are stored as little endian in compiled
+code for a basic build; on a big-endian machine, the kernel rewrites
+instruction bytes to big-endian form while loading a fasl file, so the
+interpreter can decode instructions in native order.
+
+A basic build supports only a limited, hardwired set of foreign
+interfaces that are sufficient to access kernel functions. A non-basic
+build can support the full foreign interface if the Scheme build is
+configured to use libffi. The pb32 variants assume 8-byte alignment in
+structs for doubles and 64-bit integer values, which can limit
+interoperability with foreign libraries on platforms with a different
+alignment convention (such as non-Windows x86, where doubles and
+64-bit integers need only 4-byte alignment).
+
+For a non-basic build, fragments of static Scheme code can be turned
+into C code to compile and plug back into the kernel. These fragments
+are called *pbchunks*.
+
+### pbchunk Builds
+
+The `pbchunk-convert-file` function takes compiled Scheme code (as a
+boot or fasl file), generates C code for the chunks, and generates
+revised compiled code that contains references to the chunks via
+`pb-chunk` instructions. Calling the registration function in the
+generated C code registers chunks with the kernel as targets for
+`pb-chunk` instructions. Each chunk has a static index, so the revised
+compiled Scheme code must be used with exactly the C chunks that are
+generated at the same time; when multiple sets of chunks are used
+together, each needs to be created with non-overlapping index ranges.
+
+Using
+
+```bash
+zuo . bootpbchunk <machine-type>-<tag>
+```
+
+creates a "boot/*machine-type*-*tag*" directory that contains adjusted
+versions of the boot files in "boot/*machine-type*" plus C code to
+implement chunks extracted from the boot files. For example,
+
+```bash
+zuo . bootpbchunk tpb64l-pbchunk
+```
+
+creates pbchunked boot files for the 64-bit, little-endian pb variant.
+
+If the current machine-type does not match *machine-type*, the
+`bootpbchunk` target expects to be able to use a cross compiler, so
+create one if needed using
+
+```bash
+zuo . bootquick <machine-type>
+```
+
+The `bootpbchunk` target recognizes additional arguments to specify
+additional boot files. Start with `--petite` to extract pbchunks only
+from "petite.boot" (and not the compiler in "scheme.boot"), or start
+with `--only` to extract pbchunks only from additional supplied boot
+files. For example,
+
+```bash
+zuo . bootpbchunk tpb64l-demo --only demo.boot
+```
+
+extracts chunks only from "demo.boot" and includes the updated
+"demo.boot" alongside the "petite.boot" and "scheme.boot" boot files
+in "boot/tpb64l-demo".
+
+To build with the assembled pbchunk configuration, use
+
+```bash
+./configure --boot=<machine-type>-<tag> --pbarch
+```
+
+which configures a build using prepared "boot/*machine-type*-*tag*"
+files. A build configured this way supports only `zuo` for the kernel
+build and `zuo . run` to run (the latter assuming that the target
+build matches the host platform). A plain `zuo` will not attempt to
+rebuild Scheme sources that are part of Chez Scheme.
+
+In the special case of using "boot/*machine-type*-*tag*" to target
+WebAssembly via Emscripten, a boot file added via `ARGS` will be
+included as a preload automatically and should not be listed again
+later with `--emboot`.
+
+### Internal pbchunk Protocol
+
+A `pb-chunk` instruction's payload is two integers: a 16-bit *index*
+and an 8-bit *subindex*. The *index* selects a registered C chunk
+function. The *subindex* is passed as the third argument to that
+function. Meanwhile, the first two arguments to the chunk C function
+are the machine state *ms* that lives in a thread context and the
+address *ip* of the `pb-chunk` instruction. The pb virtual registers
+are accessed via *ms*. The *ip* argument is useful for constructing
+relative addresses, such as the address of code that contains a
+relocatable reference. A C chunk function returns the address of pb
+code to jump to. A chunk function might return an address of Scheme
+function code to call that function, or it might return the address of
+code to go back to running in interpreted mode for the same code
+object where it started; that is, general jumps and bailing out of
+chunk mode are implemented in the same way.
+
 # Changing the Version Number
 
-To change the version number:
+To change the version number, edit the `version` definition in
+"cmacros.ss", and re-bootstrap from scratch using `make re.boot`.
 
- * Edit the `version` definition in "cmacro.ss"
-
- * Edit the `Version` macro in "makefiles/Mf-install"
-
-After changing the version number, re-bootstrap from scratch using
-"rktboot/main.rkt".
+To update the "boot/pb" files that are normally used to build Chez
+Scheme without an existing Chez Scheme, use `./configure --pb` before
+running `make re.boot`. If you are updating the Git submodule, create
+a fresh branch for the submodule and squash all changes into a single
+commit within that branch.

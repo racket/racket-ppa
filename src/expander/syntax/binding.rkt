@@ -28,6 +28,7 @@
  identifier-binding
  identifier-binding-symbol
  identifier-distinct-binding
+ identifier-binding-uses-scope?
  
  maybe-install-free=id!
  binding-set-free=id
@@ -99,8 +100,9 @@
     (local-binding-key b)]
    [else (syntax-e id)]))
 
-(define (identifier-binding id phase [top-level-symbol? #f])
-  (define b (resolve+shift id phase))
+(define (identifier-binding id phase [top-level-symbol? #f]
+                            #:exactly? [exactly? #f])
+  (define b (resolve+shift id phase #:exactly? exactly?))
   (cond
    [(module-binding? b)
     (if (top-level-module-path-index? (module-binding-module b))
@@ -118,14 +120,18 @@
     'lexical]
    [else #f]))
 
-(define (identifier-distinct-binding id other-id phase)
+(define (identifier-distinct-binding id other-id phase [top-level-symbol? #f])
   (define scs (resolve id phase #:get-scopes? #t))
   (cond
     [(not scs) #f]
     [else
      (define other-scs (syntax-scope-set other-id phase))
      (and (not (subset? scs other-scs))
-          (identifier-binding id phase))]))
+          (identifier-binding id phase top-level-symbol?))]))
+
+(define (identifier-binding-uses-scope? id scope phase)
+  (define scs (resolve id phase #:get-scopes? #t))
+  (and scs (set-member? scs scope)))
 
 ;; ----------------------------------------
 
@@ -197,6 +203,14 @@
      shifts]
     [else (cons shift shifts)]))
 
+(define (binding-free=id-phase immediate-b)
+  ;; a `free=id` mapping is only possible at the same phase as the
+  ;; referencing binding, so we can use the binding's own phase to
+  ;; indicate the relevant `free=id` phase
+  (if (module-binding? immediate-b)
+      (module-binding-phase immediate-b)
+      0))
+
 ;; Use `resolve+shift` instead of `resolve` when the module of a
 ;; module binding is relevant or when `free-identifier=?` equivalences
 ;; (as installed by a binding to a rename transformer) are relevant;
@@ -225,7 +239,7 @@
      (define b (if (and immediate-b
                         (not immediate?)
                         (binding-free=id immediate-b))
-                   (resolve+shift (binding-free=id immediate-b) phase
+                   (resolve+shift (binding-free=id immediate-b) (binding-free=id-phase immediate-b)
                                   #:extra-shifts (append extra-shifts (syntax-mpi-shifts s))
                                   #:ambiguous-value ambiguous-value
                                   #:exactly? exactly?

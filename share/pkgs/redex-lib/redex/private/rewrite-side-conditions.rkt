@@ -26,6 +26,7 @@ see also term.rkt for some restrictions/changes there
             "matcher.rkt"))
   
   (provide rewrite-side-conditions/check-errs
+           rewrite-side-conditions/check-errs/list
            break-out-underscore
            extract-names
            (rename-out [binds? id-binds?])
@@ -37,6 +38,25 @@ see also term.rkt for some restrictions/changes there
            is-ellipsis?)
   
   (provide (struct-out id/depth))
+
+;; this function accepts the same arguments as
+;; rewrite-side-conditions/check-errs but is expected to be given a
+;; list of syntax objects that was constructed internally (not part of
+;; the source of the program); the result pattern should be a `list`
+;; pattern but since the source locations are on the individual
+;; elements of this list, not the entire list, we make sure that we
+;; pass each element individually to `rewrite-side-conditions/check-errs`
+;; and then build the list pattern afterwards.
+(define (rewrite-side-conditions/check-errs/list all-nts/lang-id what bind-names? orig-stxes)
+  (define four-tuple-list
+    (for/list ([orig-stx (in-list orig-stxes)])
+      (rewrite-side-conditions/check-errs all-nts/lang-id what bind-names? orig-stx)))
+  (syntax-case four-tuple-list ()
+    [((lhs-syncheck-exp lhs (names ...) (names/ellipses ...)) ...)
+     #'((begin lhs-syncheck-exp ...)
+        (list lhs ...)
+        (names ... ...)
+        (names/ellipses ... ...))]))
   
   ;; the result is a four-tuple (as a list) syntax object
   ;; - the first is an ordinary expression that evaluates
@@ -104,12 +124,12 @@ see also term.rkt for some restrictions/changes there
         (raise-syntax-error
          what
          (format "expected a non-terminal in ~a" where)
-         orig-stx #'a))
+         orig-stx id))
       (when suffix-sym
         (raise-syntax-error
          what
          (format "underscores not allowed on non-terminal names in ~a" where)
-         orig-stx #'a))
+         orig-stx id))
       (hash-ref aliases prefix-sym prefix-sym))
     
     ; union-find w/o balancing or path compression (at least for now)
@@ -178,7 +198,7 @@ see also term.rkt for some restrictions/changes there
                  [under-mismatch-ellipsis '()])
         (syntax-case term (side-condition variable-except variable-prefix
                                           hole name in-hole hide-hole cross unquote and
-                                          compatible-closure-context)
+                                          compatible-closure-context #%mf-apply)
           [(side-condition pre-pat (and))
            ;; rewriting metafunctions (and possibly other things) that have no where, etc clauses
            ;; end up with side-conditions that are empty 'and' expressions, so we just toss them here.
@@ -371,6 +391,10 @@ see also term.rkt for some restrictions/changes there
                         (list (make-id/depth term (length under))))]
                [else
                 (values term '())]))]
+          [(#%mf-apply _ ...)
+           (raise-syntax-error what "mf-apply cannot be used in a pattern position" orig-stx term)]
+          [#%mf-apply
+           (raise-syntax-error what "mf-apply cannot be used in a pattern position" orig-stx term)]
           [(terms ...)
            (let ()
              (define terms-lst (syntax->list #'(terms ...)))

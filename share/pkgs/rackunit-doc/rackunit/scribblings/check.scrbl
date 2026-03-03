@@ -22,6 +22,10 @@ This means, for instance, checks always evaluate
 their arguments.  You can use a check as a first class
 function, though this will affect the source location that the check grabs.
 
+Also, if the evaluation of the arguments to one of the
+checks raises an exception (except @racket[exn:break?]) the
+exception is caught and the test case is considered to have
+failed.
 
 @section[#:tag "rackunit:basic-checks"]{Basic Checks}
 
@@ -49,6 +53,7 @@ For example, the following checks all fail:
   (check-not-eqv? 1 1 "integers are eqv?")
   (check-equal? 1 1.0 "not equal?")
   (check-not-equal? (list 1) (list 1) "equal?")
+  (check-equal? (car #f) (car #f))
 ]
 }
 
@@ -74,41 +79,52 @@ The following check fails:
          void?]{
 
 Checks that @racket[v1] and @racket[v2] are numbers within
-@racket[epsilon] of one another.  The optional
-@racket[message] is included in the output if the check
-fails.
+@racket[epsilon] of one another. Usually the first number
+is produced by a function, the second number is the expected
+value, and epsilon is the tolerance. The optional @racket[message]
+is included in the output if the check fails.
 
 For example, the following check passes:
 
 @interaction[#:eval rackunit-eval
-  (check-= 1.0 1.01 0.02 "I work")
+  (code:line (define (golden-ratio) 1.62) (code:comment "computes the golden ratio"))
+  (check-= (golden-ratio) 1.618033988749 0.01 "I work")
 ]
+
 The following check fails:
 @interaction[#:eval rackunit-eval
-  (check-= 1.0 1.01 0.005 "I fail")
+  (check-= (golden-ratio) 1.618033988749 0.001 "I fail")
 ]
 }
 
 @defproc[(check-within [v1 any/c] [v2 any/c] [epsilon number?] [message (or/c string? #f) #f])
          void?]{
-
+                
 Checks that @racket[v1] and @racket[v2] are @racket[equal?] to each
 other, while allowing numbers @italic{inside} of them to be different by
 at most @racket[epsilon] from one another. If @racket[(equal? v1 v2)] would
 call @racket[equal?] on sub-pieces that are numbers, then those numbers are
 considered "good enough" if they're within @racket[epsilon].
+In other words, this check is similar to @racket[check-=] except it works on data structures
+like lists, flvectors, and hash tables.
 
 For example, the following checks pass:
 
 @interaction[#:eval rackunit-eval
-  (check-within (list 6 10) (list 6.02 9.99) 0.05)
-  (check-within (flvector 3.0 4.0 5.0) (flvector 3.01 4.01 5.014) 0.02)
+  (code:line (define (avogadro-constant) 6e+23) (code:comment "computes the Avogadro constant"))
+  (code:line (define (gravitational-acc) 10)    (code:comment "computes the gravitational acceleration"))
+  (check-within (list (avogadro-constant) (gravitational-acc))
+                (list 6.02214076e23 9.80665) 5e+21)
   (check-within (hash 'C 20 'F 68) (hash 'C 25 'F 77) 10)
+  (check-within (flvector 3.0 4.0 5.0) (flvector 3.01 4.01 5.014) 0.02)
 ]
+
 And the following checks fail:
 @interaction[#:eval rackunit-eval
-  (check-within (list 6.0e23 10.0) (list 6.02e23 9.8) 0.05)
+  (check-within (list (avogadro-constant) (gravitational-acc))
+                (list 6.02214076e23 9.80665) 1e+21)
   (check-within (hash 'C 18 'F 64) (hash 'C 25 'F 77) 10)
+  (check-within (flvector 3.0 4.0 5.0) (flvector 3.01 4.01 5.014) 1e-5)
 ]
 
 @history[#:added "1.10"]}
@@ -152,17 +168,31 @@ For example, the following checks succeed:
      (raise (make-exn:fail "Hi there"
                            (current-continuation-marks)))))
   (check-exn
+   #rx"[Hh]i there"
+   (lambda ()
+     (raise (make-exn:fail "Hi there"
+                           (current-continuation-marks)))))
+  (check-exn
    exn:fail?
    (lambda ()
      (error 'hi "there")))
+
+  (check-exn exn:fail:contract:divide-by-zero?
+             (lambda ()
+               (/ 1 0)))
 ]
 
 The following check fails:
 
 @interaction[#:eval rackunit-eval
-  (check-exn exn:fail?
+  (check-exn exn:fail:contract:divide-by-zero?
              (lambda ()
-               (break-thread (current-thread))))
+               (car #f)))
+  (check-exn
+   #rx"Hello there"
+   (lambda ()
+     (raise (make-exn:fail "Hi there"
+                           (current-continuation-marks)))))
 ]
 
 The following example is a common mistake. The call to @racket[error]
@@ -189,8 +219,8 @@ the check fails.
 
 }
 
-@defproc[(check-regexp-match (regexp regexp?)
-                             (string string?))
+@defproc[(check-regexp-match (regexp (or/c regexp? byte-regexp? string? bytes?))
+                             (string (or/c string? bytes? path? input-port?)))
          void?]{
 
 Checks that @racket[regexp] matches the @racket[string].

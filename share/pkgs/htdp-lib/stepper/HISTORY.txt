@@ -1,5 +1,72 @@
 Stepper
 -------
+
+Changes for 9.1:
+
+None
+
+Changes for 9.0:
+
+None.
+
+Changes for 8.18:
+
+None.
+
+Changes for 8.17:
+
+Repairs and improved testing around 2htdp/universe, thanks
+to Shu-hung You.
+
+Changes for 8.16:
+
+Bug fixes, thanks to Shu-hung You
+
+Changes for 8.15:
+
+Bug fixes, thanks to Mike Sperber and Robby Findler
+
+Changes for 8.14:
+
+None.
+
+Changes for 8.13:
+
+None.
+
+Changes fro 8.12:
+
+Bug fix, thanks to both Robby and Mike Sperber.
+
+Changes for 8.11:
+
+None.
+
+Changes for 8.10:
+
+Bug fixes
+
+Changes for 8.9:
+
+None.
+
+Changes for 8.8:
+
+Test cases & better support for templates, better
+support for begin with at most one non-skipped subexpression
+
+Changes for 8.7:
+
+Bug fixes in & around templates & begin
+
+Changes for 8.6:
+
+None.
+
+Changes for 8.5:
+
+None.
+
 Changes for 8.4:
 
 None.

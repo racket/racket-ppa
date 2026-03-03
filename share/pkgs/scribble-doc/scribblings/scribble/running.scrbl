@@ -1,7 +1,8 @@
 #lang scribble/manual
 @(require "utils.rkt"
           scribble/bnf
-          (for-label setup/xref))
+          (for-label setup/xref
+                     compiler/cm))
 
 @(define fn (italic "fn"))
 
@@ -37,6 +38,9 @@ its file suffix:
 
  @item{@DFlag{xelatex} --- PDF @filepath{@|fn|.pdf} that is generated
        via @exec{xelatex}}
+
+ @item{@DFlag{lualatex} --- PDF @filepath{@|fn|.pdf} that is generated
+       via @exec{lualatex}}
 
  @item{@DFlag{dvipdf} --- PDF @filepath{@|fn|.pdf} that is generated
        via @exec{latex}, @exec{dvips}, and @exec{pstopdf}}
@@ -85,7 +89,8 @@ documents that are built separately.
          #:changed "1.19" @elem{Added @DFlag{xelatex}.}
          #:changed "1.40" @elem{Added @DFlag{keep-at-dest-base} and
                                 fixed @DFlag{dest-base} to work correctly
-                                for HTML output.}]
+                                for HTML output.}
+         #:changed "1.45" @elem{Added @DFlag{lualatex}.}]
 
 @section{Extra and Format-Specific Files}
 
@@ -159,7 +164,7 @@ installation's documentation (not user-scope documentation) to a given URL, such
 @tt{http://docs.racket-lang.org/}. Beware that documentation links
 sometimes change (although Scribble generates HTML paths and anchors
 in a relatively stable way), so
-@tt{http://download.racket-lang.org/docs/@italic{version}/html/} may be
+@tt{http://download.racket-lang.org/releases/@italic{version}/doc/} may be
 more reliable when building with an installation for @italic{version}.
 The @DFlag{redirect-main} flag is ignored for non-HTML output.
 
@@ -184,6 +189,19 @@ in @filepath{a.scrbl} and @filepath{b.scrbl}, then
 builds @filepath{c.html} with cross-reference links into
 @filepath{a.html} and @filepath{b.html}.
 
+When building a document that is normally installed as part of a
+package, referring to the document by its filesystem path may produce
+different cross-reference linking than running the document via
+@exec{raco setup}. The difference is in the way relative-path imports
+are resolved, especially with @racket[for-label]. A relative-path
+reference counts as a filesystem-path reference when starting from a
+mofule that is itself referenced through a filesystem path, or it
+counts as collection-based module path when referenced from a module
+that is itself referenced using a collection-based path. Use the
+@DFlag{lib}/@Flag{l} flag to refer to a document with a module path
+instead of a filesystem path.
+
+@history[#:changed "1.47" @elem{Added the @DFlag{lib}/@Flag{l} flag.}]
 
 @section{Selecting an Image Format}
 
@@ -231,10 +249,18 @@ and rendered, which could affect the content that
 @itemlist[
  @item{@DFlag{quiet} --- suppress output-file and undefined-tag reporting}
 
+ @item{@DFlag{make} or @Flag{y} --- Enable automatic generation and
+       update of compiled @filepath{.zo} files when loading document
+       modules. Specifically, the result of
+       @racket[(make-compilation-manager-load/use-compiled-handler)]
+       is installed as the value of @racket[current-load/use-compiled]
+       while loading a module.}
+
  @item{@DFlag{doc-binding} @nonterm{id} --- render document
        provided as @nonterm{id} instead of @racket[doc]}
 
  @item{@DFlag{errortrace} --- enable @racketmodname[errortrace #:indirect]}
 ]
 
-@history[#:changed "1.38" @elem{Added the @DFlag{errortrace} flag.}]
+@history[#:changed "1.38" @elem{Added the @DFlag{errortrace} flag.}
+         #:changed "1.44" @elem{Added the @DFlag{make}/@Flag{y} flag.}]

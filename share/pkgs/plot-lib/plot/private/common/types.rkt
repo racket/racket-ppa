@@ -37,6 +37,9 @@
 (deftype Plot-Pen-Style
   (U Integer Plot-Pen-Style-Sym))
 
+(deftype Plot-Pen-Cap
+  (U 'round 'projecting 'butt))
+
 (deftype Plot-Brush-Style-Sym
   (U 'transparent      'solid
      'bdiagonal-hatch  'fdiagonal-hatch 'crossdiag-hatch
@@ -160,7 +163,12 @@
    [draw-arrow-glyph (-> (Vectorof Real) Real Real Void)]
    [draw-glyphs (-> (Listof (Vectorof Real)) Point-Sym Nonnegative-Real Void)]
    [draw-pict (->* [pict (Vectorof Real)] (Anchor Real) Void)]
-   [calculate-legend-rect (-> (Listof legend-entry) Rect Anchor Rect)]
+   [calculate-legend-rect (-> (Listof legend-entry)
+                              Rect
+                              Anchor
+                              (U Nonnegative-Real
+                                 (List Nonnegative-Real Nonnegative-Real Nonnegative-Real Nonnegative-Real))
+                              Rect)]
    [draw-legend (-> (Listof legend-entry) Rect Void)]))
 
 (require "plotmetrics.rkt")

@@ -12,7 +12,8 @@
          "print.rkt"
          "config.rkt"
          "checkout-credentials.rkt"
-         "network.rkt")
+         "network.rkt"
+         "timeout.rkt")
 
 (provide download-file!
          download-repo!
@@ -78,7 +79,7 @@
                               "  server response: ~a")
                           (url->string url)
                           (read-line (open-input-string reply-s))))))))))
-    (do-cache-file file url (url->string url) checksum 
+    (do-cache-file file url (url->string url) checksum
                    use-cache? download-printf download!)))
 
 (define (clean-cache pkg-url checksum)
@@ -106,29 +107,35 @@
      (lambda ()
        (call-with-network-retries
         (lambda ()
-          (git-checkout host #:port port repo
-                        #:dest-dir dest-dir
-                        #:ref checksum
-                        #:initial-search-ref (or (url-fragment url) "master")
-                        #:status-printf (lambda (fmt . args)
-                                          (define (strip-ending-newline s)
-                                            (regexp-replace #rx"\n$" s ""))
-                                          (log-pkg-debug (strip-ending-newline
-                                                          (apply format fmt args))))
-                        #:transport transport
-                        #:strict-links? #t
-                        #:depth 1)))))
+          (call-in-pkg-timeout-sandbox
+           (lambda ()
+             (git-checkout host #:port port repo
+                           #:dest-dir dest-dir
+                           #:ref checksum
+                           #:initial-search-ref (or (url-fragment url) "master")
+                           #:status-printf (lambda (fmt . args)
+                                             (define (strip-ending-newline s)
+                                               (regexp-replace #rx"\n$" s ""))
+                                             (log-pkg-debug (strip-ending-newline
+                                                             (apply format fmt args))))
+                           #:transport transport
+                           #:strict-links? #t
+                           #:depth 1)))))))
     (set! unpacked? #t)
-    ;; package directory as ".tgz" so it can be cached:
-    (parameterize ([current-directory dest-dir])
-      (apply tar-gzip tmp.tgz
-             #:exists-ok? #t
-             (directory-list))))
+    ;; if use-cache? is true, package directory as ".tgz" so it can be cached:
+    (when use-cache?
+      (parameterize ([current-directory dest-dir])
+        (apply tar-gzip tmp.tgz
+               #:exists-ok? #t
+               (directory-list)))))
   
   (do-cache-file tmp.tgz url (vector transport host port repo) checksum 
                  use-cache? download-printf download!)
 
-  (unless unpacked?
+  ;; if use-cache? is true and it's a cache hit (i.e. do-cache-file does not
+  ;; call download!), then files are not already unpacked (unpacked? is false),
+  ;; so we need to unpack them.
+  (when (and use-cache? (not unpacked?))
     (untgz tmp.tgz #:dest dest-dir))
   
   (delete-file tmp.tgz))

@@ -1,12 +1,15 @@
 #lang racket/base
 
-(require syntax/parse syntax/stx racket/sequence
+(require (for-template racket/base)
+         racket/sequence
          racket/syntax
-         (for-template racket/base)
-         "../utils/utils.rkt"
+         syntax/parse
+         syntax/stx
+         (only-in "../utils/tc-utils.rkt" current-type-enforcement-mode deep)
          "../types/type-table.rkt"
-         "utils.rkt"
-         "logging.rkt")
+         "../utils/utils.rkt"
+         "logging.rkt"
+         "utils.rkt")
 
 (provide dead-code-opt-expr)
 
@@ -41,9 +44,11 @@
           (quasisyntax/loc/origin this-syntax #'kw
             (if tst-opt thn-opt els-opt))]))
   (pattern ((~and kw lambda) formals . bodies)
+    #:when (eq? deep (current-type-enforcement-mode))
     #:when (dead-lambda-branch? #'formals)
     #:with opt this-syntax)
   (pattern ((~and kw case-lambda) (formals . bodies) ...)
+    #:when (eq? deep (current-type-enforcement-mode))
     #:when (for/or ((formals (in-syntax #'(formals ...))))
              (dead-lambda-branch? formals))
     #:with opt

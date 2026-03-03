@@ -10,6 +10,7 @@
          string-constants)
 
 (import mred^
+        [prefix exit: framework:exit^]
         [prefix finder: framework:finder^]
         [prefix group: framework:group^]
         [prefix frame: framework:frame^])
@@ -74,7 +75,10 @@
        frame))))
 
 (define (edit-file filename [make-default
-                             (λ () ((current-create-new-window) filename))])
+                             (λ () ((current-create-new-window)
+                                    (and (path? filename) filename)))]
+                   #:start-pos [start-pos #f]
+                   #:end-pos [end-pos #f])
   (with-handlers ([(λ (x) #f) ;exn:fail?
                    (λ (exn)
                      (message-box
@@ -96,14 +100,16 @@
                                    filename)])
            (cond
              [already-open
-              (send already-open make-visible filename)
+              (send already-open make-visible filename
+                    #:start-pos start-pos #:end-pos end-pos)
               (send already-open show #t)
               already-open]
              [else
               (let ([handler (and (path? filename)
                                   (find-format-handler filename))])
-                (add-to-recent filename)
-                (if handler (handler filename) (make-default)))]))
+                (when (path? filename)
+                  (add-to-recent filename))
+                (if (and (path? filename) handler) (handler filename) (make-default)))]))
          (make-default))))))
 
 ;; type recent-list-item = (list/p string? number? number?)
@@ -125,6 +131,13 @@
   (define new-recent (size-down added-in
                                 (preferences:get 'framework:recent-max-count)))
   (preferences:set 'framework:recently-opened-files/pos new-recent))
+
+(define (update-currently-open-files)
+  (unless (exit:exiting?)
+    (preferences:set
+     'framework:last-opened-files
+     (send (group:get-the-frame-group)
+           get-all-open-files))))
 
 ;; same-enough-path? : path path -> boolean
 ;; used to determine if the open-recent-files menu item considers two paths to be the same

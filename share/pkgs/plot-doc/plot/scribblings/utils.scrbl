@@ -146,6 +146,13 @@ Given optionally weighted samples and a kernel bandwidth, returns a function rep
 Used by @(racket density).
 }
 
+@defproc[(silverman-bandwidth [xs (listof real?)])
+         real?]{
+Returns the Silverman Bandwidth estimator for the given samples. This is used as the default bandwidth by the @racket[violin] renderer. See the @hyperlink["https://en.wikipedia.org/wiki/Kernel_density_estimation"]{kernel density estimation} Wikipedia article for more details.
+
+@history[#:added "8.5"]
+}
+
 @;====================================================================================================
 @section{Plot Colors and Styles}
 
@@ -324,6 +331,20 @@ This is a generalization of @racket[order-of-magnitude].
 @defproc[(maybe-inexact->exact [x (or/c rational? #f)]) (or/c rational? #f)]{
 Returns @racket[#f] if @racket[x] is @racket[#f]; otherwise @racket[(inexact->exact x)].
 Use this to convert interval endpoints, which may be @racket[#f], to exact numbers.
+}
+
+@deftogether[(
+  @defproc[(min* [r real?] ...) real?]
+  @defproc[(max* [r real?] ...) real?]
+)]{
+  Compute the @racket[min] or @racket[max] of a sequence of numbers.
+
+  @examples[#:eval plot-eval
+    (min* 3 5 4 2 1)
+    (max* 3 5 4 2 1)
+    (min*)
+    (max*)
+  ]
 }
 
 @;----------------------------------------------------------------------------------------------------

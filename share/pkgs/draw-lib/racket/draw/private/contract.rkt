@@ -130,10 +130,11 @@
   (class/c
     (get-face (->m (or/c string? #f)))
     (get-family (->m font-family/c))
+    (get-feature-settings (->m font-feature-settings/c))
     (get-font-id (->m exact-integer?))
     (get-hinting (->m font-hinting/c))
     (get-point-size (->m (integer-in 1 1024)))
-    (get-size (->m (real-in 0.0 1024.0)))
+    (get-size (->*m [] [any/c] (real-in 0.0 1024.0)))
     (get-size-in-pixels (->m boolean?))
     (get-smoothing (->m font-smoothing/c))
     (get-style (->m font-style/c))
@@ -277,18 +278,11 @@
                         'replace 'truncate
                         'must-truncate 'truncate/replace)])))
 
-(define record-dc%/c
-  (class/c
-    (init [width (>=/c 0)]
-          [height (>=/c 0)])
-    [get-recorded-datum (->m any/c)]
-    [get-recorded-procedure (->m ((is-a?/c dc<%>) . -> . void?))]))
-
 (define region%/c
   (class/c
     (init [dc (or/c (is-a?/c dc<%>) #f)])
     (get-bounding-box (->m (values real? real? real? real?)))
-    (get-dc (->m (is-a?/c dc<%>)))
+    (get-dc (->m (or/c (is-a?/c dc<%>) #f)))
     (in-region? (->m real? real? boolean?))
     (intersect (->m (is-a?/c region%) void?))
     (is-empty? (->m boolean?))
@@ -329,6 +323,14 @@
     (subtract (->m (is-a?/c region%) void?))
     (union (->m (is-a?/c region%) void?))
     (xor (->m (is-a?/c region%) void?))))
+
+(define record-dc%/c
+  (class/c
+    (init [width (>=/c 0)]
+          [height (>=/c 0)])
+    [get-clipping-region (->m (or/c #f (instanceof/c region%/c)))]
+    [get-recorded-datum (->m any/c)]
+    [get-recorded-procedure (->m ((is-a?/c dc<%>) . -> . void?))]))
 
 (define dc-path%/c
   (class/c

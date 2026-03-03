@@ -24,9 +24,11 @@
     (thunk)))
 
 (define (find-racket-tag part ri stx/binding phase-level
-                         ;; used as part of the tag to find, while assuming
-                         ;; that `stx/binding` has a suitable scope, if any
+                         ;; assume that `stx/binding` has a suitable scope, if any,
+                         ;; already; currently used only for the default suffix
                          #:space [space #f]
+                         ;; used as part of the tag to find
+                         #:suffix [suffix space]
                          #:unlinked-ok? [unlinked-ok? #f])
   ;; The phase-level argument is used only when `stx/binding'
   ;; is an identifier.
@@ -90,11 +92,12 @@
             (define eb
               (list* (module-path-index->taglet mod)
                      id
-                     (if space (list space) null)))
-            (when (not search-key)
-              (set! search-key (if unlinked-ok?
-                                   (cons #f eb)
-                                   eb)))
+                     (if suffix (list suffix) null)))
+            (unless search-key
+              (set! search-key
+                    (if unlinked-ok?
+                        (cons #f eb)
+                        eb)))
             (define v (and eb (resolve-search search-key part ri `(dep ,eb))))
             (define here-result
               (and need-result?
@@ -162,37 +165,35 @@
                         (hash-set! module-info-cache rmp t)
                         t)))
                    (hash-set! seen (cons export-phase rmp) #t)
-                   (let ([a (assq id (let ([a (assoc export-phase exports)])
-                                       (if a
-                                           (cdr a) 
-                                           null)))])
-                     (cond
-                       [a
-                        (loop queue
-                              (append (map (lambda (m)
-                                             (if (pair? m)
-                                                 (list (module-path-index-rejoin (car m) mod)
-                                                       (list-ref m 2)
-                                                       defn-phase
-                                                       (list-ref m 1)
-                                                       (list-ref m 3))
-                                                 (list (module-path-index-rejoin m mod)
-                                                       id
-                                                       defn-phase
-                                                       import-phase
-                                                       export-phase)))
-                                           (reverse (cadr a)))
-                                      rqueue)
-                              need-result?)]
-                       [else
-                        ;; A dead end may not be our fault: the files could
-                        ;; have changed in inconsistent ways. So just say #f
-                        ;; for now.
-                        #;
-                        (error 'find-racket-tag
-                               "dead end when looking for binding source: ~e"
-                               id)
-                        (loop queue rqueue need-result?)]))]
+                   (define a
+                     (assq id
+                           (let ([a (assoc export-phase exports)])
+                             (if a
+                                 (cdr a)
+                                 null))))
+                   (cond
+                     [a
+                      (loop queue
+                            (append (map (lambda (m)
+                                           (if (pair? m)
+                                               (list (module-path-index-rejoin (car m) mod)
+                                                     (list-ref m 2)
+                                                     defn-phase
+                                                     (list-ref m 1)
+                                                     (list-ref m 3))
+                                               (list (module-path-index-rejoin m mod)
+                                                     id
+                                                     defn-phase
+                                                     import-phase
+                                                     export-phase)))
+                                         (reverse (cadr a)))
+                                    rqueue)
+                            need-result?)]
+                     ;; A dead end may not be our fault: the files could
+                     ;; have changed in inconsistent ways. So just say #f
+                     ;; for now.
+                     #;(error 'find-racket-tag "dead end when looking for binding source: ~e" id)
+                     [else (loop queue rqueue need-result?)])]
                   [else
                    ;; Can't get the module source, so continue with queue:
                    (loop queue rqueue need-result?)]))

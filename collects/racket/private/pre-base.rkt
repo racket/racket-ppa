@@ -184,7 +184,7 @@
                         (cdr l)))
              stx)
             (raise-syntax-error #f "bad syntax" stx)))))
-  
+
   (#%provide (all-from-except "more-scheme.rkt" old-case fluid-let)
              (all-from-except "misc.rkt" collection-path collection-file-path)
              (all-from "define.rkt")
@@ -200,6 +200,7 @@
              (rename new-prop:procedure prop:procedure)
              (rename #%app #%plain-app)
              (rename lambda #%plain-lambda)
+             (rename case-lambda case-λ)
              (rename #%module-begin #%plain-module-begin)
              (rename printing:module-begin #%printing-module-begin)
              (rename module-begin #%module-begin)
@@ -207,15 +208,16 @@
              (rename new:procedure-reduce-arity-mask procedure-reduce-arity-mask)
              (rename new:procedure->method procedure->method)
              (rename new:procedure-rename procedure-rename)
+             (rename new:procedure-realm procedure-realm)
              (rename new:chaperone-procedure chaperone-procedure)
              (rename new:impersonate-procedure impersonate-procedure)
              (rename new:chaperone-procedure* chaperone-procedure*)
-             (rename new:impersonate-procedure* impersonate-procedure*)             
+             (rename new:impersonate-procedure* impersonate-procedure*)
              (rename new:collection-path collection-path)
              (rename new:collection-file-path collection-file-path)
-             (all-from-except '#%kernel lambda λ #%app #%module-begin apply prop:procedure 
+             (all-from-except '#%kernel lambda λ #%app #%module-begin apply prop:procedure
                               procedure-reduce-arity procedure-reduce-arity-mask
-                              procedure->method procedure-rename
+                              procedure->method procedure-rename procedure-realm
                               chaperone-procedure impersonate-procedure
                               chaperone-procedure* impersonate-procedure*
                               assq assv assoc
@@ -225,7 +227,14 @@
                               collection-path collection-file-path
                               symbol->immutable-string
                               keyword->immutable-string
-                              syntax-srcloc)
+                              immutable-string? immutable-bytes? immutable-vector?
+                              immutable-hash? immutable-box?
+                              mutable-string? mutable-bytes? mutable-vector?
+                              mutable-hash? mutable-box?
+                              syntax-srcloc
+                              vector-copy vector-append vector-set/copy
+                              vector*-copy vector*-set/copy vector*-append
+                              vector-extend vector*-extend)
              (all-from "reqprov.rkt")
              (all-from-except "for.rkt"
                               define-in-vector-like

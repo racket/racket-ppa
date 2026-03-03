@@ -24,7 +24,8 @@
          "tab-panel.rkt"
          "window.rkt"
          "key.rkt"
-         "procs.rkt")
+         "procs.rkt"
+         (only-in "../common/default-procs.rkt" luminance))
 (provide (protect-out platform-values))
 
 (define (platform-values)
@@ -97,4 +98,15 @@
    check-for-break
    key-symbol-to-menu-key
    needs-grow-box-spacer?
-   graphical-system-type))
+   graphical-system-type
+   white-on-black-panel-scheme?
+   tab-panel-available?))
+
+(define (white-on-black-panel-scheme?)
+  ;; if the background and foreground are the same
+  ;; color, probably something has gone wrong;
+  ;; in that case we want to return #f.
+  (< (luminance (get-label-background-color))
+     (luminance (get-label-foreground-color))))
+
+(define (tab-panel-available?) #t)

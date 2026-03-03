@@ -2,19 +2,10 @@
 
 ;; this file cheats to define types for unexported variables
 ;; that are expanded into by Racket macros
-(require
- "../utils/utils.rkt"
- (only-in "../rep/type-rep.rkt" -StructTypeTop)
- racket/promise
- string-constants/string-constant
- racket/private/kw racket/file racket/port syntax/parse racket/path
- (for-template (only-in racket/private/kw kw-expander-proc kw-expander-impl)
-               racket/base racket/file racket/port racket/path racket/list)
- "../env/init-envs.rkt"
- "../types/abbrev.rkt"
- "../types/numeric-tower.rkt"
- (for-syntax racket/base syntax/parse
-             (only-in racket/syntax syntax-local-eval)))
+(require "../env/init-envs.rkt"
+         "../types/abbrev.rkt"
+         "../types/numeric-tower.rkt"
+         (for-syntax racket/base))
 (provide make-template-identifier)
 
 (define (make-template-identifier what where)
@@ -28,8 +19,13 @@
   (syntax-binding-set->syntax s what))
 
 
-(define-initial-env initialize-special
+(define-initial-env initialize-special #:default-T+ #true
   ;; make-promise
+  [(make-template-identifier 'lazy 'racket/private/promise)
+   (-poly (a)
+         (cl->*
+          (-> (-> (-Promise a)) (-Promise a))
+          (-> (-> a) (-Promise a))))]
   [(make-template-identifier 'delay 'racket/private/promise)
    (-poly (a) (-> (-> a) (-Promise a)))]
   ;; next four for string constants
@@ -86,7 +82,7 @@
           (let ([seq-vals
                  (lambda (a b)
                    (-values (list
-                             (-> Univ (-values-dots (list a) b 'b))
+                             (-> Univ (-values-dots (list a) b 'b) :T+ #true)
                              (Un (-> Univ Univ) (-val #f))
                              (-> Univ Univ)
                              Univ
@@ -114,6 +110,9 @@
    (-> Univ -Void)]
   ;; check-list
   [(make-template-identifier 'check-list 'racket/private/for)
+   (-> Univ -Void)]
+  ;; check-mlist
+  [(make-template-identifier 'check-mlist 'racket/private/for)
    (-> Univ -Void)]
   ;; check-fXvector for flvector
   [(make-template-identifier 'check-flvector 'racket/flonum)
@@ -290,6 +289,12 @@
   ;; check-in-lines
   [(make-template-identifier 'check-in-lines 'racket/private/for)
    (-> Univ Univ Univ)]
+  ;; check-in-input-port-bytes
+  [(make-template-identifier 'check-in-input-port-bytes 'racket/private/for)
+   (-> Univ -Void)]
+  ;; check-in-input-port-chars
+  [(make-template-identifier 'check-in-input-port-chars 'racket/private/for)
+   (-> Univ -Void)]
   ;; check-in-port
   [(make-template-identifier 'check-in-port 'racket/private/for)
    (-> Univ Univ Univ)]
@@ -326,8 +331,13 @@
   ;; ... or a Guide is ...
   [(make-template-identifier 'check-same-length 'racket/private/template)
    (-> (Un (-val #f) (-Syntax Univ)) (Un (-val #f) (-Syntax Univ)) (-lst Univ) -Void)]
-  ;; from the expansion of `make-temp-file`
-  [(make-template-identifier 'make-temporary-file/proc 'racket/file)
+  ;; from the expansion of `make-temporary-file`
+  [(make-template-identifier 'make-temporary-file 'racket/file)
+   (->optkey [-String (Un -Pathlike (-val 'directory) (-val #f)) (-opt -Pathlike)]
+	     #:copy-from (Un -Pathlike (-val 'directory) (-val #f)) #f
+	     #:base-dir (-opt -Pathlike) #f
+	     -Path)
+   #;
    (->opt [-String (Un -Pathlike (-val 'directory) (-val #f)) (-opt -Pathlike)]
           -Path)]
   ;; from the (lifted) portion of the expansion of keyword lambdas
@@ -381,5 +391,15 @@
        (-opt -Input-Port) (-opt -Output-Port) (-opt -Output-Port) -Place)]
   [(make-template-identifier 'start-place 'racket/place)
    (-> -Symbol -Module-Path -Symbol (-opt -Input-Port) (-opt -Output-Port) (-opt -Output-Port) -Place)]
-  [(make-template-identifier '-mlist 'compatibility/mlist)
-   (-poly (a) (->* (list) a (-mlst a)))])
+   [(make-template-identifier '-mlist 'compatibility/mlist)
+    (-poly (a) (->* (list) a (-mlst a)))]
+  ;; for `match`
+  ;; pregexp-matcher
+  [(make-template-identifier 'pregexp-matcher 'racket/match/runtime)
+   (-> (Un -PRegexp -String) -Symbol
+       (let* ([-False (-val #f)]
+              [make-match (lambda (t)
+                            (-> t (Un -False (-pair t (-lst (Un t -False))))))])
+         (cl->* (make-match -String)
+                (make-match -Bytes))))]
+  )

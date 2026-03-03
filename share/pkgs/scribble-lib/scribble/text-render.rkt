@@ -73,21 +73,35 @@
 
     (define/override (render-table i part ht inline?)
       (define flowss (table-blockss i))
+      (define cell-styless (extract-table-cell-styles i))
       (if (null? flowss)
           null
-          (let* ([strs (map (lambda (flows)
-                              (map (lambda (d)
+          (let* ([strs (map (lambda (flows styles)
+                              (map (lambda (d style)
                                      (if (eq? d 'cont)
                                          d
                                          (let ([o (open-output-string)])
+                                           (define padding
+                                             (or (findf cell-padding-property? (style-properties style))
+                                                 (cell-padding-property 0 0 0 0)))
+                                           (define (int n) (inexact->exact (floor n)))
                                            (parameterize ([current-indent 0]
                                                           [current-output-port o])
                                              (render-block d part ht #f))
-                                           (regexp-split
-                                            #rx"\n"
-                                            (regexp-replace #rx"\n$" (get-output-string o) "")))))
-                                   flows))
-                            flowss)]
+                                           (define strs (regexp-split
+                                                         #rx"\n"
+                                                         (regexp-replace #rx"\n$" (get-output-string o) "")))
+                                           (append
+                                            (make-list (int (cell-padding-property-top padding)) "")
+                                            (for/list ([str (in-list strs)])
+                                              (string-append (make-string (int (cell-padding-property-left padding)) #\space)
+                                                             str
+                                                             (make-string (int (cell-padding-property-right padding)) #\space)))
+                                            (make-list (int (cell-padding-property-bottom padding)) "")))))
+                                   flows
+                                   styles))
+                            flowss
+                            cell-styless)]
                  [extract-align
                   (lambda (s)
                     (define p (style-properties s))
@@ -96,22 +110,9 @@
                      [(member 'center p) 'center]
                      [else 'left]))]
                  [alignss
-                  (cond
-                   [(ormap (lambda (v) (and (table-cells? v) v)) (style-properties (table-style i)))
-                    => (lambda (tc)
-                         (for/list ([l (in-list (table-cells-styless tc))])
-                           (for/list ([s (in-list l)])
-                             (extract-align s))))]
-                   [(ormap (lambda (v) (and (table-columns? v) v)) (style-properties (table-style i)))
-                    => (lambda (tc)
-                         (make-list
-                          (length flowss)
-                          (for/list ([s (in-list (table-columns-styles tc))])
-                            (extract-align s))))]
-                   [else
-                    (if (null? flowss)
-                        null
-                        (make-list (length flowss) (make-list (length (car flowss)) 'left)))])]
+                  (for/list ([l (in-list cell-styless)])
+                    (for/list ([s (in-list l)])
+                      (extract-align s)))]
                  [extract-border
                   (lambda (s)
                     (define p (style-properties s))
@@ -122,22 +123,9 @@
                               (memq 'top-border p) (memq 'bottom-border p))]))]
                  [borderss
                   ;; A border is (vector left? right? top? bottom?)
-                  (cond
-                   [(ormap (lambda (v) (and (table-cells? v) v)) (style-properties (table-style i)))
-                    => (lambda (tc)
-                         (for/list ([l (in-list (table-cells-styless tc))])
-                           (for/list ([s (in-list l)])
-                             (extract-border s))))]
-                   [(ormap (lambda (v) (and (table-columns? v) v)) (style-properties (table-style i)))
-                    => (lambda (tc)
-                         (make-list
-                          (length flowss)
-                          (for/list ([s (in-list (table-columns-styles tc))])
-                            (extract-border s))))]
-                   [else
-                    (if (null? flowss)
-                        null
-                        (make-list (length flowss) (make-list (length (car flowss)) '#(#f #f #f #f))))])]
+                  (for/list ([l (in-list cell-styless)])
+                    (for/list ([s (in-list l)])
+                      (extract-border s)))]
                  [border-left? (lambda (v) (vector-ref v 0))]
                  [border-right? (lambda (v) (vector-ref v 1))]
                  [border-top? (lambda (v) (vector-ref v 2))]
@@ -247,11 +235,33 @@
                  (render-flow d part ht #f)))))))
 
     (define/override (render-paragraph p part ri)
-      (define o (open-output-string))
-      (parameterize ([current-output-port o])
-        (super render-paragraph p part ri))
-      (define to-wrap (regexp-replace* #rx"\n" (get-output-string o) " "))
-      (define lines (wrap-line (string-trim to-wrap) (- 72 (current-indent))))
+      (define in
+        (let-values ([(in out)
+                      (make-pipe-with-specials)])
+          (parameterize ([current-output-port out])
+            (super render-paragraph p part ri))
+          (close-output-port out)
+          in))
+      (define (port->lines o)
+        ;; n.b. wrap-line always returns a non-empty list
+        (define to-wrap (regexp-replace* #rx"\n" (get-output-string o) " "))
+        (wrap-line (string-trim to-wrap) (- 72 (current-indent))))
+      (define lines
+        (let loop ([o (open-output-string)])
+          (define ch (read-char-or-special in))
+          (cond
+            [(char? ch)
+             (write-char ch o)
+             (loop o)]
+            [(eof-object? ch)
+             (port->lines o)]
+            [(eq? 'newline ch)
+             (append (port->lines o)
+                     (loop (open-output-string)))]
+            [else
+             (raise-arguments-error 'render-paragraph
+                                    "unsupported special"
+                                    "given" ch)])))
       (write-string (car lines))
       (for ([line (in-list (cdr lines))])
         (newline) (indent) (write-string line))
@@ -259,14 +269,21 @@
       null)
 
     (define/override (render-content i part ri)
-      (if (and (element? i)
-               (let ([s (element-style i)])
-                 (or (eq? 'hspace s)
-                     (and (style? s)
-                          (eq? 'hspace (style-name s))))))
-          (parameterize ([current-preserve-spaces #t])
-            (super render-content i part ri))
-          (super render-content i part ri)))
+      (define style
+        (and (element? i)
+             (let ([s (element-style i)])
+               (if (style? s)
+                   (style-name s)
+                   s))))
+      (cond
+        [(eq? 'hspace style)
+         (parameterize ([current-preserve-spaces #t])
+           (super render-content i part ri))]
+        [(eq? 'newline style)
+         (write-special 'newline)
+         '("\n")]
+        [else
+         (super render-content i part ri)]))
 
     (define/override (render-nested-flow i part ri starting-item?)
       (define s (nested-flow-style i))

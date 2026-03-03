@@ -125,7 +125,7 @@
                           struct-general-op-types))]
       [`(let-values (((,ty ,mk ,pred ,ref ,mut) ,mst))
          (values ,ty ,mk ,pred
-                 (,make-struct-field-xs ,refs ,is ,_) ...))
+                 (,make-struct-field-xs ,refs ,is . ,_) ...))
        (define shape (expr-struct-shape mst defns))
        (and shape
             (equal? (struct-shape-op-types shape) struct-general-op-types)
@@ -150,13 +150,13 @@
 ;; checks for properties without guards or with guards for procedures of a known arity
 (define (expr-known-property e)
   (match e
+    [`(unsafe-make-struct-type-property/guard-calls-no-arguments ,name . ,rest)
+     (expr-known-property `(make-struct-type-property ,name . ,rest))]
     [`(make-struct-type-property ,name)
      (expr-known-property `(make-struct-type-property ,name #f))]
     [`(make-struct-type-property ,name ,guard)
      (expr-known-property `(make-struct-type-property ,name ,guard '()))]
-    [`(make-struct-type-property ,name ,guard ,supers)
-     (expr-known-property `(make-struct-type-property ,name ,guard ,supers #f))]
-    [`(make-struct-type-property ,_ ,guard ,(or ''() 'null) ,_)
+    [`(make-struct-type-property ,_ ,guard ,(or ''() 'null) . ,_)
      (define prop (cond
                     [(not guard)
                      (known-property)]

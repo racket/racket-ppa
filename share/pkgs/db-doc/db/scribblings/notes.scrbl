@@ -58,18 +58,33 @@ PostgreSQL supports a large variety of
 mechanisms}, controlled by the @tt{pg_hba.conf} server configuration
 file. This library currently works with the following authentication methods:
 @itemlist[
-@item{@tt{plain} (and @tt{ldap}, @tt{pam}, @tt{radius}): cleartext password, only if
-explicitly allowed (see @racket[postgresql-connect])}
-@item{@tt{md5}: MD5-hashed password}
-@item{@tt{scram-sha-256}: password-based challenge/response protocol. Depending
-on server configuration and whether TLS is used, this may correspond to either
-@tt{SCRAM-SHA-256} or @tt{SCRAM-SHA-256-PLUS}.}
+
 @item{@tt{peer}: only for local sockets}
+
+@item{@tt{password}, @tt{ldap}, @tt{pam}, @tt{radius}, @tt{bsd}: cleartext password,
+only if explicitly allowed (see @racket[postgresql-connect])}
+
+@item{@tt{md5}: MD5-hashed password}
+
+@item{@tt{scram-sha-256}: password-based
+challenge/response protocol using SASL
+
+See @tt{SCRAM-SHA-256} and @tt{SCRAM-SHA-256-PLUS} from
+@hyperlink["https://datatracker.ietf.org/doc/html/rfc7677"]{RFC 7677}.}
+
+@item{@tt{oauth}: OAuth 2.0 bearer token authentication using SASL. This library
+does not directly support any authorization flows; tokens must be obtained by
+other means.
+
+See @index["OAUTHBEARER"]{@tt{OAUTHBEARER}} from
+@hyperlink["https://datatracker.ietf.org/doc/html/rfc7628"]{RFC 7628}.}
+
 ]
 The @tt{gss}, @tt{sspi}, and @tt{krb5} methods are not supported.
 
 @history[#:changed "1.2" @elem{Added @tt{SCRAM-SHA-256} support.}
-         #:changed "1.7" @elem{Added @tt{SCRAM-SHA-256-PLUS} support.}]
+         #:changed "1.7" @elem{Added @tt{SCRAM-SHA-256-PLUS} support.}
+         #:changed "1.12" @elem{Added @tt{OAUTHBEARER} support.}]
 
 @section[#:tag "postgresql-timestamp-tz"]{PostgreSQL Timestamps and Time Zones}
 
@@ -365,3 +380,83 @@ results for another command (SQLSTATE: HY000)''.
 @hyperlink["https://stackoverflow.com/questions/9017264/why-only-some-users-get-the-error-connection-is-busy"]{this page}). The ODBC Manager GUI does not expose the option, but it can be added @hyperlink["https://serverfault.com/questions/302169/odbc-sql-server-how-do-i-turn-on-multiple-active-result-sets"]{by editing the registry}.}
 
 ]
+
+@section[#:tag "multi-stmt"]{Multi-Statement Queries}
+
+This library does not directly support multi-statement queries. That is, each
+query operation must be given exactly one top-level SQL statement; otherwise the
+operation raises an exception.  For example, the following query operation is
+invalid:
+@racketblock[
+(query c "INSERT INTO t VALUES (1); INSERT INTO t VALUES (2);") (code:comment "invalid")
+]
+Multi-statement queries are not supported because they are not generally
+supported by the backend-specific wire protocols and APIs that this library is
+built on.
+
+Workarounds for a few database systems are available:
+@itemlist[
+
+@item{@bold{PostgreSQL:} Inserting, updating, or deleting many rows with a
+single query is possible using the @tt{UNNEST} function on array arguments. See
+for example @hyperlink[pg-bulk-url]{Postgres UNNEST cheat sheet for bulk
+operations}.
+
+To execute dissimilar statements as a single query, wrap the statements in a
+@hyperlink["https://www.postgresql.org/docs/current/sql-do.html"]{@tt{DO}}
+statement. Note that the body of a @tt{DO} statement must be given as a string
+literal; use PostgreSQL's
+@hyperlink["https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-DOLLAR-QUOTING"]{dollar-quoted
+string literals} to avoid the need to escape nested string literals. For
+example:
+@racketblock[
+(query c "DO $$BEGIN INSERT INTO t VALUES (1); INSERT INTO t VALUES (2); END$$")
+]}
+
+@item{@bold{MySQL, some other systems:} Wrap the statements in a new stored
+procedure using
+@hyperlink["https://dev.mysql.com/doc/refman/8.0/en/create-procedure.html"]{@tt{CREATE
+PROCEDURE}}, then @tt{CALL} the procedure to execute the statements, and then
+@tt{DROP} the stored procedure. The procedure must cause at most one result set
+to be returned.
+
+@;{
+CREATE PROCEDURE tmpproc()
+BEGIN
+  INSERT INTO t VALUES (1);
+  INSERT INTO t VALUES (2);
+END
+
+CALL tmpproc
+}}
+
+@item{@bold{SQLite:} No known workarounds. In particular, SQLite does not
+support stored procedures.}
+
+]
+
+@(define pg-bulk-url
+   "https://www.atdatabases.org/blog/2022/01/21/optimizing-postgres-using-unnest")
+@; also https://klotzandrew.com/blog/postgres-passing-65535-parameter-limit/
+
+@;{
+CREATE TABLE users (
+  email TEXT NOT NULL PRIMARY KEY,
+  favorite_color TEXT NOT NULL)
+
+INSERT INTO users (email, favorite_color)
+SELECT * FROM UNNEST(?::TEXT[], ?::TEXT[])
+
+UPDATE users
+SET favorite_color = bulk.updated_favorite_color
+FROM (
+    SELECT * FROM UNNEST(?::TEXT[], ?::TEXT[])
+    AS t(email, updated_favorite_color)
+  ) AS bulk
+WHERE users.email = bulk.email
+
+DELETE FROM users
+WHERE (email, favorite_color) IN (
+  SELECT * FROM UNNEST(?::TEXT[], ?::TEXT[])
+)
+}

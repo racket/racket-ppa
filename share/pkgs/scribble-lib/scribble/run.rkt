@@ -7,7 +7,8 @@
          (prefix-in markdown: "markdown-render.rkt")
          (prefix-in html:     "html-render.rkt")
          (prefix-in latex:    "latex-render.rkt")
-         (prefix-in pdf:      "pdf-render.rkt"))
+         (prefix-in pdf:      "pdf-render.rkt")
+         compiler/cm)
 
 (module test racket/base)
 
@@ -28,6 +29,7 @@
 (define current-redirect           (make-parameter #f))
 (define current-redirect-main      (make-parameter #f))
 (define current-directory-depth    (make-parameter 0))
+(define current-lib-mode           (make-parameter #f))
 (define current-quiet              (make-parameter #f))
 (define helper-file-prefix         (make-parameter #f))
 (define keep-existing-helper-files? (make-parameter #f))
@@ -42,6 +44,7 @@
 
 (define (run)
   (define doc-binding 'doc)
+  (define make? #f)
   (command-line
    #:program (short-program+command-name)
    #:once-any
@@ -71,6 +74,9 @@
    [("--xelatex") "generate PDF-format output (via XeLaTeX)"
     (current-html #f)
     (current-render-mixin pdf:xelatex-render-mixin)]
+   [("--lualatex") "generate PDF-format output (via LuaLaTeX)"
+    (current-html #f)
+    (current-render-mixin pdf:lualatex-render-mixin)]
    [("--dvipdf") "generate PDF-format output (via LaTeX, dvips, and pstopdf)"
     (current-html #f)
     (current-render-mixin pdf:dvi-render-mixin)]
@@ -87,6 +93,8 @@
     (current-html #f)
     (current-render-mixin markdown:render-mixin)]
    #:once-each
+   [("--lib" "-l") "treat argument <file>s as library paths instead of filesystem paths"
+    (current-lib-mode #t)]
    [("--dest") dir "write output in <dir>"
     (current-dest-directory dir)]
    [("--dest-name") name "write output as <name>"
@@ -148,6 +156,8 @@
    [("--doc-binding") id
     "render document provided as <id> instead of `doc`"
     (set! doc-binding (string->symbol id))]
+   [("--make" "-y") "enable automatic update of compiled files"
+    (set! make? #t)]
    [("--errortrace") "enable errortrace"
     (with-handlers ([exn:fail:filesystem:missing-module?
                      (λ (e)
@@ -156,15 +166,25 @@
                         "errortrace not installed"))])
       (dynamic-require 'errortrace #f))]
    #:args (file . another-file)
-   (let ([files (cons file another-file)])
+   (let ([files (cons file another-file)]
+         [maker (and make?
+                     (make-compilation-manager-load/use-compiled-handler))])
      (parameterize ([current-command-line-arguments
                      (list->vector (reverse (doc-command-line-arguments)))])
-       (build-docs (map (lambda (file) 
-                          ;; Try `doc' submodule, first:
-                          (if (module-declared? `(submod (file ,file) ,doc-binding) #t)
-                            (dynamic-require `(submod (file ,file) ,doc-binding)
-                                             doc-binding)
-                            (dynamic-require `(file ,file) doc-binding)))
+       (build-docs (map (lambda (file)
+                          (define (go)
+                            (let ([mp (if (current-lib-mode)
+                                          `(lib ,file)
+                                          `(file ,file))])
+                              ;; Try `doc' submodule, first:
+                              (if (module-declared? `(submod ,mp ,doc-binding) #t)
+                                  (dynamic-require `(submod ,mp ,doc-binding)
+                                                   doc-binding)
+                                  (dynamic-require mp doc-binding))))
+                          (if maker
+                              (parameterize ([current-load/use-compiled maker])
+                                (go))
+                              (go)))
                         files)
                    files)))))
 

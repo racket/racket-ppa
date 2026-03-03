@@ -31,15 +31,19 @@
       [(text) RKTIO_OPEN_TEXT]
       [else 0]))
   (define host-path (->host path who '(read)))
-  (start-atomic)
-  (check-current-custodian who)
+  (start-rktio)
+  (unsafe-uninterruptible-custodian-lock-acquire)
+  (check-current-custodian who #:unlock (lambda ()
+                                          (unsafe-uninterruptible-custodian-lock-release)
+                                          (end-rktio)))
   (define fd (rktio_open rktio
                          host-path
                          (+ RKTIO_OPEN_READ
                             (mode->flags mode1)
                             (mode->flags mode2))))
+  (end-rktio)
   (when (rktio-error? fd)
-    (end-atomic)
+    (unsafe-uninterruptible-custodian-lock-release)
     (when (or (eq? mode1 'module) (eq? mode2 'module))
       (maybe-raise-missing-module who (host-> host-path) "" "" ""
                                   (format-rktio-system-error-message fd)))
@@ -50,12 +54,12 @@
                                      "  path: ~a")
                                     (host-> host-path))))
   (define p (open-input-fd fd (host-> host-path)))
-  (end-atomic)
+  (unsafe-uninterruptible-custodian-lock-release)
   (when (port-count-lines-enabled)
     (port-count-lines! p))
   p)
 
-(define (do-open-output-file #:plus-input? [plus-input? #f] who path mode1 mode2 perms)
+(define (do-open-output-file #:plus-input? [plus-input? #f] who path mode1 mode2 perms replace-perms?)
   (check who path-string? path)
   (check who permissions? #:contract permissions-desc perms)
   (define (mode->flags mode)
@@ -81,13 +85,17 @@
                                                      (mode? 'must-update))
                                                  '(read)
                                                  '()))))
-  (start-atomic)
-  (check-current-custodian who)
+  (start-rktio)
+  (unsafe-uninterruptible-custodian-lock-acquire)
+  (check-current-custodian who #:unlock (lambda ()
+                                          (unsafe-uninterruptible-custodian-lock-release)
+                                          (end-rktio)))
   (define flags
     (+ RKTIO_OPEN_WRITE
        (if plus-input? RKTIO_OPEN_READ 0)
        (mode->flags mode1)
-       (mode->flags mode2)))
+       (mode->flags mode2)
+       (if replace-perms? RKTIO_OPEN_REPLACE_PERMS 0)))
   (define fd0
     (rktio_open_with_create_permissions rktio host-path flags perms))
   (define fd
@@ -100,17 +108,19 @@
                                     host-path
                                     (current-force-delete-permissions)))
        (when (rktio-error? r)
-         (end-atomic)
+         (unsafe-uninterruptible-custodian-lock-release)
+         (end-rktio)
          (raise-filesystem-error who
                                  r
                                  (format (string-append
                                           "error deleting file\n"
                                           "  path: ~a")
                                          (host-> host-path))))
-       (rktio_open rktio host-path flags)]
+       (rktio_open_with_create_permissions rktio host-path flags perms)]
       [else fd0]))
   (when (rktio-error? fd)
-    (end-atomic)
+    (end-rktio)
+    (unsafe-uninterruptible-custodian-lock-release)
     (raise-filesystem-error who
                             fd
                             (format (string-append
@@ -123,12 +133,14 @@
                                        "path is a directory"]
                                       [else "error opening file"])
                                     (host-> host-path))))
+  (define is-terminal? (rktio_fd_is_terminal rktio fd))
+  (end-rktio)
   (define opened-path (host-> host-path))
   (define refcount (box (if plus-input? 2 1)))
-  (define op (open-output-fd fd opened-path #:fd-refcount refcount))
+  (define op (open-output-fd fd opened-path #:fd-refcount refcount #:is-terminal? is-terminal?))
   (define ip (and plus-input?
                   (open-input-fd fd opened-path #:fd-refcount refcount)))
-  (end-atomic)
+  (unsafe-uninterruptible-custodian-lock-release)
   (when (port-count-lines-enabled)
     (port-count-lines! op)
     (when plus-input?
@@ -139,11 +151,11 @@
 
 (define DEFAULT-CREATE-PERMS #o666)
 
-(define/who (open-output-file path [mode1 none] [mode2 none] [perms DEFAULT-CREATE-PERMS])
-  (do-open-output-file who path mode1 mode2 perms))
+(define/who (open-output-file path [mode1 none] [mode2 none] [perms DEFAULT-CREATE-PERMS] [replace-perms? #f])
+  (do-open-output-file who path mode1 mode2 perms replace-perms?))
 
-(define/who (open-input-output-file path [mode1 none] [mode2 none] [perms DEFAULT-CREATE-PERMS])
-  (do-open-output-file #:plus-input? #t who path mode1 mode2 perms))
+(define/who (open-input-output-file path [mode1 none] [mode2 none] [perms DEFAULT-CREATE-PERMS] [replace-perms? #f])
+  (do-open-output-file #:plus-input? #t who path mode1 mode2 perms replace-perms?))
 
 (define/who (call-with-input-file path proc [mode none])
   (check who path-string? path)
@@ -153,11 +165,11 @@
    (proc i)
    (close-input-port i)))
 
-(define/who (call-with-output-file path proc [mode1 none] [mode2 none] [perms DEFAULT-CREATE-PERMS])
+(define/who (call-with-output-file path proc [mode1 none] [mode2 none] [perms DEFAULT-CREATE-PERMS] [replace-perms? #f])
   (check who path-string? path)
   (check who (procedure-arity-includes/c 1) proc)
   (check who permissions? #:contract permissions-desc perms)
-  (define o (open-output-file path mode1 mode2 perms))
+  (define o (open-output-file path mode1 mode2 perms replace-perms?))
   (begin0
    (proc o)
    (close-output-port o)))
@@ -173,11 +185,11 @@
      (lambda ()
        (close-input-port i)))))
 
-(define/who (with-output-to-file path proc [mode1 none] [mode2 none] [perms DEFAULT-CREATE-PERMS])
+(define/who (with-output-to-file path proc [mode1 none] [mode2 none] [perms DEFAULT-CREATE-PERMS] [replace-perms? #f])
   (check who path-string? path)
   (check who (procedure-arity-includes/c 0) proc)
   (check who permissions? #:contract permissions-desc perms)
-  (define o (open-output-file path mode1 mode2 perms))
+  (define o (open-output-file path mode1 mode2 perms replace-perms?))
   (parameterize ([current-output-port o])
     (dynamic-wind
      void

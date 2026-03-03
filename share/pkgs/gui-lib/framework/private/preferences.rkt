@@ -259,7 +259,19 @@ the state transitions / contracts are:
   (define on-close-dialog-callbacks null)
   
   (define can-close-dialog-callbacks null)
-  
+
+;; labels->panel-visibility-thunk : hash[(listof string?) -o> (-> void?)]
+;; maps the sequence of strings naming a path into the preferences
+;; dialog into a function that makes the corresponding panel visible
+(define labels->panel-visibility-thunk (make-hash))
+
+(define (show-tab-panel panel-paths)
+  (show-dialog)
+  (define pth (hash-ref labels->panel-visibility-thunk panel-paths #f))
+  (unless pth
+    (error 'show-tab-panel "did not find the path\n  path: ~e" panel-paths))
+  (pth))
+
   (define (make-preferences-dialog)
     (letrec ([stashed-prefs (preferences:get-prefs-snapshot)]
              [cancelled? #f]
@@ -288,32 +300,39 @@ the state transitions / contracts are:
                    [label (string-constant preferences)]
                    [height 200])]
              [build-ppanel-tree
-              (λ (ppanel tab-panel single-panel)
+              (λ (ppanel tab-panel single-panel parents thunk)
                 (send tab-panel append (ppanel-name ppanel))
                 (cond
-                  [(ppanel-leaf? ppanel) 
+                  [(ppanel-leaf? ppanel)
+                   (hash-set! labels->panel-visibility-thunk (cons (ppanel-name ppanel) parents) thunk)
                    ((ppanel-leaf-maker ppanel) single-panel)]
                   [(ppanel-interior? ppanel)
-                   (let-values ([(tab-panel single-panel) (make-tab/single-panel single-panel #t)])
-                     (for-each
-                      (λ (ppanel) (build-ppanel-tree ppanel tab-panel single-panel))
-                      (ppanel-interior-children ppanel)))]))]
+                   (define-values (tab-panel next-single-panel) (make-tab/single-panel single-panel #t))
+                   (define (next-thunk)
+                     (thunk)
+                     (tab-panel-callback next-single-panel tab-panel))
+                   (for ([child-ppanel (in-list (ppanel-interior-children ppanel))]
+                         [i (in-naturals)])
+                     (build-ppanel-tree child-ppanel tab-panel next-single-panel
+                                        (cons (ppanel-name ppanel) parents)
+                                        (λ ()
+                                          (send tab-panel set-selection i)
+                                          (next-thunk))))]))]
              [make-tab/single-panel 
               (λ (parent inset?)
-                (letrec ([spacer (and inset?
-                                      (instantiate vertical-panel% ()
-                                        (parent parent)
-                                        (border 10)))]
-                         [tab-panel (instantiate tab-panel% ()
-                                      (choices null)
-                                      (parent (if inset? spacer parent))
-                                      (callback (λ (_1 _2) 
-                                                  (tab-panel-callback
-                                                   single-panel
-                                                   tab-panel))))]
-                         [single-panel (instantiate panel:single% ()
-                                         (parent tab-panel))])
-                  (values tab-panel single-panel)))]
+                (define spacer (and inset?
+                                    (new vertical-panel%
+                                         [parent parent]
+                                         [border 10])))
+                (define tab-panel (new tab-panel%
+                                       [choices null]
+                                       [parent (if inset? spacer parent)]
+                                       [callback (λ (_1 _2)
+                                                   (tab-panel-callback
+                                                    single-panel
+                                                    tab-panel))]))
+                (define single-panel (new  panel:single% [parent tab-panel]))
+                (values tab-panel single-panel))]
              [tab-panel-callback
               (λ (single-panel tab-panel)
                 (send single-panel active-child
@@ -321,10 +340,15 @@ the state transitions / contracts are:
                                 (send tab-panel get-selection))))]
              [panel (make-object vertical-panel% (send frame get-area-container))]
              [_ (let-values ([(tab-panel single-panel) (make-tab/single-panel panel #f)])
-                  (for-each
-                   (λ (ppanel)
-                     (build-ppanel-tree ppanel tab-panel single-panel))
-                   ppanels)
+                  (for ([ppanel (in-list ppanels)]
+                        [i (in-naturals)])
+                    (build-ppanel-tree ppanel tab-panel single-panel
+                                       '()
+                                       (λ ()
+                                         (send tab-panel set-selection i)
+                                         (tab-panel-callback
+                                          single-panel
+                                          tab-panel))))
                   (let ([single-panel-children (send single-panel get-children)])
                     (unless (null? single-panel-children)
                       (send single-panel active-child (car single-panel-children))
@@ -462,42 +486,55 @@ the state transitions / contracts are:
                  (list (string-constant editor-prefs-panel-label) 
                        (string-constant editor-general-prefs-panel-label))
                  (λ (editor-panel)
-                   (add-check editor-panel 'framework:delete-forward?
+                   (define narrow-checkboxes-hp
+                     (new horizontal-panel% [parent editor-panel] [stretchable-height #f] [alignment '(left top)]))
+                   (define narrow-checkboxes-left
+                     (new vertical-panel% [parent narrow-checkboxes-hp] [stretchable-height #f] [alignment '(left top)]))
+                   (define narrow-checkboxes-right
+                     (new vertical-panel% [parent narrow-checkboxes-hp] [stretchable-height #f] [alignment '(left top)]))
+                   ;; start narrow ones; the left should have more than the right on all platforms
+                   ;; macos, left: 5, right: 4
+                   ;; linux, left: 4, right: 3
+                   ;; win,   left: 5, right: 3
+                   (add-check narrow-checkboxes-left 'framework:delete-forward?
                               (string-constant map-delete-to-backspace)
                               not not)
-                   (add-check editor-panel 
+                   (add-check narrow-checkboxes-left
                               'framework:auto-set-wrap?
                               (string-constant wrap-words-in-editor-buffers))
-                   
-                   (add-check editor-panel 
-                              'framework:menu-bindings
-                              (string-constant enable-keybindings-in-menus))
+                   (add-check narrow-checkboxes-left
+                              'framework:caret-blink-disable?
+                              (string-constant disable-caret-blinking))
                    (when (memq (system-type) '(macosx))
-                     (add-check editor-panel 
+                     (add-check narrow-checkboxes-left
                                 'framework:alt-as-meta
                                 (string-constant alt-as-meta))
-                     (add-check editor-panel 
+                     (add-check narrow-checkboxes-left
                                 'framework:special-meta-key
                                 (string-constant command-as-meta)))
-                   
                    (when (memq (system-type) '(windows))
-                     (add-check editor-panel 
+                     (add-check narrow-checkboxes-left
                                 'framework:any-control+alt-is-altgr
                                 (string-constant any-control+alt-is-altgr)))
-                   
-                   (add-check editor-panel 
+                   (add-check (if (equal? (system-type) 'macosx)
+                                  narrow-checkboxes-right
+                                  narrow-checkboxes-left)
                               'framework:coloring-active
                               (string-constant online-coloring-active))
-                   
-                   (add-check editor-panel
+                   (add-check narrow-checkboxes-right
                                'framework:anchored-search
                                (string-constant find-anchor-based))
-                   (add-check editor-panel
+                   (add-check narrow-checkboxes-right
                               'framework:do-paste-normalization
                               (string-constant normalize-string-preference))
-                   (add-check editor-panel
+                   (add-check narrow-checkboxes-right
                                'framework:overwrite-mode-keybindings
                                (string-constant enable-overwrite-mode-keybindings))
+                   ;; end narrow ones
+
+                   (add-check editor-panel
+                              'framework:menu-bindings
+                              (string-constant enable-keybindings-in-menus))
                    (add-check editor-panel
                                'framework:automatic-parens
                                (string-constant enable-automatic-parens))
@@ -513,9 +550,6 @@ the state transitions / contracts are:
                                'framework:column-guide-width
                                (string-constant maximum-char-width-guide-pref-check-box)
                                (λ (n) (and (exact-integer? n) (>= n 2))))
-                   (add-check editor-panel
-                              'framework:caret-blink-disable?
-                              (string-constant disable-caret-blinking))
                    (when (equal? (system-type) 'unix)
                      (add-check editor-panel
                                 'framework:editor-x-selection-mode
@@ -567,6 +601,31 @@ the state transitions / contracts are:
                                (cadr current)))))
   (update-tf-bkg))
 
+(define (add-boolean-option-with-ask-me parent label option1 option2 pref-key)
+  (define rb
+    (new radio-box%
+         [label label]
+         [parent parent]
+         [choices (list option1
+                        option2
+                        (string-constant ask-me-each-time))]
+         [callback
+          (λ (rb evt)
+            (preferences:set pref-key
+                             (case (send rb get-selection)
+                               [(0) #t]
+                               [(1) #f]
+                               [(2) 'ask])))]))
+  (define (update-rb what)
+    (send rb set-selection
+          (case what
+            [(#t) 0]
+            [(#f) 1]
+            [(ask) 2])))
+  (update-rb (preferences:get pref-key))
+  (preferences:add-callback pref-key (λ (p v) (update-rb v)))
+  (void))
+
 (define (add-general-checkbox-panel) (add-general-checkbox-panel/real))
 (define (add-general-checkbox-panel/real)
   (set! add-general-checkbox-panel/real void)
@@ -579,28 +638,12 @@ the state transitions / contracts are:
                 (string-constant backup-unsaved-files))
      (add-check editor-panel 'framework:backup-files? (string-constant first-change-files))
 
-     (define auto-load-rb
-       (new radio-box%
-            [label (string-constant autoload-automatically-reload)]
-            [parent editor-panel]
-            [choices (list (string-constant autoload-when-the-editor-isnt-dirty)
-                           (string-constant autoload-never-revert)
-                           (string-constant autoload-ask-about-reverting))]
-            [callback
-             (λ (rb evt)
-               (preferences:set 'framework:autoload
-                                (case (send rb get-selection)
-                                  [(0) #t]
-                                  [(1) #f]
-                                  [(2) 'ask])))]))
-     (define (update-auto-load-rb what)
-       (send auto-load-rb set-selection
-             (case what
-               [(#t) 0]
-               [(#f) 1]
-               [(ask) 2])))
-     (update-auto-load-rb (preferences:get 'framework:autoload))
-     (preferences:add-callback 'framework:autoload (λ (p v) (update-auto-load-rb v)))
+     (add-boolean-option-with-ask-me
+      editor-panel
+      (string-constant autoload-automatically-reload)
+      (string-constant autoload-when-the-editor-isnt-dirty)
+      (string-constant autoload-never-revert)
+      'framework:autoload)
 
      (unless (equal? (system-type) 'unix)
        (define (bool->pref b) (if b 'std 'common))

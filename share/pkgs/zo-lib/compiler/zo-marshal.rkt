@@ -150,22 +150,22 @@
     (write-bytes (bundle-bytes-code-bstr mb) outp)))
 
 (define (zo-marshal-bundle-to top outp)
-  (case (hash-ref top 'vm #f)
+  (define machine-type (hash-ref top 'vm #f))
+  (case machine-type
     [(#"racket" #f)
      (zo-marshal-racket-bundle-to (hash-remove top 'vm) outp)]
     [(#"linklet")
      (write-bundle-header #"linklet" outp)
      (s-exp->fasl (hash-remove top 'vm) outp)]
-    [(#"chez-scheme")
-     (write-bundle-header #"chez-scheme" outp)
+    [else
+     ;; assume CS otherwise
+     (write-bundle-header machine-type outp)
      (define opaque (hash-ref top 'opaque
                               (lambda ()
                                 (error 'zo-marshal "missing 'opaque for chez-scheme virtual-machine format"))))
      (define bstr (opaque-bstr opaque))
      (write-bytes (integer->integer-bytes (bytes-length bstr) 4 #f #f) outp)
-     (write-bytes bstr outp)]
-    [else
-     (error 'zo-marshal "unknown virtual machine: ~a" (hash-ref top 'vm #f))]))
+     (write-bytes bstr outp)]))
 
 (define (zo-marshal-racket-bundle-to top outp) 
   ; (obj -> (or pos #f)) output-port -> number
@@ -348,6 +348,7 @@
   CPT_CLOSURE
   CPT_DELAY_REF ; used to delay loading of syntax objects and lambda bodies
   CPT_PREFAB
+  CPT_PREFAB_TYPE
   CPT_LET_ONE_UNUSED
   CPT_SHARED
   CPT_TOPLEVEL
@@ -364,7 +365,7 @@
   CPT_OTHER_FORM
   CPT_SRCLOC)
 
-(define CPT_SMALL_NUMBER_START 47)
+(define CPT_SMALL_NUMBER_START 48)
 (define CPT_SMALL_NUMBER_END 74)
 
 (define CPT_SMALL_SYMBOL_START 74)
@@ -753,7 +754,8 @@
         (out-number (cond
                       [(hash-eqv? v) 2]
                       [(hash-eq? v) 0]
-                      [(hash-equal? v) 1])
+                      [(hash-equal? v) 1]
+                      [(hash-equal-always? v) 3])
                     out)
         (out-number (hash-count v) out)
         (for ([(k v) (in-hash v)])
@@ -772,6 +774,12 @@
         (vector-set! pre-v 0 (prefab-struct-key v))
         (out-byte CPT_PREFAB out)
         (out-anything pre-v out)]
+       [(? (lambda (v) (and (struct-type? v)
+                            (prefab-struct-type-key+field-count v))))
+        (define key+field-count (prefab-struct-type-key+field-count v))
+        (out-byte CPT_PREFAB_TYPE out)
+        (out-anything (car key+field-count) out)
+        (out-number (cdr key+field-count) out)]
        [(quoted qv)
         (out-byte CPT_QUOTE out)
         (parameterize ([quoting? #t])

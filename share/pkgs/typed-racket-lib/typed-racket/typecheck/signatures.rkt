@@ -15,6 +15,10 @@
    [cond-contracted tc-expr/t (syntax? . -> . Type?)]
    [cond-contracted tc-expr/t* (syntax? . -> . (values Type? boolean?))]
    [cond-contracted single-value ((syntax?) ((or/c tc-results/c #f)) . ->* . full-tc-results/c)]
+   [cond-contracted tc-expr-seq (->* ((listof syntax?) (-> syntax? tc-results/c full-tc-results/c))
+                                     (tc-results/c
+                                      #:unreachable-op (-> (listof syntax?) void?))
+                                     full-tc-results/c)]
    [cond-contracted tc-dep-fun-arg ((syntax?) ((or/c tc-results/c #f)) . ->* . full-tc-results/c)]))
 
 (define-signature check-subforms^
@@ -57,7 +61,7 @@
 
 (define-signature tc-lambda^
   ([cond-contracted tc/lambda (syntax? syntax? syntax? (or/c tc-results/c #f) . -> . full-tc-results/c)]
-   [cond-contracted tc/rec-lambda/check (syntax? syntax? syntax? (listof Type?) tc-results/c . -> .
+   [cond-contracted tc/rec-lambda/check (syntax? syntax? syntax? (listof Type?) (or/c #f tc-results/c) . -> .
                                                  (values full-tc-results/c full-tc-results/c))]))
 
 (define-signature tc-app^

@@ -36,7 +36,7 @@
                       [(expt arithmetic-shift)
                        (known-procedure/folding/limited a 'expt)]
                       [(unsafe-fx+)
-                       (known-procedure/pure/folding-unsafe a 'fx+)]
+                       (known-procedure/then-pure/folding-unsafe a 'fx+)]
                       [else
                        (known-procedure a)]))]
          [else
@@ -89,22 +89,32 @@
                                   (integer->char 48)
                                   (char->integer '#\1)
                                   (void (void) eof-object null)))
+                          (define-values (adds-unsafe) (lambda (x)
+                                                         (list (unsafe-fx+ x 1)
+                                                               (unsafe-fx+ x 2))))
+                          (define-values (adds-safe) (lambda (x)
+                                                       (list (fx+ x 1)
+                                                             (unsafe-fx+ x 2))))
+                          (define-values (adds-still-unsafe) (lambda (x)
+                                                               (list (unsafe-fx+ x 1)
+                                                                     (fx+ x 2))))
                           (define-values (done) (z))
                           (define-values (call) (lambda () (values 'c1 'c2)))
                           (define-values (c1 c2) (call)))))
                     #;
                     (call-with-input-file "regexp.rktl" read)
-                    #t ; serializable
-                    #t ; datum-intern?
-                    #f ; for-jitify?
-                    #f ; allow-set!-undefined?
-                    #f ; unsafe-mode?
-                    #t ; enforce-constant?
-                    #t ; allow-inline?
-                    #f ; no-prompt?
-                    prim-knowns
-                    primitives
-                    #f
+                    #t          ; serializable
+                    #t          ; datum-intern?
+                    #f          ; target 
+                    #f          ; allow-set!-undefined?
+                    #f          ; unsafe-mode?
+                    #t          ; enforce-constant?
+                    #t          ; allow-inline?
+                    #f          ; no-prompt?
+                    prim-knowns ; hasheq : symbol -> known-procedure (see "known.rkt") 
+                    primitives  ; hasheq : symbol -> actual primitive
+                    #f          ; compiler-query
+                    #f          ; get-import-knowns
                     #f))
 
 (pretty-print (unwrap schemified))

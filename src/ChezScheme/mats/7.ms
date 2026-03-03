@@ -1068,12 +1068,17 @@
            (lambda ()
              (pretty-print '(display "hello 5\n")))
            '(replace))
+         (with-output-to-file "testfile-6.ss"
+           (lambda ()
+             (pretty-print '(error 'boot "fail")))
+           '(replace))
          (parameterize ([optimize-level 2])
            (compile-script "testfile-1")
            (compile-script "testfile-2")
            (compile-file "testfile-3")
            (compile-file "testfile-4")
-           (compile-file "testfile-5")))
+           (compile-file "testfile-5")
+           (compile-file "testfile-6")))
        (void))
   (equal?
     (begin
@@ -1120,13 +1125,16 @@
           out)))
     "(aye captain)\n")
   (equal?
-    (begin
-      (unless (or (embedded?) (equal? *scheme* (format "~a/bin/~a/scheme~a" (path-parent *mats-dir*) (machine-type) (if (windows?) ".exe" ""))))
-        (errorf #f "not testing boot file based on ../boot/~a/petite.boot, since *scheme* isn't ../bin/~a/scheme~a"
-          (machine-type) (machine-type) (if (windows?) ".exe" "")))
+    (let ([would-be-scheme (find-source (format "..~abin~a~a~ascheme~a" 
+                                                (directory-separator)
+                                                (directory-separator) (machine-type) (directory-separator)
+                                                (if (windows?) ".exe" "")))])
+      (unless (or (embedded?) (path-equal? *scheme* would-be-scheme))
+        (errorf #f "not testing boot file based on ../boot/~a/petite.boot, since *scheme* ~a isn't ~a"
+          (machine-type) *scheme* would-be-scheme))
       (parameterize ([optimize-level 2])
         (make-boot-file "testfile.boot" '()
-          (format "~a/boot/~a/petite.boot" (path-parent *mats-dir*) (machine-type))
+          (find-source (format "../boot/~a/petite.boot" (machine-type)))
           "testfile-1.so"
           "testfile-2.so"
           "testfile-3.ss"
@@ -1149,12 +1157,15 @@
   ; which scheme-start is set, which was failing because its relocation information was discarded
   ; by the static-generation collection.
   (or
-   (case (machine-type) [(pb) #t] [else #f]) ; no callables in pb
+   (pb?) ; callables not always in pb, and boot files may not work with pbchunk
    (equal?
-    (begin
-      (unless (or (embedded?) (equal? *scheme* (format "~a/bin/~a/scheme~a" (path-parent *mats-dir*) (machine-type) (if (windows?) ".exe" ""))))
-        (errorf #f "not testing boot file based on ../boot/~a/petite.boot, since *scheme* isn't ../bin/~a/scheme~a"
-          (machine-type) (machine-type) (if (windows?) ".exe" "")))
+    (let ([would-be-scheme (find-source (format "..~abin~a~a~ascheme~a" 
+                                                (directory-separator)
+                                                (directory-separator) (machine-type) (directory-separator)
+                                                (if (windows?) ".exe" "")))])
+      (unless (or (embedded?) (path-equal? *scheme* would-be-scheme))
+        (errorf #f "not testing boot file based on ../boot/~a/petite.boot, since *scheme* ~a isn't ~a"
+          (machine-type) *scheme* would-be-scheme))
       (mkfile "testfile.ss"
         '(scheme-start
            (lambda ()
@@ -1174,6 +1185,14 @@
           (unless (eof-object? err) (error 'bootfile-test2 err))
           out)))
     "#<code>\n"))
+  ;; make sure an error from a boot file exits with a non-0 exit code
+  (not (equal?
+        (begin
+          (parameterize ([optimize-level 2])
+            (make-boot-file "testfile.boot" '("petite")
+                            "testfile-6.so"))
+          (system (format "~a -b ./testfile.boot -q" (patch-exec-path *scheme*))))
+        0))
 )
 
 (mat hostop
@@ -4805,8 +4824,16 @@ evaluating module init
     "yes\n#<void>\n#<void>\n(#f #f #f #f)\nhello from B1, hello from C1\n(#t #f #t #f)\n")
   (error? ; mismatched compilation instance
     (separate-eval
-      '(parameterize ([library-directories '(("testdir-dist1" . "testdir-dist1"))])
-         (verify-loadability 'load "testdir-dist2/testfile-clA.so"))))
+     '(guard [x [#t (let* ([ps (condition-irritants x)]
+                           ;; rewrite error message to hide Window separator difference
+                           [new-ps (map (lambda (p)
+                                          (if (string? p)
+                                              (list->string (subst #\/ #\\ (string->list p)))
+                                              p))
+                                        ps)])
+                      (raise (condition (make-irritants-condition new-ps) x)))]]
+             (parameterize ([library-directories '(("testdir-dist1" . "testdir-dist1"))])
+               (verify-loadability 'load "testdir-dist2/testfile-clA.so")))))
   (error? ; mismatched compilation instance
     (separate-eval
       '(parameterize ([library-directories '(("testdir-dist1" . "testdir-dist1"))])
@@ -4969,7 +4996,7 @@ evaluating module init
   (error?
     (verify-loadability 'load "testfile-clI1.so"))
 
-  ; make sure compile-whole-program perserves the information verify-loadability needs
+  ; make sure compile-whole-program preserves the information verify-loadability needs
   (begin
     (mkfile "testfile-clJ0.ss"
       '(library (testfile-clJ0) (export x0) (import (chezscheme)) (define x0 'eat) (printf "invoking J0\n")))
@@ -5661,8 +5688,9 @@ evaluating module init
               (parameterize ([print-vector-length #t]) (pretty-print v))
               #t))))))
   (parameterize ([collect-maximum-generation 4]
-                 [collect-generation-radix 4]
-                 [collect-trip-bytes (expt 2 20)])
+                 [collect-generation-radix 2]
+                 [collect-trip-bytes (expt 2 20)]
+                 [collect-maximum-generation-threshold-factor 0])
     (collect (collect-maximum-generation))
     (let ([b0 (maximum-memory-bytes)])
       (define tail-spin
@@ -5674,6 +5702,30 @@ evaluating module init
       (let ([b1 (maximum-memory-bytes)])
         (or (< (- b1 b0) (expt 2 24))
             (errorf #f "b0 = ~s, b1 = ~s, b1-b0 = ~s" b0 b1 (- b1 b0))))))
+  (begin
+    (define try-gc-threshold
+      (lambda (gc-max?)
+        (let* ([v (gensym)]
+               [w (weak-cons v '())])
+          (parameterize ([collect-maximum-generation 4]
+                         [collect-generation-radix 4]
+                         [collect-trip-bytes (expt 2 20)]
+                         [collect-maximum-generation-threshold-factor (if gc-max? 0 1000)])
+            (collect (collect-maximum-generation))
+            (set! v #f)
+            (let ()
+              (define tail-spin
+                (lambda (n)
+                  (do ([i 1 (fx+ i 1)] [next (cons 0 '()) (cdr next)])
+                      ((fx= i n))
+                    (set-cdr! next (cons i '())))))
+              (tail-spin 50000000)
+              (if gc-max?
+                  (eq? #!bwp (car w))
+                  (symbol? (car w))))))))
+    #t)
+  (try-gc-threshold #t)
+  (try-gc-threshold #f)
  )
 
 (mat object-counts
@@ -6143,8 +6195,8 @@ evaluating module init
    (>= (bytes-deallocated) 0)
    (let ([b (bytes-deallocated)] [c (collections)])
      (with-interrupts-disabled ; ensure allocated list stays in generation 0 until printed
-      (let ([x (make-list 10 'a)])
-        (pretty-print x))
+      (let ([x (make-list 10000 'a)])
+        (pretty-print (list-tail x 9990)))
       (collect))
      (and (> (collections) c) (or (eq? (current-eval) interpret)
                                   (> (bytes-deallocated) b))))
@@ -6153,7 +6205,7 @@ evaluating module init
           (>= (bytes-allocated #f space) 0))
      (#%$spaces))
    (let ()
-     (define fudge (if (positive? (heap-check-interval)) 4000 2000))
+     (define fudge (if (or (positive? (heap-check-interval)) (> (collect-maximum-generation) 4)) 4000 2000))
      (define ~=
        (lambda (x y)
          (<= (abs (- x y)) fudge)))

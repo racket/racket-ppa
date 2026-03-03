@@ -3,6 +3,7 @@
          racket/list
          racket/date
          racket/class
+         racket/match
          scribble/core
          scribble/decode
          scribble/html-properties
@@ -16,30 +17,56 @@
 (provide define-cite
          author+date-style author+date-square-bracket-style number-style
          make-bib in-bib (rename-out [auto-bib? bib?])
-         author-name org-author-name 
+         author-name org-author-name
          (contract-out
           [authors (->* (content?) #:rest (listof content?) element?)]
           [proceedings-location
-           (->* [any/c] [#:pages (or/c (list/c any/c any/c) #f) #:series any/c #:volume any/c] element?)]
+           (->* [any/c] [#:pages (or/c (list/c any/c any/c) #f)
+                         #:series any/c #:volume any/c #:number any/c
+                         #:editor any/c #:address any/c #:publisher any/c #:organization any/c]
+                element?)]
           [journal-location
-           (->* [any/c] [#:pages (or/c (list/c any/c any/c) #f) #:number any/c #:volume any/c] element?)]
+           (->* [any/c] [#:pages (or/c (list/c any/c any/c) #f) #:volume any/c #:number any/c] element?)]
           [book-location
-           (->* [] [#:edition any/c #:publisher any/c] element?)]
+           (->* []
+                [#:edition any/c #:chapter any/c #:editor any/c
+                 #:series any/c #:volume any/c #:number any/c #:pages (or/c (list/c any/c any/c) #f)
+                 #:publisher any/c #:address any/c] (or/c element? #f))]
+          [booklet-location
+           (->* [] [#:howpublished any/c #:address any/c] (or/c element? #f))]
+          [misc-location
+           (->* [] [#:howpublished any/c] (or/c element? #f))]
           [techrpt-location
-           (-> #:institution any/c #:number any/c element?)]
+           (->* [#:institution any/c] [#:number any/c #:type any/c #:address any/c] element?)]
           [dissertation-location
-           (->* [#:institution any/c] [#:degree any/c] element?)]
+           (->* [#:institution any/c] [#:degree any/c #:type any/c #:address any/c]
+                element?)]
           [book-chapter-location
-           (->* [any/c] [#:pages (or/c (list/c any/c any/c) #f) #:series any/c #:volume any/c #:publisher any/c] element?)])
+           (->* [any/c]
+                [#:edition any/c #:editor any/c #:chapter any/c
+                 #:series any/c #:volume any/c #:number any/c #:pages (or/c (list/c any/c any/c) #f)
+                 #:publisher any/c #:address any/c] element?)]
+          [webpage-location
+           (->* [] [string? #:accessed any/c] (or/c element? #f))]
+          [manual-location
+           (->* [] [#:organization any/c #:edition any/c] (or/c element? #f))])
          other-authors
          editor
          abbreviate-given-names
-         
+
          #; (String[url] -> Element)
-         url-rendering)
+         url-rendering
+
+         doi-rendering)
 
 (define abbreviate-given-names (make-parameter #f))
 (define url-rendering (make-parameter (λ (url) (link url (make-element 'url (list url))))))
+(define doi-rendering
+  (make-parameter (λ (doi) (make-element "pseudodoi"
+                                         (list "doi:"
+                                               (link (string-append
+                                                      "https://doi.org/"
+                                                      doi) doi))))))
 
 (define autobib-style-extras
   (let ([abs (lambda (s)
@@ -53,10 +80,11 @@
 (define bib-columns-style (make-style #f autobib-style-extras))
 
 (define bibentry-style (make-style "Autobibentry" autobib-style-extras))
+(define bibentrytarget-style (make-style "Autobibtarget" autobib-style-extras))
 (define colbibnumber-style (make-style "Autocolbibnumber" autobib-style-extras))
 (define colbibentry-style (make-style "Autocolbibentry" autobib-style-extras))
 
-(define-struct auto-bib (author date title location url note is-book? key specific))
+(define-struct auto-bib (author date title location url note is-book? doi key specific))
 (define-struct bib-group (ht))
 
 (define-struct (author-element element) (names cite))
@@ -115,7 +143,7 @@
                              [partition '()])
                       ([bib (reverse sorted-by-date)])
                     (cond [(and (send style collapse-for-date?)
-                                last (date=? last bib) 
+                                last (date=? last bib)
                                 (equal? (auto-bib-specific bib) "")
                                 (equal? (auto-bib-specific last) ""))
                            ;; can group
@@ -150,7 +178,7 @@
    (list (add-cite group (car bib-entries) 'autobib-author #f #f style)
          'nbsp
          (send style get-cite-open)
-         (add-date-cites group bib-entries 
+         (add-date-cites group bib-entries
                          (send style get-group-sep)
                          style #t bib-date<? bib-date=?)
          (send style get-cite-close))))
@@ -246,9 +274,9 @@
              e))
      (super-new))))
 
-(define (gen-bib tag group sec-title 
-                 style maybe-disambiguator 
-                 maybe-render-date-bib maybe-render-date-cite 
+(define (gen-bib tag group sec-title
+                 style maybe-disambiguator
+                 maybe-render-date-bib maybe-render-date-cite
                  maybe-date<? maybe-date=?
                  spaces)
   (define disambiguator (or maybe-disambiguator default-disambiguation))
@@ -297,7 +325,7 @@
           (when (auto-bib-date bib)
             (collect-put! ci
                           `(autobib-date ,(auto-bib-key bib)) ;; (list which key)
-                          (make-element #f (list 
+                          (make-element #f (list
                                             (send style
                                                   render-citation
                                                   (render-date-cite (auto-bib-date bib))
@@ -310,13 +338,13 @@
               bibliography-line
               i
               (make-paragraph plain
-                              (list (make-collect-element #f collect-target collect)))))
+                              (list (make-collect-element bibentrytarget-style collect-target collect)))))
       ;; create the bibliography with disambiguations added.
       (define-values (last num-ambiguous rev-disambiguated*)
         (for/fold ([last #f] [num-ambiguous 0] [rev-disambiguated '()]) ([bib (in-list bibs)]
                                                                          [i (in-naturals 1)])
           (define ambiguous?? (and (send style disambiguate-date?)
-                                   last 
+                                   last
                                    (ambiguous? last bib)))
           (define num-ambiguous*
             (cond [ambiguous?? (add1 num-ambiguous)]
@@ -338,27 +366,33 @@
       (make-paragraph (make-style #f '()) '(""))
       (make-paragraph (make-style #f '()) '(""))))
 
-  (make-part #f
-             `((part ,tag))
-             (list sec-title)
-             (make-style #f '(unnumbered))
-             null
-             (list (make-table (send style bibliography-table-style)
+  (define table
+    (make-table (send style bibliography-table-style)
                                (add-between #:splice? #t
                                             disambiguated
                                             (for/list ([i (in-range 1 spaces)])
                                               (make-space)))))
-             null))
+
+  (if sec-title
+    (make-part #f
+               `((part ,tag))
+               (list sec-title)
+               (make-style #f '(unnumbered))
+               null
+               (list table)
+               null)
+    table))
 
 (define (bib->entry bib style disambiguation render-date-bib i)
-  (define-values (author date title location url note is-book?)
+  (define-values (author date title location url note is-book? doi)
     (values (auto-bib-author bib)
             (auto-bib-date bib)
             (auto-bib-title bib)
             (auto-bib-location bib)
             (auto-bib-url bib)
             (auto-bib-note bib)
-            (auto-bib-is-book? bib)))
+            (auto-bib-is-book? bib)
+            (auto-bib-doi bib)))
   (make-element (send style entry-style)
                 (append
                  (if author
@@ -384,7 +418,8 @@
                                   (decode-content (list (render-date-bib date))))
                             ".")
                      null)
-                 (if url `(" " ,[(url-rendering) url]) null)
+                 (if (and (not doi) url) `(" " ,[(url-rendering) url]) null)
+                 (if doi `(" " ,[(doi-rendering) doi]) null)
                  (if note `(" " ,note) null))))
 
 (define-syntax (define-cite stx)
@@ -440,17 +475,20 @@
 ;; disambiguations during gen-bib.
 (define (make-bib #:title title
                   #:author [author #f]
+                  #:type [type #f]
                   #:is-book? [is-book? #f]
                   #:location [location #f]
                   #:date [date #f]
                   #:url [url #f]
+                  #:doi [doi #f]
                   #:note [note #f])
+  ;; TODO what to do with type??
   (define author*
     (cond [(not author) #f]
           [(author-element? author) author]
           [else (parse-author author)]))
   (define parsed-date (understand-date date))
-  (make-auto-bib author* parsed-date title location url note is-book?
+  (make-auto-bib author* parsed-date title location url note is-book? doi
                  (content->string
                   (make-element #f
                                 (append
@@ -458,7 +496,8 @@
                                  (list title)
                                  (if location (decode-content (list location)) null)
                                  (if date (decode-content (list (default-render-date-bib parsed-date))) null)
-                                 (if url (list [(url-rendering) url]) null)
+                                 (if (and (not doi) url) (list [(url-rendering) url]) null)
+                                 (if doi (list [(doi-rendering) doi]) null)
                                  (if note (list note) null))))
                  ""))
 
@@ -471,6 +510,7 @@
    (auto-bib-url bib)
    (auto-bib-note bib)
    (auto-bib-is-book? bib)
+   (auto-bib-doi bib)
    (auto-bib-key bib)
    ;; "where" is the only specific part of auto-bib elements currently.
    (string-append (auto-bib-specific bib) where)))
@@ -503,92 +543,132 @@
   (check-equal? (given-names->initials "Matthew") "M. ")
   (check-equal? (given-names->initials "Matthew R.") "M. R. ")
   (check-equal? (given-names->initials "Matthew Raymond") "M. R. "))
-         
+
 (define (proceedings-location
+         #:editor [editor_ #f]
          location
-         #:pages [pages #f]
          #:series [series #f]
-         #:volume [volume #f])
-  (let* ([s @elem{In @italic{@elem{Proc. @to-string[location]}}}]
-         [s (if series
-                @elem{@|s|, @to-string[series]}
-                s)]
-         [s (if volume
-                @elem{@|s| volume @to-string[volume]}
-                s)]
-         [s (if pages
-                @elem{@|s|, pp. @(to-string (car pages))--@(to-string (cadr pages))}
-                s)])
-    s))
+         #:volume [volume #f]
+         #:number [number #f]
+         #:pages [pages #f]
+         #:organization [organization #f]
+         #:publisher [publisher #f]
+         #:address [address #f])
+  (concatenate-elements
+   (concatenate-elements
+    @elem{In }
+    (concatenate-elements
+     #:separator ", "
+     (and editor_ (editor editor_))
+     @italic{@elem{Proc. @to-string[location]}}
+     (series-volume-number-pages-element series volume number pages)))
+   #:separator ". "
+   (organization-publisher-address-element organization publisher address)))
 
 (define (journal-location
          location
-         #:pages [pages #f]
+         #:volume [volume #f]
          #:number [number #f]
-         #:volume [volume #f])
-  (let* ([s @italic{@to-string[location]}]
-         [s (if volume
-                @elem{@|s| @(to-string volume)}
-                s)]
-         [s (if number
-                @elem{@|s|(@(to-string number))}
-                s)]
-         [s (if pages
-                @elem{@|s|, pp. @(to-string (car pages))--@(to-string (cadr pages))}
-                s)])
-    s))
+         #:pages [pages #f])
+  (concatenate-elements
+   @italic{@to-string[location]}
+   #:separator " "
+   (series-volume-number-pages-element #f volume number pages)))
+
+;; The URL is now redundant with the URL in make-bib, so we now (2025-12) make it optional
+(define (webpage-location (url #f) #:accessed [accessed #f])
+  (concatenate-elements
+   (and url ((url-rendering) url))
+   #:separator " "
+   (and accessed @elem{(accessed @to-string[accessed])})))
 
 (define (string-capitalize str)
   (if (non-empty-string? str)
       (let ([chars (string->list str)])
         (list->string (cons (char-upcase (car chars)) (cdr chars))))
       str))
-  
+
+(define (concatenate-elements #:separator (separator "") . elements)
+  (let loop ((l (filter (lambda (x) x) elements))) ;; remove #f from the list
+     (match l
+       ['() #f]
+       [(list a) (elem a)]
+       [(cons a b) (elem a separator (loop (cdr l)))])))
+
 (define (book-location
          #:edition [edition #f]
-         #:publisher [publisher #f])
-  (let* ([s (if edition
-                @elem{@(string-capitalize (to-string edition)) edition}
-                #f)]
-         [s (if publisher
-                (if s
-                   @elem{@|s|. @to-string[publisher]}
-                   @elem{@to-string[publisher]})
-                s)])
-    (unless s
-      (error 'book-location "no arguments"))
-    s))
+         #:chapter [chapter #f]
+         #:editor [editor_ #f]
+         #:series [series #f]
+         #:volume [volume #f]
+         #:number [number #f]
+         #:pages [pages #f]
+         #:publisher [publisher #f]
+         #:address [address #f])
+  (concatenate-elements
+   (concatenate-elements
+    #:separator ", "
+    (edition-element edition)
+    (to-string* chapter)
+    (and editor_ (editor editor_))
+    (series-volume-number-pages-element series volume number pages))
+   #:separator ". "
+   (organization-publisher-address-element #f publisher address)))
+
+(define (booklet-location
+         #:howpublished [howpublished #f]
+         #:address [address #f])
+  (concatenate-elements #:separator ". "
+    (to-string* howpublished)
+    (to-string* address)))
+
+(define (misc-location
+         #:howpublished [howpublished #f])
+  (and howpublished (elem (to-string howpublished))))
+
+(define (manual-location
+         #:organization [organization #f]
+         #:edition [edition #f])
+  (concatenate-elements
+   (edition-element edition)
+   #:separator ", "
+   (to-string* organization)))
 
 (define (techrpt-location
-         #:institution org
-         #:number num)
-  @elem{@to-string[org], @to-string[num]})
+         #:institution institution
+         #:type [type #f]
+         #:number [number #f]
+         #:address [address #f])
+  (concatenate-elements #:separator ", "
+    (to-string* institution) (to-string* type) (to-string* number) (to-string* address)))
 
 (define (dissertation-location
-         #:institution org
-         #:degree [degree "PhD"])
-  @elem{@to-string[degree] dissertation, @to-string[org]})
+         #:institution institution
+         #:degree [degree "PhD"]
+         #:type [type #f]
+         #:address [address #f])
+  (concatenate-elements #:separator ", "
+    @elem{@to-string[degree] dissertation}
+    (to-string institution)
+    (to-string* type)
+    (to-string* address)))
 
 (define (book-chapter-location
          location
-         #:pages [pages #f]
+         #:edition [edition #f]
+         #:chapter [chapter #f]
+         #:editor [editor_ #f]
          #:series [series #f]
          #:volume [volume #f]
-         #:publisher [publisher #f])
-  (let* ([s @elem{In @italic{@elem{@to-string[location]}}}]
-         [s (if series
-                @elem{@|s|, @to-string[series]}
-                s)]
-         [s (if volume
-                @elem{@|s| volume @to-string[volume]}
-                s)]
-         [s (if pages
-                @elem{@|s|, pp. @(to-string (car pages))--@(to-string (cadr pages))}
-                s)]
-          [s (if publisher
-                @elem{@|s| @to-string[publisher]}
-                s)])
-    s))
+         #:number [number #f]
+         #:pages [pages #f]
+         #:publisher [publisher #f]
+         #:address [address #f])
+  (concatenate-elements #:separator " "
+   @elem{In @italic{@elem{@to-string[location]}}}
+   (book-location #:edition edition #:chapter chapter #:editor editor_
+         #:series series #:volume volume #:number number #:pages pages
+         #:publisher publisher #:address address)))
 
 ;; ----------------------------------------
 
@@ -596,11 +676,11 @@
   (make-author-element
    #f
    (list
-    (format "~a ~a~a" 
+    (format "~a ~a~a"
             (if (abbreviate-given-names)
                 (given-names->initials first)
                 first)
-            last 
+            last
             (if suffix
                 (format " ~a" suffix)
                 "")))
@@ -668,3 +748,24 @@
      (author-element-cite name))))
 
 (define (to-string v) (format "~a" v))
+(define (to-string* v) (and v (to-string v)))
+(define (edition-element edition)
+  (and edition @elem{@(string-capitalize (to-string edition)) edition}))
+(define (pages-element pages)
+  (and pages @elem{pp. @(to-string (car pages))--@(to-string (cadr pages))}))
+(define (series-volume-number-pages-element series volume number pages)
+  (concatenate-elements
+   (to-string* series)
+   #:separator ", "
+   (concatenate-elements
+    (to-string* volume)
+    (and number @elem{(@to-string[number])}))
+   (pages-element pages)))
+(define (organization-publisher-address-element organization publisher address)
+  (concatenate-elements
+   (to-string* organization)
+   #:separator ". "
+   (concatenate-elements
+    (to-string* publisher)
+    #:separator ", "
+    (to-string* address))))

@@ -228,7 +228,7 @@
         (define D "[0-9]")
         (define L "[a-zA-Z_]")
         (define H "[a-fA-F0-9]")
-        (define E (format "[Ee][+-]?~a+" D))
+        (define E (format "[Eef][+-]?~a+" D))
         (define FS "(?:f|F|l|L)")
         (define IS "(?:u|U|l|L)*")
 
@@ -253,6 +253,7 @@
 
         (define char-complex (trans "'([^\\']|\\\\.)+'"))
         (define string-complex (trans "\"([^\\\"]|\\\\.)*\""))
+        (define line-continue (trans "[\\]\r?\n"))
 
         (define simple-table (make-vector 256 #f))
 
@@ -401,6 +402,8 @@
                                     (loop (cdar m)
                                           (cons (mk-string (subbytes s (caar m) (cdar m)))
                                                 result)))]
+                              [(regexp-match? line-continue s p)
+                               (loop (add1 p) result)]
                               [else
                                (error 'c-tokenize "strange: ~e ~e" p (subbytes s p (min len (+ p 100))))])]
                            [(not (car simple))
@@ -439,27 +442,72 @@
         ;; To run cpp:
         (define process2
           (if (eq? (system-type) 'windows)
-              (lambda (s)
-                (let ([split (let loop ([s s])
-                               (let ([m (regexp-match #rx"([^ ]*) +(.*)" s)])
-                                 (if m
-                                     (cons (cadr m) (loop (caddr m)))
-                                     (list s))))])
+              (lambda (s dest)
+                (let ([split (let loop ([i 0] [start 0] [quoted? #f])
+                               (cond
+                                 [(= i (string-length s))
+                                  (if (= i start)
+                                      '()
+                                      (list (substring s start i)))]
+                                 [(and (not quoted?)
+                                       (char=? #\space (string-ref s i)))
+                                  (if (= i start)
+                                      (loop (+ i 1) (+ i 1) #f)
+                                      (cons (substring s start i)
+                                            (loop (+ i 1) (+ i 1) #f)))]
+                                 [(and (char=? #\\ (string-ref s i))
+                                       (regexp-match-positions #rx"^\\\\*\"" s i))
+                                  => (lambda (m)
+                                       (define count (- (cdar m) (caar m) 1))
+                                       (define bs (make-string (quotient count 2) #\\))
+                                       (define prefix (string-append (substring s start i)
+                                                                     bs
+                                                                     (if (even? count)
+                                                                         ""
+                                                                         "\"")))
+                                       (define r (if (even? count)
+                                                     (loop (+ i count) (+ i count) quoted?)
+                                                     (loop (+ i count 1) (+ i count 1) quoted?)))
+                                       (if (or (null? r)
+                                               (and (not quoted?)
+                                                    (odd? count)
+                                                    (char=? (string-ref s (+ i count 1)) #\space)))
+                                           (cons prefix r)
+                                           (cons (string-append prefix (car r))
+                                                 (cdr r))))]
+                                 [(char=? #\" (string-ref s i))
+                                  (cond
+                                    [quoted?
+                                     (define e (substring s start i))
+                                     (define r (loop (+ i 1) (+ i 1) #f))
+                                     (if (or (null? r)
+                                             (char=? (string-ref s (+ i 1)) #\space))
+                                         (cons e r)
+                                         (cons (string-append e (car r)) (cdr r)))]
+                                    [else
+                                     (define r (loop (+ i 1) (+ i 1) #t))
+                                     (if (= i start)
+                                         r
+                                         (cons (string-append (substring s start i) (car r))
+                                               (cdr r)))])]
+                                 [else
+                                  (loop (+ i 1) start quoted?)]))])
                   (apply (verbose process*) (find-executable-path (maybe-add-exe (car split)) #f)
-                         (cdr split))))
-              (verbose process)))
+                         (append (cdr split) (list dest)))))
+              (lambda (s dest)
+                ((verbose process) (format "~a ~s" s dest)))))
 
         (define cpp-process
 	  (if (string? cpp)
-	      (process2 (format "~a~a~a ~a"
+	      (process2 (format "~a~a~a"
 				cpp
 				(if pgc?
 				    (if pgc-really?
 					" -DMZ_XFORM -DMZ_PRECISE_GC"
 					" -DMZ_XFORM")
 				    "")
-				(if callee-restore? " -DGC_STACK_CALLEE_RESTORE" "")
-				file-in))
+				(if callee-restore? " -DGC_STACK_CALLEE_RESTORE" ""))
+                        file-in)
 	      (apply (verbose process*)
 		     (append
 		      cpp
@@ -953,10 +1001,12 @@
           ;;  nested function calls because it takes more than one argument:
           (append
            '(memcpy memmove memcmp memset
-		    __builtin___memmove_chk __inline_memmove_chk
-		    __builtin___memcpy_chk __inline_memcpy_chk
-		    __builtin___memset_chk __inline_memset_chk
-		    __builtin___memcmp_chk __inline_memcmp_chk
+		    __builtin___memmove_chk __inline_memmove_chk __memmove_ichk
+		    __builtin___memcpy_chk __inline_memcpy_chk __memcpy_ichk
+		    __builtin___memset_chk __inline_memset_chk __memset_ichk
+		    __builtin___memcmp_chk __inline_memcmp_chk __memcmp_ichk
+		    __builtin___strcpy_chk __inline_strcpy_chk __strcpy_ichk
+		    __builtin___sprintf_chk __inline_sprintf_chk __sprintf_ichk
                     strcmp strcoll strcpy _mzstrcpy strcat
 		     __builtin_memset
                     printf sprintf vsprintf vprintf
@@ -1501,7 +1551,12 @@
             [(start-skip? e)
              (set! skipping? #t)
              null]
-            [skipping?
+            [(and skipping?
+		  (or (not (eq? 'windows (system-type)))
+		      (and
+		       (not (extern-c? e))
+		       (not (and (typedef? e)
+				 (msvc-c-assert? e))))))
              e]
 
             ;; START_XFORM_SUSPEND and END_XFORM_SUSPEND:
@@ -1533,10 +1588,7 @@
              e]
 
             ;; process 'extern "C"' blocks
-            [(and (>= (length e) 3)
-                  (eq? (tok-n (car e)) 'extern)
-                  (member (tok-n (cadr e)) '("C" "C++"))
-                  (braces? (caddr e)))
+            [(extern-c? e)
              (list* (car e)
                     (cadr e)
                     (let ([body-v (caddr e)])
@@ -1574,7 +1626,8 @@
                (printf "/* TYPEDEF */\n"))
 	     (let ([e2 (skip-declspec-align e)])
                (if (or (simple-unused-def? e2)
-                       (unused-struc-typedef? e2))
+                       (unused-struc-typedef? e2)
+		       (msvc-c-assert? e2))
                    null
                    (begin
                      (when pgc?
@@ -1631,6 +1684,8 @@
                      (when show-info? (printf "/* FUNCTION ~a */\n" name))
                      (if (or (positive? suspend-xform)
                              (not pgc?)
+                             (and (eq? (tok-n (car e)) 'extern)
+                                  (equal? (tok-n (cadr e)) "C++"))
                              (and where
                                   (regexp-match re:h where)
                                   (let loop ([e e][prev #f])
@@ -1679,6 +1734,12 @@
 
             [else (print-struct #t)
                   (error 'xform "unknown form: ~s" e)]))
+
+	(define (extern-c? e)
+	  (and (>= (length e) 3)
+               (eq? (tok-n (car e)) 'extern)
+               (member (tok-n (cadr e)) '("C" "C++"))
+               (braces? (caddr e))))
 
         (define (empty-decl? e)
           (and (= 1 (length e))
@@ -1751,14 +1812,22 @@
                         (let ([s (tok-n (list-ref e (- l 3)))])
                           (and (symbol? s)
                                (not (eq? '= s))
-                               (not (eq? '__attribute__ s)))))
+                               (or (not (eq? '__attribute__ s))
+                                   ;; try skipping over `__attribute__`
+                                   (loop (- l 2))))))
+                       (and
+                        (> l 2)
+                        (eq? (tok-n (list-ref e (- l 2))) 'noexcept)
+                        (loop (- l 1)))
                        (and
                         ;; next-to-last is 0, then =, then parens
+                        (> l 2)
                         (eq? 0 (tok-n (list-ref e (- l 2))))
                         (eq? '= (tok-n (list-ref e (- l 3))))
                         (loop (- l 2)))
                        (and
                         ;; next-to-last is 0, then =, then parens
+                        (> l 2)
                         (eq? '__attribute__ (tok-n (list-ref e (- l 3))))
                         (loop (- l 2))))))))
 
@@ -1832,6 +1901,11 @@
 	      (skip-compiler-pragmas (cddr e))
 	      e))
 
+	(define (msvc-c-assert? e2)
+	  (and ((length e2) . > . 3)
+	       (eq? 'char (tok-n (cadr e2)))
+	       (eq? '__C_ASSERT__ (tok-n (caddr e2)))))
+
         (define (struct-decl? e)
 	  (let ([e (skip-declspec-align e)])
             (and (memq (tok-n (car e)) '(struct enum))
@@ -1858,7 +1932,8 @@
                                 ;; `const' can appear between the arg parens
                                 ;;  and the function body; this happens in the
                                 ;;  OS X headers
-                                (and (eq? 'const (tok-n v))
+                                ;; `noexcept` happens in Windows C++ headers
+                                (and (memq (tok-n v) '(const noexcept))
                                      (positive? (sub1 ll))
                                      (parens? (list-ref e (- ll 2))))))))))))
 
@@ -1917,6 +1992,8 @@
                (loop (cddr e) type)]
               [(eq? '__attribute__ (tok-n (car e)))
                (loop (cddr e) type)]
+              [(eq? 'noexcept (tok-n (car e)))
+               (loop (cdr e) type)]
               [(parens? (cadr e))
                (let ([name (tok-n (let ([p (car e)])
 				    (if (parens? p)
@@ -2479,12 +2556,17 @@
                                       (tok-n (caddr e))
                                       (+ p 2))]
                              [else (loop (cdr e) (add1 p))]))]
-                        [(args-e) (seq->list (seq-in (list-ref e (if (and func-pos
-                                                                          (eq? class-name function-name))
-                                                                     (add1 func-pos)
-                                                                     (if assert-no-conversion?
-                                                                         (- len 2)
-                                                                         (sub1 len))))))]
+                        [(args-e) (seq->list (seq-in
+                                              (let* ([pos (if (and func-pos
+                                                                   (eq? class-name function-name))
+                                                              (add1 func-pos)
+                                                              (if assert-no-conversion?
+                                                                  (- len 2)
+                                                                  (sub1 len)))]
+                                                     [pos (if (memq (tok-n (list-ref e pos)) '(const noexcept))
+                                                              (sub1 pos)
+                                                              pos)])
+                                                (list-ref e pos))))]
                         [(arg-vars all-arg-vars)
                          (let-values ([(arg-pragmas arg-decls) (body->lines (append
                                                                              args-e

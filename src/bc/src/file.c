@@ -125,14 +125,15 @@ READ_ONLY static Scheme_Object *init_dir_symbol, *init_file_symbol, *sys_dir_sym
 READ_ONLY static Scheme_Object *exec_file_symbol, *run_file_symbol, *collects_dir_symbol;
 READ_ONLY static Scheme_Object *pref_file_symbol, *orig_dir_symbol, *addon_dir_symbol;
 READ_ONLY static Scheme_Object *config_dir_symbol, *cache_dir_symbol;
-READ_ONLY static Scheme_Object *host_collects_dir_symbol, *host_config_dir_symbol;
+READ_ONLY static Scheme_Object *host_collects_dir_symbol, *host_config_dir_symbol, *host_addon_dir_symbol;
 
 SHARED_OK static Scheme_Object *exec_cmd;
 SHARED_OK static Scheme_Object *run_cmd;
 SHARED_OK static Scheme_Object *collects_path, *config_path;
-SHARED_OK static Scheme_Object *host_collects_path, *host_config_path;
+SHARED_OK static Scheme_Object *host_collects_path, *host_config_path, *host_addon_path;
 THREAD_LOCAL_DECL(static Scheme_Object *original_pwd);
 SHARED_OK static Scheme_Object *addon_dir;
+SHARED_OK static int host_addon_no_inherit;
 
 READ_ONLY static Scheme_Object *windows_symbol, *unix_symbol;
 
@@ -146,6 +147,7 @@ READ_ONLY static Scheme_Object *access_time_seconds_symbol, *access_time_nanosec
 READ_ONLY static Scheme_Object *modify_time_seconds_symbol, *modify_time_nanoseconds_symbol;
 READ_ONLY static Scheme_Object *change_time_seconds_symbol, *change_time_nanoseconds_symbol;
 READ_ONLY static Scheme_Object *creation_time_seconds_symbol, *creation_time_nanoseconds_symbol;
+
 
 void scheme_init_file(Scheme_Startup_Env *env)
 {
@@ -173,6 +175,7 @@ void scheme_init_file(Scheme_Startup_Env *env)
   REGISTER_SO(config_dir_symbol);
   REGISTER_SO(host_collects_dir_symbol);
   REGISTER_SO(host_config_dir_symbol);
+  REGISTER_SO(host_addon_dir_symbol);
   REGISTER_SO(orig_dir_symbol);
   REGISTER_SO(addon_dir_symbol);
   REGISTER_SO(cache_dir_symbol);
@@ -227,6 +230,7 @@ void scheme_init_file(Scheme_Startup_Env *env)
   config_dir_symbol = scheme_intern_symbol("config-dir");
   host_collects_dir_symbol = scheme_intern_symbol("host-collects-dir");
   host_config_dir_symbol = scheme_intern_symbol("host-config-dir");
+  host_addon_dir_symbol = scheme_intern_symbol("host-addon-dir");
   orig_dir_symbol = scheme_intern_symbol("orig-dir");
   addon_dir_symbol = scheme_intern_symbol("addon-dir");
   cache_dir_symbol = scheme_intern_symbol("cache-dir");
@@ -348,7 +352,7 @@ void scheme_init_file(Scheme_Startup_Env *env)
   scheme_addto_prim_instance("copy-file", 
 			     scheme_make_prim_w_arity(copy_file, 
 						      "copy-file", 
-						      2, 3), 
+						      2, 5), 
 			     env);
   scheme_addto_prim_instance("build-path", 
 			     scheme_make_immed_prim(scheme_build_path,
@@ -523,6 +527,8 @@ Scheme_Object *scheme_make_sized_offset_path(char *chars, intptr_t d, intptr_t l
   return scheme_make_sized_offset_kind_path(chars, d, len, copy, SCHEME_PLATFORM_PATH_KIND);
 }
 
+/* If changing the following, consider also changing
+   syntax->tmp-context-string in racket/collects/racket/file.rkt */
 # define IS_SPEC_CHAR(x) (IS_A_DOS_SEP(x) || ((x) == '"') || ((x) == '|') \
                           || ((x) == ':') || ((x) == '<') || ((x) == '>') \
                           || ((x) == '?') || ((x) == '*'))
@@ -3398,7 +3404,7 @@ static void escape_during_copy(rktio_file_copy_t *cf)
 static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
 {
   char *src, *dest;
-  int exists_ok = 0;
+  int exists_ok = 0, use_perms = 0, perm_bits = 0, override_create_perms = 1;
   Scheme_Object *bss, *bsd;
   rktio_file_copy_t *cf;
 
@@ -3410,6 +3416,19 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
   bss = argv[0];
   bsd = argv[1];
   exists_ok = ((argc > 2) && SCHEME_TRUEP(argv[2]));
+  if (argc > 3) {
+    if (!SCHEME_FALSEP(argv[3])) {
+      if (SCHEME_INTP(argv[3])
+          && (SCHEME_INT_VAL(argv[3]) >= 0)
+          && (SCHEME_INT_VAL(argv[3]) <= 65535)) {
+        perm_bits = SCHEME_INT_VAL(argv[3]);
+        use_perms = 1;
+      } else
+        scheme_wrong_contract("copy-file", "(or/c #f (integer-in 0 65535))", 1, argc, argv);
+    }
+    if (argc > 4)
+      override_create_perms = SCHEME_TRUEP(argv[4]);
+  }
 
   src = scheme_expand_string_filename(bss,
                                       "copy-file",
@@ -3421,7 +3440,8 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
                                        NULL, 
                                        SCHEME_GUARD_FILE_WRITE | SCHEME_GUARD_FILE_DELETE);
 
-  cf = rktio_copy_file_start(scheme_rktio, dest, src, exists_ok);
+  cf = rktio_copy_file_start_permissions(scheme_rktio, dest, src, exists_ok,
+                                         use_perms, perm_bits, override_create_perms);
   if (cf) {
     int ok = 1;
     while (!rktio_copy_file_is_done(scheme_rktio, cf)) {
@@ -3812,6 +3832,13 @@ static Scheme_Object *simplify_qm_path(Scheme_Object *path, int *has_rel)
   }
 }
 
+static void cycle_error(char *s) {
+  scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                   "simplify-path: cycle detected at link\n"
+                   "  link path: %q",
+                   s);
+}
+
 static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle_check, int skip, 
 				       int use_filesystem, 
                                        int force_rel_up, int already_cleansed,
@@ -4014,10 +4041,7 @@ static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle
 	  if ((len == SCHEME_PATH_LEN(p))
 	      && !strcmp(s, SCHEME_PATH_VAL(p))) {
 	    /* Cycle of links detected */
-	    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-			     "simplify-path: cycle detected at link\n"
-                             "  link path: %q",
-			     s);
+            cycle_error(s);
 	  }
 	  l = SCHEME_CDR(l);
 	}
@@ -4087,7 +4111,7 @@ static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle
 	  while (1) {
 	    a[0] = result;
 	    new_result = do_resolve_path(1, a, guards);
-	
+
 	    /* Was it a link? */
 	    if (result != new_result) {
 	      /* It was a link. Is the new result relative? */
@@ -4113,20 +4137,16 @@ static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle
 		  if ((SCHEME_PATH_LEN(cp) == SCHEME_PATH_LEN(new_result))
 		      && !strcmp(SCHEME_PATH_VAL(cp), SCHEME_PATH_VAL(new_result))) {
 		    /* cycle */
-		    new_result = NULL;
-		    break;
+                    cycle_error(SCHEME_PATH_VAL(new_result));
 		  }
 		}
 	      }
 	    
-	      if (new_result) {
-		/* Simplify the new result */
-		result = do_simplify_path(new_result, cycle_check, skip,
-					  use_filesystem, force_rel_up, 0, kind,
-					  guards);
-		cycle_check = scheme_make_pair(new_result, cycle_check);
-	      } else
-		break;
+              /* Simplify the new result */
+              result = do_simplify_path(new_result, cycle_check, skip,
+                                        use_filesystem, force_rel_up, 0, kind,
+                                        guards);
+              cycle_check = scheme_make_pair(new_result, cycle_check);
 	    } else
 	      break;
 	  }
@@ -4653,7 +4673,7 @@ static Scheme_Object *make_directory(int argc, Scheme_Object *argv[])
         && (SCHEME_INT_VAL(argv[1]) <= 65535)) {
       perms = SCHEME_INT_VAL(argv[1]);
     } else
-      scheme_wrong_contract("make-directory", "(or/c symbol? (integer-in 0 65535))", 1, argc, argv);
+      scheme_wrong_contract("make-directory", "(integer-in 0 65535)", 1, argc, argv);
   }
 
   filename = scheme_expand_string_filename(argv[0],
@@ -4979,33 +4999,35 @@ static Scheme_Object *make_nanoseconds(uintptr_t secs, uintptr_t nsecs) {
                          scheme_make_integer_value_from_unsigned(nsecs));
 }
 
-static Scheme_Object *file_stat(int argc, Scheme_Object *argv[])
+static Scheme_Object *file_or_fd_stat(const char *filename, Scheme_Object *filename_arg, intptr_t fd, int as_link)
 {
-  char *filename;
-  int as_link = 0;
   rktio_stat_t *r;
   Scheme_Hash_Tree *ht;
 
-  if (!SCHEME_PATH_STRINGP(argv[0]))
-    scheme_wrong_contract("file-or-directory-identity", "path-string?", 0, argc, argv);
+  if (filename) {
+    r = rktio_file_or_directory_stat(scheme_rktio, filename, !as_link);
 
-  filename = scheme_expand_string_filename(argv[0],
-					   "file-or-directory-identity",
-					   NULL,
-					   SCHEME_GUARD_FILE_EXISTS);
+    if (!r) {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                       "file-or-directory-stat: cannot get stat result\n"
+                       "  path: %q\n"
+                       "  system error: %R",
+                       filename_for_error(filename_arg));
+      return NULL;
+    }
+  } else {
+    rktio_fd_t *rfd;
 
-  if (argc > 1)
-    as_link = SCHEME_TRUEP(argv[1]);
+    rfd = rktio_system_fd(scheme_rktio, fd, RKTIO_OPEN_READ);
+    r = rktio_fd_stat(scheme_rktio, rfd);
+    rktio_forget(scheme_rktio, rfd);
 
-  r = rktio_file_or_directory_stat(scheme_rktio, filename, !as_link);
-
-  if (!r) {
-    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-                     "file-or-directory-stat: cannot get stat result\n"
-                     "  path: %q\n"
-                     "  system error: %R",
-                     filename_for_error(argv[0]));
-    return NULL;
+    if (!r) {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                       "port-file-stat: cannot get stat result\n"
+                       "  system error: %R");
+      return NULL;
+    }
   }
 
   ht = scheme_make_hash_tree(0);
@@ -5040,6 +5062,30 @@ static Scheme_Object *file_stat(int argc, Scheme_Object *argv[])
   rktio_free(r);
   
   return (Scheme_Object *)ht;
+}
+
+static Scheme_Object *file_stat(int argc, Scheme_Object *argv[])
+{
+  char *filename;
+  int as_link = 0;
+
+  if (!SCHEME_PATH_STRINGP(argv[0]))
+    scheme_wrong_contract("file-or-directory-identity", "path-string?", 0, argc, argv);
+
+  filename = scheme_expand_string_filename(argv[0],
+					   "file-or-directory-identity",
+					   NULL,
+					   SCHEME_GUARD_FILE_EXISTS);
+
+  if (argc > 1)
+    as_link = SCHEME_TRUEP(argv[1]);
+
+  return file_or_fd_stat(filename, argv[0], 0, as_link);
+}
+
+Scheme_Object *scheme_get_fd_stat(intptr_t fd)
+{
+  return file_or_fd_stat(NULL, NULL, fd, 0);
 }
 
 static Scheme_Object *file_size(int argc, Scheme_Object *argv[])
@@ -5185,6 +5231,10 @@ find_system_path(int argc, Scheme_Object **argv)
     return config_path;
   } else if (argv[0] == orig_dir_symbol) {
     return original_pwd;
+  } else if (argv[0] == host_addon_dir_symbol) {
+    if (host_addon_path) return host_addon_path;
+    if (host_addon_no_inherit && addon_dir) return addon_dir;
+    which = RKTIO_PATH_ADDON_DIR;
   } else if (argv[0] == addon_dir_symbol) {
     if (addon_dir) return addon_dir;
     which = RKTIO_PATH_ADDON_DIR;
@@ -5287,6 +5337,15 @@ void scheme_set_host_config_path(Scheme_Object *p)
   host_config_path = p;
 }
 
+/* should only called from main */
+void scheme_set_host_addon_dir(Scheme_Object *p)
+{
+  if (!host_addon_path) {
+    REGISTER_SO(host_addon_path);
+  }
+  host_addon_path = p;
+  host_addon_no_inherit = 1;
+}
 
 void scheme_set_original_dir(Scheme_Object *d)
 {
@@ -5349,7 +5408,7 @@ HANDLE scheme_dll_load_library(const char *s, const wchar_t *ws, int *_mode)
   }
 
   *_mode = 0;
-  return LoadLibraryW(scheme_get_dll_path(ws));
+  return LoadLibraryW(scheme_get_dll_path((wchar_t *)ws));
 }
 
 void *scheme_dll_get_proc_address(HANDLE m, const char *name, int dll_mode)

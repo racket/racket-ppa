@@ -29,7 +29,7 @@
  (all-from-except intermediate:
                   lang/private/intermediate-funs
                   procedures
-                  + * /
+                  + * / =
                   append
                   string-append
                   string=? 
@@ -61,6 +61,11 @@
                   procedure?)
  
  ("Numbers (relaxed conditions plus)"
+  @defproc[(= [x number] ...) number]{
+ Compares numbers for equality.
+ In ISL and up: @racket[=] works when applied to only one number.
+ @interaction[#:eval (isl) (= 10 10) (= 11) (= 0)]
+}
   @defproc[(+ [x number] ...) number]{
  Adds all given numbers.
  In ISL and up: @racket[+] works when applied to only one number or none. 
@@ -164,11 +169,11 @@
  @interaction[#:eval ev-isl (map add-and-multiply (list 3 -4 2/5) '(1 2 3))]
 }
   @defproc[(for-each [f (any ... -> any)] [l (listof any)] ...) void?]{
- Applies a function to each item on one or more lists for effect only:
- @codeblock{(for-each f (list x-1 ... x-n)) = (begin (f x-1) ... (f x-n))}
- @interaction[#:eval (asl-eval)
-              (for-each (lambda (x) (begin (display x) (newline))) '(1 2 3))
-              ]
+ Applies a function to each item on one or more lists for effect only.
+
+ Although the @emph{Intermediate Student with Lambda} provides
+ the @racket[for-each] function, it is intended to be used
+ in the @secref["advanced"] level.
 }
   @defproc[((intermediate-filter filter) [p? (X -> boolean)] [l (listof X)]) (listof X)]{
  Constructs a list from all those items on a list for which the predicate holds.

@@ -1,6 +1,7 @@
 #lang racket/base
 (require racket/fixnum
          ffi/unsafe/port
+         ffi/unsafe/schedule
          "terminal.rkt"
          "param.rkt")
 
@@ -48,7 +49,9 @@
 (define (init-screen in out)
   (define in-fd (unsafe-port->file-descriptor in))
   (define out-fd (unsafe-port->file-descriptor out))
-  (and (init-term in-fd out-fd)
+  (and in-fd
+       out-fd
+       (init-term in-fd out-fd)
        (begin
          (set! cursor-col 0)
          (set! the-unread-char #f)
@@ -60,14 +63,22 @@
   ($clear-screen)
   (set! cursor-col 0))
 
+(struct sigwinch-evt ()
+  #:property prop:evt (unsafe-poller (lambda (self poll?)
+                                       (if ($ee-pending-winch?)
+                                           (values (list self) #f)
+                                           (values #f self)))))
+(define sigwinch (sigwinch-evt))
+
 (define ($ee-read-char in-port block?)
   (cond
     [block?
      (post-output-mode)
      (let loop ()
        (define r (sync in-port
+                       sigwinch
                        ((current-get-interaction-evt))))
-       (unless (eq? r in-port)
+       (unless (or (eq? r in-port) (eq? r sigwinch))
          (when (procedure? r)
            (signal-mode)
            (r)
@@ -179,4 +190,5 @@
       (wait (- ms 10)))))
 
 (define (set-fg-color color)
-  (set-color color #f))
+  (when (current-expeditor-color-enabled)
+    (set-color color #f)))

@@ -167,7 +167,7 @@ See also @racket[path-dialog%] for a richer interface.
                         [directory (or/c path-string? #f) #f]
                         [style (listof (or/c 'enter-packages 'common)) null]
                         [#:dialog-mixin dialog-mixin (make-mixin-contract path-dialog%) (λ (x) x)])
-         (or/c path #f)]{
+         (or/c path? #f)]{
 
 Obtains a directory pathname from the user via the platform-specific
  standard (modal) dialog, using @racket[parent] as the parent window if
@@ -327,7 +327,7 @@ The @racket[style] list must contain exactly one of @racket['default=1],
 
 In addition, @racket[style] can contain @racket['caution],
  @racket['stop], or @racket['no-icon] to adjust the icon that appears
- n the dialog, the same for @racket[message-box].
+ in the dialog, the same for @racket[message-box].
 
 If @racket[return-the-dialog?] is a true value, then the dialog
  is not shown and is instead returned from @racket[message-box/custom].

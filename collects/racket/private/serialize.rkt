@@ -296,8 +296,9 @@
             (let-values ([(path base) (module-path-index-split v)])
               (loop path)
               (loop base))]
-	   [else (raise-argument-error
+	   [else (raise-argument-error*
 		  'serialize
+                  'racket/primitive
 		  "serializable?"
 		  v)])
 	  ;; No more possibility for this object in
@@ -401,6 +402,7 @@
 	       (if (immutable? v) '- '!)
 	       (append
 		(if (hash-equal? v) '(equal) null)
+		(if (hash-equal-always? v) '(equal-always) null)
 		(if (hash-eqv? v) '(eqv) null)
 		(if (hash-weak? v) '(weak) null))
 	       (let ([loop (serial #t)])
@@ -441,6 +443,7 @@
      [(hash? v)
       (cons 'h (append
 		(if (hash-equal? v) '(equal) null)
+		(if (hash-equal-always? v) '(equal-always) null)
 		(if (hash-eqv? v) '(eqv) null)
 		(if (hash-weak? v) '(weak) null)))]
      [else
@@ -505,6 +508,10 @@
            (if (null? (cdr v))
                (make-hash)
                (make-weak-hash))]
+          [(equal-always)
+           (if (null? (cdr v))
+               (make-hashalw)
+               (make-weak-hashalw))]
           [(eqv)
            (if (null? (cdr v))
                (make-hasheqv)
@@ -588,7 +595,9 @@
                          (make-immutable-hasheq al)
                          (if (eq? (caaddr v) 'equal)
                              (make-immutable-hash al)
-                             (make-immutable-hasheqv al)))))]
+                             (if (eq? (caaddr v) 'equal-always)
+                                 (make-immutable-hashalw al)
+                                 (make-immutable-hasheqv al))))))]
 	  [(date) (apply make-date (map loop (cdr v)))]
 	  [(date*) (apply make-date* (map loop (cdr v)))]
 	  [(arity-at-least) (make-arity-at-least (loop (cdr v)))]

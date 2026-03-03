@@ -7,7 +7,13 @@
 (require mzlib/etc mzlib/list mzlib/math syntax/docprovide
          (for-syntax "firstorder.rkt")
          (for-syntax syntax/parse) 
-         (for-syntax racket/syntax))
+         (for-syntax racket/syntax)
+         (only-in "teach.rkt"
+                  Integer Number Rational Real Natural
+                  Boolean True False
+                  String Char Symbol
+                  EmptyList ConsOf
+                  Any))
 
 ;; Implements the procedures:
 (require "teachprims.rkt" "teach.rkt" lang/posn lang/imageeq "provide-and-scribble.rkt")
@@ -112,24 +118,24 @@
  Determines whether some value is a number:
  @interaction[#:eval (bsl) (number? "hello world") (number? 42)] 
 }
-  @defproc[(= [x number][y number][z number] ...) boolean?]{
- Compares numbers for equality.
+  @defproc[((beginner-= =) [x number][y number][z number] ...) boolean?]{
+ Compares two or more numbers for equality.
  @interaction[#:eval (bsl) (= 42 2/5)]
 }
-  @defproc[(< [x real][y real][z real] ...) boolean?]{
- Compares (real) numbers for less-than.
+  @defproc[((beginner-< <) [x real][y real][z real] ...) boolean?]{
+ Compares two or more (real) numbers for less-than.
  @interaction[#:eval (bsl) (< 42 2/5)]
 }
-  @defproc[(> [x real][y real][z real] ...) boolean?]{
- Compares (real) numbers for greater-than.
+  @defproc[((beginner-> >) [x real][y real][z real] ...) boolean?]{
+ Compares two or more (real) numbers for greater-than.
  @interaction[#:eval (bsl) (> 42 2/5)]   
 }
-  @defproc[(<= [x real][y real][z real] ...) boolean?]{
- Compares (real) numbers for less-than or equality.
+  @defproc[((beginner-<= <=) [x real][y real][z real] ...) boolean?]{
+ Compares two or more (real) numbers for less-than or equality.
  @interaction[#:eval (bsl) (<= 42 2/5)]
 }
-  @defproc[(>= [x real][y real][z real] ...) boolean?]{
- Compares (real) numbers for greater-than or equality.
+  @defproc[((beginner->= >=) [x real][y real][z real] ...) boolean?]{
+ Compares two or more (real) numbers for greater-than or equality.
  @interaction[#:eval (bsl) (>= 42 42)]
 }
   @defproc[((beginner-+ +) [x number][y number][z number] ...) number]{
@@ -194,7 +200,7 @@
   
   ;; exponents and logarithms 
   @defproc[(expt [x number][y number]) number]{
- Computes the power of the first to the second number.
+ Computes the power of the first to the second number, which is to say, exponentiation.
  @interaction[#:eval (bsl) (expt 16 1/2) (expt 3 -4)]
 }
   @defproc[(exp [x number]) number]{
@@ -400,7 +406,7 @@
  Looks up the character that corresponds to the given exact integer in the ASCII table (if any).
  @interaction[#:eval (bsl) (integer->char 42)]
 }
-  @defproc[((beginner-random random) [x natural]) natural]{
+  @defproc[((beginner-random random) [x (and/c natural? positive?)]) natural?]{
  Generates a random natural number less than some given exact natural.
  @interaction[#:eval (bsl) (random 42)]
 }
@@ -460,7 +466,7 @@
  Determines whether some value is the empty list.
  @interaction[#:eval (bsl) (empty? '()) (empty? 42)]
 }
-  @defproc[((beginner-cons cons) [x any/x][y list?]) list?]{
+  @defproc[((beginner-cons cons) [x any/c][y list?]) list?]{
  Constructs a list.
  @interaction[#:eval (bsl-eval) (cons 1 '())]
 }
@@ -510,7 +516,7 @@
  Constructs a list of its arguments.
  @interaction[#:eval (bsl-eval) (list 1 2 3 4 5 6 7 8 9 0)]
 }
-  @defproc[(make-list [i natural-number] [x any/c]) list?]{
+  @defproc[(make-list [i natural?] [x any/c]) list?]{
  Constructs a list of @racket[i] copies of @racket[x].
  @interaction[#:eval (bsl-eval) (make-list 3 "hello")]
 }
@@ -527,7 +533,7 @@
  Creates a single list from several, by concatenation of the items.  
  @interaction[#:eval (bsl) (append (cons 1 (cons 2 '())) (cons "a" (cons "b" empty)))]
 }
-  @defproc[(length (l list?)) natural-number?]{
+  @defproc[(length (l list?)) natural?]{
  Evaluates the number of items on a list.
  @interaction[#:eval (bsl) x (length x)]
 }
@@ -644,13 +650,13 @@
  LISP-style selector: @racket[(car (cdr (cdr (cdr x))))].
  @interaction[#:eval (bsl) v (cadddr v)]
 }
-  @defproc[(assoc [x any] [l (listof any)]) (union (listof any) #false)]{
+  @defproc[(assoc [x any/c] [l (listof any)]) (union (listof any) #false)]{
  Produces the first pair on @racket[l] whose @racket[first] is @racket[equal?] to @racket[x];
  otherwise it produces @racket[#false].
  @interaction[#:eval (bsl) (assoc "hello" '(("world" 2) ("hello" 3) ("good" 0)))]
 }
  
-  @defproc[((beginner-list? list?) [x any]) boolean?]{
+  @defproc[((beginner-list? list?) [x any/c]) boolean?]{
  Checks whether the given value is a list.
  @interaction[#:eval (bsl)
               (list? 42)
@@ -668,11 +674,11 @@
  Determines if its input is a posn.
  @interaction[#:eval (bsl) q (posn? q) (posn? 42)]
 }
-  @defproc[(posn-x [p posn]) any]{
+  @defproc[(posn-x [p posn]) any/c]{
  Extracts the x component of a posn.
  @interaction[#:eval (bsl) p (posn-x p)]
 }
-  @defproc[(posn-y [p posn]) any]{
+  @defproc[(posn-y [p posn]) any/c]{
  Extracts the y component of a posn.
  @interaction[#:eval (bsl) p (posn-y p)]
  })
@@ -765,11 +771,11 @@
  Determines the length of a string. 
  @interaction[#:eval (bsl) (string-length "hello world")]
 }
-  @defproc[((beginner-string-ith string-ith) [s string][i natural-number]) 1string?]{
+  @defproc[((beginner-string-ith string-ith) [s string][i natural?]) 1string?]{
  Extracts the @racket[i]th 1-letter substring from @racket[s].
  @interaction[#:eval (bsl) (string-ith "hello world" 1)]
 }
-  @defproc[((beginner-replicate replicate) [i natural-number][s string]) string]{
+  @defproc[((beginner-replicate replicate) [i natural?][s string]) string]{
  Replicates @racket[s] @racket[i] times. 
  @interaction[#:eval (bsl) (replicate 3 "h")]
 }
@@ -822,15 +828,15 @@
  Builds a string of the given characters. 
  @interaction[#:eval (bsl) (string #\d #\o #\g)]
 }
-  @defproc[(make-string [i natural-number][c char]) string]{
+  @defproc[(make-string [i natural?][c char]) string]{
  Produces a string of length @racket[i] from @racket[c].
  @interaction[#:eval (bsl) (make-string 3 #\d)]
 }
-  @defproc[(string-ref [s string][i natural-number]) char]{
+  @defproc[(string-ref [s string][i natural?]) char]{
  Extracts the @racket[i]th character from @racket[s]. 
  @interaction[#:eval (bsl) (string-ref "cat" 2)]
 }
-  @defproc[(substring [s string][i natural-number][j natural-number]) string]{
+  @defproc[(substring [s string][i natural?][j natural?]) string]{
  Extracts the substring starting at @racket[i] up to @racket[j] (or the
  end if @racket[j] is not provided). 
  @interaction[#:eval (bsl) (substring "hello world" 1 5) (substring "hello world" 1 8) (substring "hello world" 4)]
@@ -918,7 +924,6 @@
  @interaction[#:eval (bsl)
               (format "Dear Dr. ~a:" "Flatt")
               (format "Dear Dr. ~s:" "Flatt")
-              (format "the value of ~s is ~a" '(+ 1 1) (+ 1 1))
               ]
  })
  
@@ -936,7 +941,7 @@
  })
  
  ("Misc"
-  @defproc[(identity [x any/c]) any]{
+  @defproc[(identity [x any/c]) any/c]{
  Returns @racket[x].
  @interaction[#:eval (bsl) (identity 42) (identity c1)  (identity "hello")]
 }
@@ -984,4 +989,48 @@
 }
   @defproc[((beginner-exit exit)) void]{
  Evaluating @racket[(exit)] terminates the running program. 
- }))
+ })
+
+ ("Signatures"
+    @defthing[Number signature?]{
+    Signature for arbitrary numbers.
+    }
+    @defthing[Natural signature?]{
+    Signature for natural numbers.
+    }
+    @defthing[Integer signature?]{
+    Signature for integers.
+    }
+    @defthing[Rational signature?]{
+    Signature for rational numbers.
+    }
+    @defthing[Real signature?]{
+    Signature for real numbers.
+    }
+    @defthing[Boolean signature?]{
+    Signature for booleans.
+    }
+    @defthing[True signature?]{
+    Signature for just true.
+    }
+    @defthing[False signature?]{
+    Signature for just false.
+    }
+    @defthing[String signature?]{
+    Signature for strings.
+    }
+    @defthing[Char signature?]{
+    Signature for chararacters.
+    }
+    @defthing[Symbol signature?]{
+    Signature for symbols.
+    }
+    @defthing[EmptyList signature?]{
+    Signature for the empty list.
+    }
+    @defproc[(ConsOf [first-sig signature?] [rest-sig signature?]) signature?]{
+    Signature for a cons pair.
+    }
+    @defthing[Any signature?]{
+    Signature for any value.
+    }))

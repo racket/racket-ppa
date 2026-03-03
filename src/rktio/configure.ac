@@ -26,8 +26,7 @@ use_flag_posix_pthread=no
 
 # For standalone builds:
 rktio_version=1.0
-HIDE_STANDALONE=hide_standalone_
-HIDE_NOT_STANDALONE=
+AS_STANDALONE=f
 
 ###### Autoconfigure #######
 
@@ -98,6 +97,7 @@ case "$host_os" in
     ;;
   *mingw*)
     skip_iconv_check=yes
+    PREFLAGS="$PREFLAGS -DWIN32"
     # force pthread off for Windows:
     enable_pthread=no
     ;;
@@ -357,6 +357,8 @@ if test "${LFS_CFLAGS}" != "" && test "${LFS_CFLAGS}" != "undefined"; then
   CFLAGS="${CFLAGS} ${LFS_CFLAGS}"  
 fi
 
+AC_CHECK_DECL([O_CLOEXEC],AC_DEFINE([RKTIO_HAS_CLOEXEC],1, [Have O_CLOEXEC]), [], [#include <fcntl.h>])
+
 ############### pthread ###################
 
 if test "${enable_pthread}" = "" ; then
@@ -379,8 +381,7 @@ fi
 ############## libtool ################
 
 if test "${enable_standalone}" = "yes" ; then
-   HIDE_STANDALONE=""
-   HIDE_NOT_STANDALONE=hide_not_standalone_
+   AS_STANDALONE=t
    if test "${enable_shared}" = "" ; then
      enable_shared=yes
    fi
@@ -415,7 +416,7 @@ if test "${enable_shared}" = "yes" ; then
   fi
 
   # Use only for standalone builds:
-  AR="${LIBTOOLPROG} --mode=link --tag=CC $CC${need_gcc_static_libgcc}${ar_libtool_no_undefined} -release ${rktio_version} -rpath ${abslibdir} \$(ARLIBFLAGS) -o"
+  AR="${LIBTOOLPROG} --mode=link --tag=CC $CC${need_gcc_static_libgcc}${ar_libtool_no_undefined} -release ${rktio_version} -rpath ${abslibdir} -o"
   # Used for a librktio convenience library:
   STATIC_AR="${LIBTOOLPROG} --mode=link --tag=CC $CC -o"
   ARFLAGS=""
@@ -432,13 +433,13 @@ else
   ICP=cp
   LTO="o"
   LTA="a"
-  RKTLINKER='$(CC)'
+  RKTLINKER="$CC"
   STATIC_AR="$AR"
   LIBSFX=so
   ICP_LIB=cp
   if test "${make_darwin_dylib}" = "yes" ; then
      LIBSFX="dylib"
-     AR='$(RKTLINKER) --shared -o'
+     AR="${RKTLINKER} --shared -o"
      ARFLAGS=""
      LIBS="${LIBS} -framework CoreFoundation"
      ICP_LIB=cp
@@ -465,8 +466,7 @@ AC_SUBST(LIBSFX)
 AC_SUBST(LTO)
 AC_SUBST(LTA)
 
-AC_SUBST(HIDE_NOT_STANDALONE)
-AC_SUBST(HIDE_STANDALONE)
+AC_SUBST(AS_STANDALONE)
 
 AC_SUBST(RKTIO_NO_ICONV)
 
@@ -474,5 +474,7 @@ AC_SUBST(HAVE_DIRENT_NAMLEN)
 AC_SUBST(HAVE_DIRENT_NAMELEN)
 
 makefiles="Makefile"
+
+cp ${srcdir}/buildmain.zuo main.zuo
 
 AC_OUTPUT($makefiles)

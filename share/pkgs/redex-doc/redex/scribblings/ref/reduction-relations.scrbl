@@ -207,6 +207,8 @@ arguments would have stepped.
          (listof symbol?)]{
 
 Returns the names of the reduction relation's named clauses.
+
+ @history[#:added "1.20"]
 }
 
 @defform[(compatible-closure reduction-relation lang non-terminal)]{
@@ -215,9 +217,10 @@ This accepts a reduction, a language, the name of a
 non-terminal in the language and returns the compatible
 closure of the reduction for the specified non-terminal.
 
-In the below example, @racket[_r] is intended to calculate a boolean @racket[or].
-Since @tt{r} does not recursively break apart its input, it will not reduce
-subexpressions within a larger non-matching expression @tt{t}.
+In the below example, @racket[addition-without-context]
+contains two rules that calculate sums. But, since it
+requires a @tt{+} at the top level, it will not reduce
+subexpressions within a larger non-matching expression.
 
 @examples[
 #:label #f
@@ -245,8 +248,8 @@ subexpressions within a larger non-matching expression @tt{t}.
 ]
 
 The @racket[compatible-closure] operator allows us to close
-@racket[_addition-without-context] over all nested @racket[_e]
-contexts and then we can use it to find the sum.
+@racket[addition-without-context] over all nested @racket[e]
+contexts and then we can use it to find nested sums.
 
 @examples[
 #:label #f
@@ -336,7 +339,8 @@ names of the reductions that were used.
           [t any/c]
           [#:all? all boolean? #f]
           [#:cache-all? cache-all? boolean? (or all? (current-cache-all?))]
-          [#:stop-when stop-when (-> any/c any) (λ (x) #f)])
+          [#:stop-when stop-when (-> any/c any) (λ (x) #f)]
+          [#:error-on-multiple? error-on-multiple? boolean?])
          (listof any/c)]{
 
 Accepts a reduction relation and a
@@ -358,6 +362,11 @@ called with each term that @racket[apply-reduction-relation*] encounters. If it
 ever returns a true value (anything except @racket[#f]), then @racket[apply-reduction-relation*]
 considers the term to be irreducible (and so returns it and does not try to
 reduce it further).
+
+If @racket[error-on-multiple?] is @racket[#t], then an error is signalled if any of
+the terms reduce to more than one other term.
+
+@history[#:changed "1.18" @list{Added @racket[error-on-multiple?].}]
 
 }
 

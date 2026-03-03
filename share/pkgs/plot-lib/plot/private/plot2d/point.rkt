@@ -71,7 +71,7 @@
          [(empty? vs)  empty-renderer2d]
          [else
           (unless (= 0 x-jitter y-jitter)
-            (points-apply-jitters vs (vector x-jitter y-jitter) #:ivls (vector (ivl x-min x-max) (ivl y-min y-max))))
+            (points-apply-jitters vs ((inst vector Nonnegative-Real) x-jitter y-jitter) #:ivls (vector (ivl x-min x-max) (ivl y-min y-max))))
           (match-define (list (vector #{xs : (Listof Real)} #{ys : (Listof Real)}) ...) vs)
           (let ([x-min  (if x-min x-min (apply min* xs))]
                 [x-max  (if x-max x-max (apply max* xs))]
@@ -190,7 +190,6 @@
                              Nonnegative-Real Nonnegative-Real Boolean
                              2D-Render-Proc))
 (define ((error-bars-render-fun xs ys hs color line-width line-style width alpha invert?) area)
-  (define clip-rect (send area get-clip-rect))
   (define radius (* 1/2 width))
   (define angle (if invert? (/ pi 2) 0))
 
@@ -200,12 +199,11 @@
   (send area put-alpha alpha)
   (send area put-pen color line-width line-style)
   (for ([x  (in-list xs)] [y  (in-list ys)] [h  (in-list hs)])
-    (when (rect-contains? clip-rect (maybe-invert x y))
-      (define v1 (maybe-invert x (- y h)))
-      (define v2 (maybe-invert x (+ y h)))
-      (send area put-line v1 v2)
-      (send area put-tick v1 radius angle)
-      (send area put-tick v2 radius angle))))
+    (define v1 (maybe-invert x (- y h)))
+    (define v2 (maybe-invert x (+ y h)))
+    (send area put-line v1 v2)
+    (send area put-tick v1 radius angle)
+    (send area put-tick v2 radius angle)))
 
 (:: error-bars
     (->* [(Sequenceof (Sequenceof Real))]

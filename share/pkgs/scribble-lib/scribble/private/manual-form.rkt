@@ -20,7 +20,7 @@
          specform specform/subs
          specsubform specsubform/subs specspecsubform specspecsubform/subs
          specsubform/inline
-         defsubform defsubform*
+         defsubidform defsubform defsubform*
          racketgrammar racketgrammar*
          (rename-out [racketgrammar schemegrammar]
                      [racketgrammar* schemegrammar*])
@@ -81,7 +81,7 @@
     [(_ k:kind-kw lt:link-target?-kw d:id-kw l:literals-kw [spec spec1 ...]
         g:grammar
         c:contracts-kw
-        desc ...)
+        desc:expr ...)
      (with-syntax* ([defined-id (if (syntax-e #'d.defined-id)
                                     #'d.defined-id
                                     (syntax-case #'spec ()
@@ -122,7 +122,7 @@
 (define-syntax (defform* stx)
   (syntax-parse stx
     [(_ k:kind-kw lt:link-target?-kw d:id-kw l:literals-kw [spec ...+]
-        subs:subs-kw c:contracts-kw desc ...)
+        subs:subs-kw c:contracts-kw desc:expr ...)
      (syntax/loc stx
        (defform*/subs #:kind k.kind 
          #:link-target? lt.expr
@@ -133,7 +133,7 @@
 (define-syntax (defform stx)
   (syntax-parse stx
     [(_ k:kind-kw lt:link-target?-kw d:id-kw l:literals-kw spec
-        subs:subs-kw c:contracts-kw desc ...)
+        subs:subs-kw c:contracts-kw desc:expr ...)
      (syntax/loc stx
        (defform*/subs #:kind k.kind
          #:link-target? lt.expr
@@ -143,17 +143,17 @@
 
 (define-syntax (defform/subs stx)
   (syntax-parse stx
-    [(_ k:kind-kw lt:link-target?-kw d:id-kw l:literals-kw spec subs desc ...)
+    [(_ k:kind-kw lt:link-target?-kw d:id-kw l:literals-kw spec subs c:contracts-kw desc:expr ...)
      (syntax/loc stx
        (defform*/subs #:kind k.kind 
          #:link-target? lt.expr
          #:id [d.defined-id d.defined-id-expr] 
          #:literals (l.lit ...)
-         [spec] subs desc ...))]))
+         [spec] subs #:contracts c.cs desc ...))]))
 
 (define-syntax (defform/none stx)
   (syntax-parse stx
-    [(_ k:kind-kw lt:link-target?-kw l:literals-kw spec subs:subs-kw c:contracts-kw desc ...)
+    [(_ k:kind-kw lt:link-target?-kw l:literals-kw spec subs:subs-kw c:contracts-kw desc:expr ...)
      (syntax/loc stx
        (with-togetherable-racket-variables
         (l.lit ...)
@@ -182,7 +182,7 @@
 
 (define-syntax (defidform stx)
   (syntax-parse stx
-    [(_ k:kind-kw lt:link-target?-kw spec-id desc ...)
+    [(_ k:kind-kw lt:link-target?-kw spec-id desc:expr ...)
      #'(with-togetherable-racket-variables
         ()
         ()
@@ -200,6 +200,10 @@
                      (flow-paragraphs (decode-flow (splice-run s)))
                      (list s))))
 
+(define-syntax (defsubidform stx)
+  (syntax-case stx ()
+    [(_ . rest) #'(into-blockquote (defidform . rest))]))
+
 (define-syntax (defsubform stx)
   (syntax-case stx ()
     [(_ . rest) #'(into-blockquote (defform . rest))]))
@@ -212,7 +216,7 @@
   (syntax-parse stx
     [(_ has-kw? l:literals-kw spec g:grammar
         c:contracts-kw
-        desc ...)
+        desc:expr ...)
      (syntax/loc stx
        (with-racket-variables
         (l.lit ...)
@@ -231,16 +235,17 @@
 
 (define-syntax (specsubform stx)
   (syntax-parse stx
-    [(_ l:literals-kw spec subs:subs-kw c:contracts-kw desc ...)
+    [(_ l:literals-kw spec subs:subs-kw c:contracts-kw desc:expr ...)
      (syntax/loc stx
        (spec?form/subs #f #:literals (l.lit ...) spec subs.g #:contracts c.cs desc ...))]))
 
 (define-syntax (specsubform/subs stx)
   (syntax-parse stx
-    [(_ l:literals-kw spec g:grammar desc ...)
+    [(_ l:literals-kw spec g:grammar c:contracts-kw desc:expr ...)
      (syntax/loc stx
        (spec?form/subs #f #:literals (l.lit ...) spec 
-                       ([g.non-term-id g.non-term-form ...] ...) 
+                       ([g.non-term-id g.non-term-form ...] ...)
+                       #:contracts c.cs
                        desc ...))]))
 
 (define-syntax-rule (specspecsubform spec desc ...)
@@ -257,10 +262,11 @@
 
 (define-syntax (specform/subs stx)
   (syntax-parse stx
-    [(_ l:literals-kw spec g:grammar
-        desc ...)
+    [(_ l:literals-kw spec g:grammar c:contracts-kw
+        desc:expr ...)
      (syntax/loc stx
        (spec?form/subs #t #:literals (l.lit ...) spec ([g.non-term-id g.non-term-form ...] ...)
+                       #:contracts c.cs
                        desc ...))]))
 
 (define-syntax-rule (specsubform/inline spec desc ...)
@@ -299,30 +305,32 @@
 
 (define (meta-symbol? s) (memq s '(... ...+ ?)))
 
-(define (defform-site kw-id)
-  (let ([target-maker (id-to-form-target-maker kw-id #t)])
-    (define-values (content ref-content) (definition-site (syntax-e kw-id) kw-id #t))
-    (if target-maker
-        (target-maker
-         content
-         (lambda (tag)
-           (make-toc-target2-element
-            #f
-            (if kw-id
-                (make-index-element
-                 #f content tag
-                 (list (datum-intern-literal (symbol->string (syntax-e kw-id))))
-                 (list ref-content)
-                 (with-exporting-libraries
-                  (lambda (libs)
-                    (make-form-index-desc (syntax-e kw-id)
-                                          libs))))
-                content)
-            tag
-            ref-content)))
-        content)))
+(define (defform-site kw-id #:kind [kind "syntax"])
+  (define target-maker (id-to-form-target-maker kw-id #t))
+  (define-values (content ref-content) (definition-site (syntax-e kw-id) kw-id #t))
+  (if target-maker
+      (target-maker
+       content
+       (lambda (tag)
+         (make-toc-target2-element
+          #f
+          (if kw-id
+              (make-index-element
+               #f content tag
+               (list (datum-intern-literal (symbol->string (syntax-e kw-id))))
+               (list ref-content)
+               (with-exporting-libraries
+                   (lambda (libs)
+                     (make-exported-index-desc* (syntax-e kw-id)
+                                                libs
+                                                (hash 'kind kind)))))
+              content)
+          tag
+          ref-content)))
+      content))
 
 (define (*defforms kind link? kw-id forms form-procs subs sub-procs contract-procs content-thunk)
+  (define kind* (or kind "syntax"))
   (parameterize ([current-meta-list '(... ...+)])
     (make-box-splice
      (cons
@@ -336,7 +344,7 @@
                      [form-proc (in-list form-procs)]
                      [i (in-naturals)])
             (list
-             ((if (zero? i) (add-background-label (or kind "syntax")) values)
+             ((if (zero? i) (add-background-label kind*) values)
               (list
                ((or form-proc
                     (lambda (x)
@@ -345,7 +353,7 @@
                 (and kw-id
                      (if (eq? form (car forms))
                          (if link?
-                             (defform-site kw-id)
+                             (defform-site kw-id #:kind kind*)
                              (to-element #:defn? #t kw-id))
                          (to-element #:defn? #t kw-id))))))))
           (if (null? sub-procs)
@@ -405,25 +413,23 @@
               flow-empty-line flow-empty-line)
         (list (to-flow nonterm) flow-empty-line (to-flow "=") flow-empty-line
               (make-flow (list (car clauses))))
-        (map (lambda (clause)
-               (list flow-empty-line flow-empty-line
-                     (to-flow "|") flow-empty-line
-                     (make-flow (list clause))))
-             (cdr clauses))))
+        (for/list ([clause (in-list (cdr clauses))])
+          (list flow-empty-line
+                flow-empty-line
+                (to-flow "|")
+                flow-empty-line
+                (make-flow (list clause))))))
      nonterms clauseses))))
 
 (define (*racketrawgrammar style nonterm clause1 . clauses)
   (*racketrawgrammars style (list nonterm) (list (cons clause1 clauses))))
 
 (define (*racketgrammar lits s-expr clauseses-thunk)
-  (let ([l (clauseses-thunk)])
-    (*racketrawgrammars #f
-                        (map (lambda (x)
-                               (make-element #f
-                                             (list (hspace 2)
-                                                   (car x))))
-                             l)
-                        (map cdr l))))
+  (define l (clauseses-thunk))
+  (*racketrawgrammars #f
+                      (for/list ([x (in-list l)])
+                        (make-element #f (list (hspace 2) (car x))))
+                      (map cdr l)))
 
 (define (*var id)
   (to-element (*var-sym id)))
@@ -437,14 +443,11 @@
       (append
        (list (list flow-empty-line))
        (list (list (make-flow
-                    (map (lambda (c)
-                           (make-table
-                            "argcontract"
-                            (list
-                             (list (to-flow (hspace 2))
-                                   (to-flow ((car c)))
-                                   flow-spacer
-                                   (to-flow ":")
-                                   flow-spacer
-                                   (make-flow (list ((cadr c))))))))
-                         contract-procs)))))))
+                    (for/list ([c (in-list contract-procs)])
+                      (make-table "argcontract"
+                                  (list (list (to-flow (hspace 2))
+                                              (to-flow ((car c)))
+                                              flow-spacer
+                                              (to-flow ":")
+                                              flow-spacer
+                                              (make-flow (list ((cadr c))))))))))))))

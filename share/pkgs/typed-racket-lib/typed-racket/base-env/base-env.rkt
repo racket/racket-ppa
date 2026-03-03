@@ -1,4 +1,5 @@
 #lang s-exp "env-lang.rkt"
+#:default-T+ #true
 
 ;; This module defines Typed Racket's main base type environment.
 (require
@@ -7,6 +8,7 @@
   racket/unsafe/ops
   racket/unsafe/undefined
   racket/hash
+  racket/treelist
   (only-in racket/extflonum floating-point-bytes->extfl extfl->floating-point-bytes)
   ;(only-in rnrs/lists-6 fold-left)
   '#%paramz
@@ -21,7 +23,9 @@
   racket/keyword
   racket/private/stx
   (only-in mzscheme make-namespace)
-  (only-in racket/match/runtime match:error matchable? match-equality-test syntax-srclocs))
+  (only-in racket/match/runtime match:error matchable? match-equality-test syntax-srclocs
+           hash-state-step hash-shortcut-step
+           invoke-thunk hash-state hash-state-closed? hash-state-residue undef user-def))
  "base-structs.rkt"
  racket/file
  (only-in racket/private/pre-base new-apply-proc)
@@ -70,10 +74,10 @@
                                    #f)]
 
 ;; Section 4.2 (Booleans)
-[boolean? (make-pred-ty B)]
-[not (make-pred-ty (-val #f))]
+[boolean? (unsafe-shallow:make-pred-ty B)]
+[not (unsafe-shallow:make-pred-ty (-val #f))]
 
-[immutable? (asym-pred Univ B (-PS (-is-type 0 (Un -Bytes -BoxTop -String (-Immutable-HT Univ Univ) (-ivec Univ)))
+[immutable? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 (Un -Bytes -BoxTop -String (-Immutable-HT Univ Univ) (-ivec Univ)))
                                    (-not-type 0 (Un (-Immutable-HT Univ Univ) (-ivec Univ)))))]
 
 ;; Section 4.1.1 (racket/bool)
@@ -81,7 +85,7 @@
 [false (-val #f)]
 [boolean=? (B B . -> . B)]
 [symbol=? (Sym Sym . -> . B)]
-[false? (make-pred-ty (-val #f))]
+[false? (unsafe-shallow:make-pred-ty (-val #f))]
 [xor (-> Univ Univ Univ)]
 
 ;; Section 4.3 (Numbers)
@@ -91,13 +95,13 @@
 
 ;; Section 4.3.2.7 (Random Numbers)
 [random
-  (cl->* (->opt -Int -Int [-Pseudo-Random-Generator] -NonNegFixnum)
+  (cl->* (->opt -Int -Int [-Pseudo-Random-Generator] -Int)
          (->opt -Int [-Pseudo-Random-Generator] -NonNegFixnum)
          (->opt [-Pseudo-Random-Generator] -Flonum))]
 
 [random-seed (-> -PosInt -Void)]
 [make-pseudo-random-generator (-> -Pseudo-Random-Generator)]
-[pseudo-random-generator? (make-pred-ty -Pseudo-Random-Generator)]
+[pseudo-random-generator? (unsafe-shallow:make-pred-ty -Pseudo-Random-Generator)]
 [current-pseudo-random-generator (-Param -Pseudo-Random-Generator -Pseudo-Random-Generator)]
 [pseudo-random-generator->vector
  (-> -Pseudo-Random-Generator (-vec* -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt))]
@@ -121,7 +125,7 @@
 [extfl->floating-point-bytes (->opt -ExtFlonum [Univ -Bytes -Nat] -Bytes)]
 
 ;; Section 4.4 (Strings)
-[string? (make-pred-ty -String)]
+[string? (unsafe-shallow:make-pred-ty -String)]
 ;make-string (in Index)
 [string (->* '() -Char -String)]
 [string->immutable-string (-> -String -String)]
@@ -203,7 +207,7 @@
            #:repeat? Univ #f
            -String)]
 
-[non-empty-string? (asym-pred Univ -Boolean (-PS (-is-type 0 -String) -tt))]
+[non-empty-string? (unsafe-shallow:asym-pred Univ -Boolean (-PS (-is-type 0 -String) -tt))]
 [string-contains? (-> -String -String -Boolean)]
 [string-prefix? (-> -String -String -Boolean)]
 [string-suffix? (-> -String -String -Boolean)]
@@ -318,11 +322,11 @@
 
 ;; Section 4.5 (Byte Strings)
 [bytes (->* (list) -Integer -Bytes)]
-[bytes? (make-pred-ty -Bytes)]
+[bytes? (unsafe-shallow:make-pred-ty -Bytes)]
 [make-bytes (cl-> [(-Integer -Integer) -Bytes]
                   [(-Integer) -Bytes])]
 [bytes->immutable-bytes (-> -Bytes -Bytes)]
-[byte? (make-pred-ty -Byte)]
+[byte? (unsafe-shallow:make-pred-ty -Byte)]
 [bytes-append (->* (list) -Bytes -Bytes)]
 [bytes-length (-> -Bytes -Index)]
 [unsafe-bytes-length (-> -Bytes -Index)]
@@ -380,7 +384,7 @@
               -Nat
               (one-of/c 'complete 'continues)))))]
 
-[bytes-converter? (make-pred-ty -Bytes-Converter)]
+[bytes-converter? (unsafe-shallow:make-pred-ty -Bytes-Converter)]
 
 [locale-string-encoding (-> -String)]
 
@@ -388,7 +392,7 @@
 [bytes-join ((-lst -Bytes) -Bytes . -> . -Bytes)]
 
 ;; Section 4.6 (Characters)
-[char? (make-pred-ty -Char)]
+[char? (unsafe-shallow:make-pred-ty -Char)]
 [char=? (->* (list -Char -Char) -Char B)]
 [char<=? (->* (list -Char -Char) -Char B)]
 [char>=? (->* (list -Char -Char) -Char B)]
@@ -426,7 +430,7 @@
 [char-utf-8-length (-> -Char (apply Un (map -val '(1 2 3 4 5 6))))]
 
 ;; Section 4.7 (Symbols)
-[symbol? (make-pred-ty Sym)]
+[symbol? (unsafe-shallow:make-pred-ty Sym)]
 [symbol-interned? (-> Sym B)]
 [symbol-unreadable? (-> Sym B)]
 [symbol->string (Sym . -> . -String)]
@@ -439,10 +443,10 @@
 [symbol->immutable-string (Sym . -> . -String)]
 
 ;; Section 4.8 (Regular Expressions)
-[regexp? (make-pred-ty -Regexp)]
-[pregexp? (make-pred-ty -PRegexp)]
-[byte-regexp? (make-pred-ty -Byte-Regexp)]
-[byte-pregexp? (make-pred-ty -Byte-PRegexp)]
+[regexp? (unsafe-shallow:make-pred-ty -Regexp)]
+[pregexp? (unsafe-shallow:make-pred-ty -PRegexp)]
+[byte-regexp? (unsafe-shallow:make-pred-ty -Byte-Regexp)]
+[byte-pregexp? (unsafe-shallow:make-pred-ty -Byte-PRegexp)]
 [regexp (-String . -> . -Base-Regexp)]
 [pregexp (-String . -> . -PRegexp)]
 [byte-regexp (-Bytes . -> . -Byte-Base-Regexp)]
@@ -497,7 +501,7 @@
   [-> -Bytes -Bytes])]
 
 ;; Section 4.9 (Keywords)
-[keyword? (make-pred-ty -Keyword)]
+[keyword? (unsafe-shallow:make-pred-ty -Keyword)]
 [string->keyword (-String . -> . -Keyword)]
 [keyword->string (-Keyword . -> . -String)]
 [keyword<? (->* (list -Keyword -Keyword) -Keyword B)]
@@ -507,142 +511,142 @@
 ;; Section 4.10 (Pairs and Lists)
 [car   (-poly (a b)
               (cl->*
-               (->acc (list (-pair a b)) a (list -car))
-               (->* (list (-lst a)) a)))]
+               (->acc (list (-pair a b)) a (list -car) #:T+ #f)
+               (->* (list (-lst a)) a :T+ #f)))]
 [cdr   (-poly (a b)
               (cl->*
-               (->acc (list (-pair a b)) b (list -cdr))
-               (->* (list (-lst a)) (-lst a))))]
+               (->acc (list (-pair a b)) b (list -cdr) #:T+ #f)
+               (->* (list (-lst a)) (-lst a) :T+ #f)))]
 
 ;; these type signatures do not cover all valid uses of these pair accessors
 [caar (-poly (a b c)
-             (cl->* [->acc (list (-pair (-pair a b) c)) a (list -car -car)]
-                    [-> (-lst (-pair a b)) a]
-                    [-> (-pair (-lst a) b) a]
-                    [-> (-lst (-lst a)) a]))]
+             (cl->* [->acc (list (-pair (-pair a b) c)) a (list -car -car) #:T+ #f]
+                    [-> (-lst (-pair a b)) a :T+ #f]
+                    [-> (-pair (-lst a) b) a :T+ #f]
+                    [-> (-lst (-lst a)) a :T+ #f]))]
 [cdar (-poly (a b c)
-             (cl->* [->acc (list (-pair (-pair a b) c)) b (list -cdr -car)]
-                    [-> (-lst (-pair a b)) b]
-                    [-> (-pair (-lst a) b) (-lst a)]
-                    [-> (-lst (-lst a)) (-lst a)]))]
+             (cl->* [->acc (list (-pair (-pair a b) c)) b (list -cdr -car) #:T+ #f]
+                    [-> (-lst (-pair a b)) b :T+ #f]
+                    [-> (-pair (-lst a) b) (-lst a) :T+ #f]
+                    [-> (-lst (-lst a)) (-lst a) :T+ #f]))]
 [cadr (-poly (a b c)
-             (cl->* [->acc (list (-pair a (-pair b c))) b (list -car -cdr)]
-                    [-> (-pair a (-lst b)) b]
-                    [-> (-lst a) a]))]
+             (cl->* [->acc (list (-pair a (-pair b c))) b (list -car -cdr) #:T+ #f]
+                    [-> (-pair a (-lst b)) b :T+ #f]
+                    [-> (-lst a) a :T+ #f]))]
 [cddr  (-poly (a b c)
-              (cl->* [->acc (list (-pair a (-pair b c))) c (list -cdr -cdr)]
-                     [-> (-pair a (-lst b)) (-lst b)]
-                     [-> (-pair a (-pair b (-lst c))) (-lst c)]
-                     [-> (-lst a) (-lst a)]))]
+              (cl->* [->acc (list (-pair a (-pair b c))) c (list -cdr -cdr) #:T+ #f]
+                     [-> (-pair a (-lst b)) (-lst b) :T+ #f]
+                     [-> (-pair a (-pair b (-lst c))) (-lst c) :T+ #f]
+                     [-> (-lst a) (-lst a) :T+ #f]))]
 
 [caaar (-poly (a b c d)
-              (cl->* [->acc (list (-pair (-pair (-pair a b) c) d)) a (list -car -car -car)]
-                     [-> (-lst (-lst (-lst a))) a]))]
+              (cl->* [->acc (list (-pair (-pair (-pair a b) c) d)) a (list -car -car -car) #:T+ #f]
+                     [-> (-lst (-lst (-lst a))) a :T+ #f]))]
 [cdaar (-poly (a b c d)
-              (cl->* [->acc (list (-pair (-pair (-pair a b) c) d)) b (list -cdr -car -car)]
-                     [-> (-lst (-lst (-lst a))) (-lst a)]))]
+              (cl->* [->acc (list (-pair (-pair (-pair a b) c) d)) b (list -cdr -car -car) #:T+ #f]
+                     [-> (-lst (-lst (-lst a))) (-lst a) :T+ #f]))]
 [cadar (-poly (a b c d)
-              (cl->* [->acc (list (-pair (-pair a (-pair b c)) d)) b (list -car -cdr -car)]
-                     [-> (-lst (-lst a)) a]))]
+              (cl->* [->acc (list (-pair (-pair a (-pair b c)) d)) b (list -car -cdr -car) #:T+ #f]
+                     [-> (-lst (-lst a)) a :T+ #f]))]
 [cddar (-poly (a b c d)
-              (cl->* [->acc (list (-pair (-pair a (-pair b c)) d)) c (list -cdr -cdr -car)]
-                     [-> (-lst (-lst a)) (-lst a)]))]
+              (cl->* [->acc (list (-pair (-pair a (-pair b c)) d)) c (list -cdr -cdr -car) #:T+ #f]
+                     [-> (-lst (-lst a)) (-lst a) :T+ #f]))]
 [caadr (-poly (a b c d)
-              (cl->* [->acc (list (-pair a (-pair (-pair b c) d))) b (list -car -car -cdr)]
-                     [-> (-lst (-lst a)) a]))]
+              (cl->* [->acc (list (-pair a (-pair (-pair b c) d))) b (list -car -car -cdr) #:T+ #f]
+                     [-> (-lst (-lst a)) a :T+ #f]))]
 [cdadr (-poly (a b c d)
-              (cl->* [->acc (list (-pair a (-pair (-pair b c) d))) c (list -cdr -car -cdr)]
-                     [-> (-lst (-lst a)) (-lst a)]))]
+              (cl->* [->acc (list (-pair a (-pair (-pair b c) d))) c (list -cdr -car -cdr) #:T+ #f]
+                     [-> (-lst (-lst a)) (-lst a) :T+ #f]))]
 [caddr  (-poly (a b c d)
-              (cl->* [->acc (list (-pair a (-pair b (-pair c d)))) c (list -car -cdr -cdr)]
-                     [-> (-lst a) a]))]
+              (cl->* [->acc (list (-pair a (-pair b (-pair c d)))) c (list -car -cdr -cdr) #:T+ #f]
+                     [-> (-lst a) a :T+ #f]))]
 [cdddr (-poly (a b c d)
-              (cl->* [->acc (list (-pair a (-pair b (-pair c d)))) d (list -cdr -cdr -cdr)]
-                     [-> (-lst a) (-lst a)]))]
+              (cl->* [->acc (list (-pair a (-pair b (-pair c d)))) d (list -cdr -cdr -cdr) #:T+ #f]
+                     [-> (-lst a) (-lst a) :T+ #f]))]
 
 [caaaar (-poly (a b c d e)
-               (cl->* [->acc (list (-pair (-pair (-pair (-pair a b) c) d) e)) a (list -car -car -car -car)]
-                      [-> (-lst (-lst (-lst (-lst a)))) a]))]
+               (cl->* [->acc (list (-pair (-pair (-pair (-pair a b) c) d) e)) a (list -car -car -car -car) #:T+ #f]
+                      [-> (-lst (-lst (-lst (-lst a)))) a :T+ #f]))]
 [cdaaar (-poly (a b c d e)
-               (cl->* [->acc (list (-pair (-pair (-pair (-pair a b) c) d) e)) b (list -cdr -car -car -car)]
-                      [-> (-lst (-lst (-lst (-lst a)))) (-lst a)]))]
+               (cl->* [->acc (list (-pair (-pair (-pair (-pair a b) c) d) e)) b (list -cdr -car -car -car) #:T+ #f]
+                      [-> (-lst (-lst (-lst (-lst a)))) (-lst a) :T+ #f]))]
 [cadaar (-poly (a b c d e)
-               (cl->* [->acc (list (-pair (-pair (-pair a (-pair b c)) d) e)) b (list -car -cdr -car -car)]
-                      [-> (-lst (-lst (-lst a))) a]))]
+               (cl->* [->acc (list (-pair (-pair (-pair a (-pair b c)) d) e)) b (list -car -cdr -car -car) #:T+ #f]
+                      [-> (-lst (-lst (-lst a))) a :T+ #f]))]
 [cddaar (-poly (a b c d e)
-               (cl->* [->acc (list (-pair (-pair (-pair b (-pair b c)) d) e)) c (list -cdr -cdr -car -car)]
-                      [-> (-lst (-lst (-lst a))) (-lst a)]))]
+               (cl->* [->acc (list (-pair (-pair (-pair b (-pair b c)) d) e)) c (list -cdr -cdr -car -car) #:T+ #f]
+                      [-> (-lst (-lst (-lst a))) (-lst a) :T+ #f]))]
 [caadar (-poly (a b c d e)
-               (cl->* [->acc (list (-pair (-pair a (-pair (-pair b c) d)) e)) b (list -car -car -cdr -car)]
-                      [-> (-lst (-lst (-lst a))) a]))]
+               (cl->* [->acc (list (-pair (-pair a (-pair (-pair b c) d)) e)) b (list -car -car -cdr -car) #:T+ #f]
+                      [-> (-lst (-lst (-lst a))) a :T+ #f]))]
 [cdadar (-poly (a b c d e)
-               (cl->* [->acc (list (-pair (-pair a (-pair (-pair b c) d)) e)) c (list -cdr -car -cdr -car)]
-                      [-> (-lst (-lst (-lst a))) (-lst a)]))]
+               (cl->* [->acc (list (-pair (-pair a (-pair (-pair b c) d)) e)) c (list -cdr -car -cdr -car) #:T+ #f]
+                      [-> (-lst (-lst (-lst a))) (-lst a) :T+ #f]))]
 [caddar (-poly (a b c d e)
-               (cl->* [->acc (list (-pair (-pair a (-pair b (-pair c d))) e)) c (list -car -cdr -cdr -car)]
-                      [-> (-lst (-lst a)) a]))]
+               (cl->* [->acc (list (-pair (-pair a (-pair b (-pair c d))) e)) c (list -car -cdr -cdr -car) #:T+ #f]
+                      [-> (-lst (-lst a)) a :T+ #f]))]
 [cdddar (-poly (a b c d e)
-               (cl->* [->acc (list (-pair (-pair a (-pair b (-pair c d))) e)) d (list -cdr -cdr -cdr -car)]
-                      [-> (-lst (-lst a)) (-lst a)]))]
+               (cl->* [->acc (list (-pair (-pair a (-pair b (-pair c d))) e)) d (list -cdr -cdr -cdr -car) #:T+ #f]
+                      [-> (-lst (-lst a)) (-lst a) :T+ #f]))]
 [caaadr (-poly (a b c d e)
-               (cl->* [->acc (list (-pair a (-pair (-pair (-pair b c) d) e))) b (list -car -car -car -cdr)]
-                      [-> (-lst (-lst (-lst a))) a]))]
+               (cl->* [->acc (list (-pair a (-pair (-pair (-pair b c) d) e))) b (list -car -car -car -cdr) #:T+ #f]
+                      [-> (-lst (-lst (-lst a))) a :T+ #f]))]
 [cdaadr (-poly (a b c d e)
-               (cl->* [->acc (list (-pair a (-pair (-pair (-pair b c) d) e))) c (list -cdr -car -car -cdr)]
-                      [-> (-lst (-lst (-lst a))) (-lst a)]))]
+               (cl->* [->acc (list (-pair a (-pair (-pair (-pair b c) d) e))) c (list -cdr -car -car -cdr) #:T+ #f]
+                      [-> (-lst (-lst (-lst a))) (-lst a) :T+ #f]))]
 [cadadr (-poly (a b c d e)
-               (cl->* [->acc (list (-pair a (-pair (-pair b (-pair c d)) e))) c (list -car -cdr -car -cdr)]
-                      [-> (-lst (-lst a)) a]))]
+               (cl->* [->acc (list (-pair a (-pair (-pair b (-pair c d)) e))) c (list -car -cdr -car -cdr) #:T+ #f]
+                      [-> (-lst (-lst a)) a :T+ #f]))]
 [cddadr (-poly (a b c d e)
-               (cl->* [->acc (list (-pair a (-pair (-pair b (-pair c d)) e))) d (list -cdr -cdr -car -cdr)]
-                      [-> (-lst (-lst a)) (-lst a)]))]
+               (cl->* [->acc (list (-pair a (-pair (-pair b (-pair c d)) e))) d (list -cdr -cdr -car -cdr) #:T+ #f]
+                      [-> (-lst (-lst a)) (-lst a) :T+ #f]))]
 [caaddr (-poly (a b c d e)
-               (cl->* [->acc (list (-pair a (-pair b (-pair (-pair c d) e)))) c (list -car -car -cdr -cdr)]
-                      [-> (-lst (-lst a)) a]))]
+               (cl->* [->acc (list (-pair a (-pair b (-pair (-pair c d) e)))) c (list -car -car -cdr -cdr) #:T+ #f]
+                      [-> (-lst (-lst a)) a :T+ #f]))]
 [cdaddr (-poly (a b c d e)
-               (cl->* [->acc (list (-pair a (-pair b (-pair (-pair c d) e)))) d (list -cdr -car -cdr -cdr)]
-                      [-> (-lst (-lst a)) (-lst a)]))]
+               (cl->* [->acc (list (-pair a (-pair b (-pair (-pair c d) e)))) d (list -cdr -car -cdr -cdr) #:T+ #f]
+                      [-> (-lst (-lst a)) (-lst a) :T+ #f]))]
 [cadddr (-poly (a b c d e)
-               (cl->* [->acc (list (-pair a (-pair b (-pair c (-pair d e))))) d (list -car -cdr -cdr -cdr)]
-                      [-> (-lst a) a]))]
+               (cl->* [->acc (list (-pair a (-pair b (-pair c (-pair d e))))) d (list -car -cdr -cdr -cdr) #:T+ #f]
+                      [-> (-lst a) a :T+ #f]))]
 [cddddr (-poly (a b c d e)
-               (cl->* [->acc (list (-pair a (-pair b (-pair c (-pair d e))))) e (list -cdr -cdr -cdr -cdr)]
-                      [-> (-lst a) (-lst a)]))]
+               (cl->* [->acc (list (-pair a (-pair b (-pair c (-pair d e))))) e (list -cdr -cdr -cdr -cdr) #:T+ #f]
+                      [-> (-lst a) (-lst a) :T+ #f]))]
 
 [first (-poly (a b)
               (cl->*
-               (->acc (list (-pair a (-lst b))) a (list -car))
-               (->* (list (-lst a)) a)))]
+               (->acc (list (-pair a (-lst b))) a (list -car) #:T+ #f)
+               (->* (list (-lst a)) a :T+ #f)))]
 [second (-poly (a r t)
-               (cl->* [->acc (list (-lst* a r #:tail (-lst t))) r (list -car -cdr)]
-                      [->* (list (-lst a)) a]))]
+               (cl->* [->acc (list (-lst* a r #:tail (-lst t))) r (list -car -cdr) #:T+ #f]
+                      [->* (list (-lst a)) a :T+ #f]))]
 [third (-poly (a b r t)
-              (cl->* [->acc (list (-lst* a b r #:tail (-lst t))) r (list -car -cdr -cdr)]
-                     [->* (list (-lst a)) a]))]
+              (cl->* [->acc (list (-lst* a b r #:tail (-lst t))) r (list -car -cdr -cdr) #:T+ #f]
+                     [->* (list (-lst a)) a :T+ #f]))]
 [fourth  (-poly (a b c r t)
-              (cl->* [->acc (list (-lst* a b c r #:tail (-lst t))) r (list -car -cdr -cdr -cdr)]
-                     [->* (list (-lst a)) a]))]
+              (cl->* [->acc (list (-lst* a b c r #:tail (-lst t))) r (list -car -cdr -cdr -cdr) #:T+ #f]
+                     [->* (list (-lst a)) a :T+ #f]))]
 [fifth   (-poly (a b c d r t)
-              (cl->* [->acc (list (-lst* a b c d r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr)]
-                     [->* (list (-lst a)) a]))]
+              (cl->* [->acc (list (-lst* a b c d r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr) #:T+ #f]
+                     [->* (list (-lst a)) a :T+ #f]))]
 [sixth   (-poly (a b c d e r t)
-              (cl->* [->acc (list (-lst* a b c d e r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr -cdr)]
-                     [->* (list (-lst a)) a]))]
+              (cl->* [->acc (list (-lst* a b c d e r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr -cdr) #:T+ #f]
+                     [->* (list (-lst a)) a :T+ #f]))]
 [seventh (-poly (a b c d e f r t)
-              (cl->* [->acc (list (-lst* a b c d e f r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr -cdr -cdr)]
-                     [->* (list (-lst a)) a]))]
+              (cl->* [->acc (list (-lst* a b c d e f r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr -cdr -cdr) #:T+ #f]
+                     [->* (list (-lst a)) a :T+ #f]))]
 [eighth  (-poly (a b c d e f g r t)
-              (cl->* [->acc (list (-lst* a b c d e f g r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr -cdr -cdr -cdr)]
-                     [->* (list (-lst a)) a]))]
+              (cl->* [->acc (list (-lst* a b c d e f g r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr -cdr -cdr -cdr) #:T+ #f]
+                     [->* (list (-lst a)) a :T+ #f]))]
 [ninth   (-poly (a b c d e f g h r t)
-              (cl->* [->acc (list (-lst* a b c d e f g h r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr -cdr -cdr -cdr -cdr)]
-                     [->* (list (-lst a)) a]))]
+              (cl->* [->acc (list (-lst* a b c d e f g h r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr -cdr -cdr -cdr -cdr) #:T+ #f]
+                     [->* (list (-lst a)) a :T+ #f]))]
 [tenth   (-poly (a b c d e f g h i r t)
-              (cl->* [->acc (list (-lst* a b c d e f g h i r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr -cdr -cdr -cdr -cdr -cdr)]
-                     [->* (list (-lst a)) a]))]
+              (cl->* [->acc (list (-lst* a b c d e f g h i r #:tail (-lst t))) r (list -car -cdr -cdr -cdr -cdr -cdr -cdr -cdr -cdr -cdr) #:T+ #f]
+                     [->* (list (-lst a)) a :T+ #f]))]
 [rest (-poly (a b)
              (cl->*
-              (->acc (list (-pair a (-lst b))) (-lst b) (list -cdr))
+              (->acc (list (-pair a (-lst b))) (-lst b) (list -cdr) #:T+ #t)
               (->* (list (-lst a)) (-lst a))))]
 
 [cons (-poly (a b)
@@ -653,16 +657,16 @@
                      [(a (-lst a)) (-lst a)]))]
 #;[*list? (make-pred-ty (-lst Univ))]
 
-[null? (make-pred-ty -Null)]
+[null? (unsafe-shallow:make-pred-ty -Null)]
 [null -Null]
-[cons? (make-pred-ty (-pair Univ Univ))]
-[pair? (make-pred-ty (-pair Univ Univ))]
-[empty? (make-pred-ty -Null)]
+[cons? (unsafe-shallow:make-pred-ty (-pair Univ Univ))]
+[pair? (unsafe-shallow:make-pred-ty (-pair Univ Univ))]
+[empty? (unsafe-shallow:make-pred-ty -Null)]
 [empty -Null]
 
 [ormap (-polydots (a c b) (->... (list (->... (list a) (b b) c) (-lst a)) ((-lst b) b) (Un c (-val #f))))]
 [andmap (-polydots (a c d b) (cl->*
-                              (make-pred-ty (list (make-pred-ty (list a) c d) (-lst a)) c (-lst d)
+                              (unsafe-shallow:make-pred-ty (list (make-pred-ty (list a) c d) (-lst a)) c (-lst d)
                                             ;; predicate on second argument
                                             (-arg-path 1))
                               (->... (list (->... (list a) (b b) c) (-lst a)) ((-lst b) b) (Un c (-val #t)))))]
@@ -681,7 +685,7 @@
           (cl->* (Univ (-lst a) . -> . (-opt (-ne-lst a)))
                  (b (-lst a) (-> b a Univ)
                        . -> . (-opt (-ne-lst a)))))]
-[findf (-poly (a) ((a . -> . B) (-lst a) . -> . (-opt a)))]
+[findf (-poly (a) ((a . -> . B :T+ #f) (-lst a) . -> . (-opt a) :T+ #f))]
 
 [assq  (-poly (a b) (Univ (-lst (-pair a b)) . -> . (-opt (-pair a b))))]
 [assv  (-poly (a b) (Univ (-lst (-pair a b)) . -> . (-opt (-pair a b))))]
@@ -700,16 +704,25 @@
                      (-> a Univ)
                      . -> .
                      (-opt -Index)))]
+[indexes-of (-poly (a b)
+                   (cl->* ((-lst a) Univ . -> . (-lst -Index))
+                          ((-lst a) b (-> a b Univ)
+                             . -> . (-lst -Index))))]
+[indexes-where (-poly (a)
+                      ((-lst a)
+                       (-> a Univ)
+                       . -> .
+                       (-lst -Index)))]
 
-[list? (make-pred-ty (-lst Univ))]
+[list? (unsafe-shallow:make-pred-ty (-lst Univ))]
 [list (-poly (a) (->* '() a (-lst a)))]
 [map (-polydots (c a b)
                 (cl->*
-                 (-> (-> a c) (-pair a (-lst a)) (-pair c (-lst c)))
+                 (-> (-> a c :T+ #f) (-pair a (-lst a)) (-pair c (-lst c)))
                  ((list
-                   ((list a) (b b) . ->... . c)
+                   ((list a) (b b) . ->... . c :T+ #f)
                    (-lst a))
-                  ((-lst b) b) . ->... .(-lst c))))]
+                  ((-lst b) b) . ->... . (-lst c))))]
 [for-each (-polydots (a b) ((list ((list a) (b b) . ->... . Univ) (-lst a))
                             ((-lst b) b) . ->... . -Void))]
 #;[fold-left (-polydots (c a b) ((list ((list c a) (b b) . ->... . c) c (-lst a))
@@ -718,15 +731,15 @@
                                 ((-lst b) b) . ->... . c))]
 [foldl
  (-poly (a b c d)
-        (cl-> [((a b . -> . b) b (-lst a)) b]
-              [((a b c . -> . c) c (-lst a) (-lst b)) c]
-              [((a b c d . -> . d) d (-lst a) (-lst b) (-lst c)) d]))]
+        (cl-> [((a b . -> . b :T+ #f) b (-lst a)) b :T+ #f]
+              [((a b c . -> . c :T+ #f) c (-lst a) (-lst b)) c :T+ #f]
+              [((a b c d . -> . d :T+ #f) d (-lst a) (-lst b) (-lst c)) d :T+ #f]))]
 [foldr  (-poly (a b c d)
-               (cl-> [((a b . -> . b) b (-lst a)) b]
-                     [((a b c . -> . c) c (-lst a) (-lst b)) c]
-                     [((a b c d . -> . d) d (-lst a) (-lst b) (-lst c)) d]))]
+               (cl-> [((a b . -> . b :T+ #f) b (-lst a)) b :T+ #f]
+                     [((a b c . -> . c :T+ #f) c (-lst a) (-lst b)) c :T+ #f]
+                     [((a b c d . -> . d :T+ #f) d (-lst a) (-lst b) (-lst c)) d :T+ #f]))]
 [filter (-poly (a b) (cl->*
-                      ((asym-pred a Univ (-PS (-is-type 0 b) -tt))
+                      ((unsafe-shallow:asym-pred a Univ (-PS (-is-type 0 b) -tt))
                        (-lst a)
                        . -> .
                        (-lst b))
@@ -754,7 +767,7 @@
 ;; Section 4.10.7 (racket/list)
 [filter-map (-polydots (c a b)
                        ((list
-                         ((list a) (b b) . ->... . (-opt c))
+                         ((list a) (b b) . ->... . (-opt c) :T+ #f)
                          (-lst a))
                         ((-lst b) b) . ->... . (-lst c)))]
 [count (-polydots (a b)
@@ -766,10 +779,10 @@
                    -Index))]
 [partition
  (-poly (a b) (cl->*
-               (-> (asym-pred b Univ (-PS (-is-type 0 a) -tt)) (-lst b) (-values (list (-lst a) (-lst b))))
+               (-> (unsafe-shallow:asym-pred b Univ (-PS (-is-type 0 a) -tt)) (-lst b) (-values (list (-lst a) (-lst b))))
                (-> (-> a Univ) (-lst a) (-values (list (-lst a) (-lst a))))))]
 
-[last   (-poly (a) ((-lst a) . -> . a))]
+[last   (-poly (a) ((-lst a) . -> . a :T+ #f))]
 [add-between (-poly (a b) ((-lst a) b
                            #:splice? -Boolean #f
                            #:before-first (-lst b) #f
@@ -784,7 +797,7 @@
  (-poly (a b)
    (cl->*
     (-> (-lst a)
-        (asym-pred a Univ (-PS (-is-type 0 b) -tt))
+        (unsafe-shallow:asym-pred a Univ (-PS (-is-type 0 b) -tt))
         (-lst b))
     (-> (-lst a) (-> a Univ) (-lst a))))]
 [dropf (-poly (a) (-> (-lst a) (-> a Univ) (-lst a)))]
@@ -792,14 +805,14 @@
  (-poly (a b)
    (cl->*
     (-> (-lst a)
-        (asym-pred a Univ (-PS (-is-type 0 b) -tt))
+        (unsafe-shallow:asym-pred a Univ (-PS (-is-type 0 b) -tt))
         (-values (list (-lst b) (-lst a))))
     (-> (-lst a) (-> a Univ) (-values (list (-lst a) (-lst a))))))]
 [takef-right
  (-poly (a b)
    (cl->*
     (-> (-lst a)
-        (asym-pred a Univ (-PS (-is-type 0 b) -tt))
+        (unsafe-shallow:asym-pred a Univ (-PS (-is-type 0 b) -tt))
         (-lst b))
     (-> (-lst a) (-> a Univ) (-lst a))))]
 [dropf-right (-poly (a) (-> (-lst a) (-> a Univ) (-lst a)))]
@@ -807,7 +820,7 @@
  (-poly (a b)
    (cl->*
     (-> (-lst a)
-        (asym-pred a Univ (-PS (-is-type 0 b) -tt))
+        (unsafe-shallow:asym-pred a Univ (-PS (-is-type 0 b) -tt))
         (-values (list (-lst a) (-lst b))))
     (-> (-lst a) (-> a Univ) (-values (list (-lst a) (-lst a))))))]
 
@@ -822,7 +835,7 @@
 
 [append-map
  (-polydots (c a b) ((list ((list a) (b b) . ->... . (-lst c)) (-lst a))
-                     ((-lst b) b) . ->... .(-lst c)))]
+                     ((-lst b) b) . ->... . (-lst c)))]
 [append*
  (-poly (a) ((-lst (-lst a)) . -> . (-lst a)))]
 [flatten
@@ -835,9 +848,9 @@
                              (-> (-lst a) -Nat (-seq (-lst a)))))]
 [permutations (-poly (a) (-> (-lst a) (-lst (-lst a))))]
 [in-permutations (-poly (a) (-> (-lst a) (-seq (-lst a))))]
-[argmin (-poly (a) ((a . -> . -Real) (-lst a) . -> . a))]
-[argmax (-poly (a) ((a . -> . -Real) (-lst a) . -> . a))]
-[group-by (-poly (a b) (->opt (-> a b) (-lst a) [(-> b b Univ)] (-lst (-lst a))))]
+[argmin (-poly (a) ((a . -> . -Real) (-lst a) . -> . a :T+ #f))]
+[argmax (-poly (a) ((a . -> . -Real) (-lst a) . -> . a :T+ #f))]
+[group-by (-poly (a b) (->opt (-> a b :T+ #f) (-lst a) [(-> b b Univ)] (-lst (-lst a))))]
 [cartesian-product (-polydots (a) (->... '() ((-lst a) a) (-lst (make-ListDots a 'a))))]
 [remf (-poly (a) (-> (-> a Univ) (-lst a) (-lst a)))]
 [remf* (-poly (a) (-> (-> a Univ) (-lst a) (-lst a)))]
@@ -848,11 +861,13 @@
 ;; Section 4.11 (Mutable Pairs)
 [mcons (-poly (a b) (-> a b (-mpair a b)))]
 [mcar (-poly (a b)
-             (cl->* (-> (-mpair a b) a)
-                    (-> (-mlst a) a)))]
+             (cl->* (-> (-mpair a b) a :T+ #f)
+                    (-> (-mlst a) a :T+ #f)
+                    (-> -MPairTop Univ)))]
 [mcdr (-poly (a b)
-             (cl->* (-> (-mpair a b) b)
-                    (-> (-mlst a) (-mlst a))))]
+             (cl->* (-> (-mpair a b) b :T+ #f)
+                    (-> (-mlst a) (-mlst a))
+                    (-> -MPairTop Univ)))]
 [set-mcar! (-poly (a b)
                   (cl->* (-> (-mpair a b) a -Void)
                          (-> (-mlst a) a -Void)))]
@@ -860,18 +875,20 @@
                   (cl->* (-> (-mpair a b) b -Void)
                          (-> (-mlst a) (-mlst a) -Void)))]
 [unsafe-mcar (-poly (a b)
-                    (cl->* (-> (-mpair a b) a)
-                           (-> (-mlst a) a)))]
+                    (cl->* (-> (-mpair a b) a :T+ #f)
+                           (-> (-mlst a) a :T+ #f)
+                           (-> -MPairTop Univ)))]
 [unsafe-mcdr (-poly (a b)
-                    (cl->* (-> (-mpair a b) b)
-                           (-> (-mlst a) (-mlst a))))]
+                    (cl->* (-> (-mpair a b) b :T+ #f)
+                           (-> (-mlst a) (-mlst a) :T+ #f)
+                           (-> -MPairTop Univ)))]
 [unsafe-set-mcar! (-poly (a b)
                          (cl->* (-> (-mpair a b) a -Void)
                                 (-> (-mlst a) a -Void)))]
 [unsafe-set-mcdr! (-poly (a b)
                          (cl->* (-> (-mpair a b) b -Void)
                                 (-> (-mlst a) (-mlst a) -Void)))]
-[mpair? (make-pred-ty -MPairTop)]
+[mpair? (unsafe-shallow:make-pred-ty -MPairTop)]
 ;; mlist is a macro that under the hood uses -mlist, which is annotated in
 ;; base-special-env.rkt
 
@@ -880,19 +897,21 @@
 [mappend (-poly (a) (->* (list) (-mlst a) (-mlst a)))]
 
 ;; Section 4.12 (Vectors)
-[vector? (make-pred-ty -VectorTop)]
+[vector? (unsafe-shallow:make-pred-ty -VectorTop)]
 [vector->list (-poly (a) (cl->* (-> (-vec a) (-lst a))
                                 (-> -VectorTop (-lst Univ))))]
 [list->vector (-poly (a) (-> (-lst a) (-mvec a)))]
 [vector-length (->acc (list -VectorTop)
                       -Index
-                      (list -vec-len))]
+                      (list -vec-len) #:T+ #t)]
 [vector (-poly (a) (->* (list) a (-mvec a)))]
 [vector-immutable (-poly (a) (->* (list) a (-ivec a)))]
-[vector->immutable-vector (-poly (a) (-> (-vec a) (-ivec a)))]
+[vector->immutable-vector (-poly (a)
+                                 (cl-> [((-vec a)) (-ivec a)]
+                                       [(-VectorTop) (-ivec Univ)]))]
 [vector-fill! (-poly (a) (-> (-vec a) a -Void))]
-[vector-argmax (-poly (a) (-> (-> a -Real) (-vec a) a))]
-[vector-argmin (-poly (a) (-> (-> a -Real) (-vec a) a))]
+[vector-argmax (-poly (a) (-> (-> a -Real) (-vec a) a :T+ #f))]
+[vector-argmin (-poly (a) (-> (-> a -Real) (-vec a) a :T+ #f))]
 [vector-memq (-poly (a) (-> Univ (-vec a) (-opt -Index)))]
 [vector-memv (-poly (a) (-> Univ (-vec a) (-opt -Index)))]
 [vector-member (-poly (a) (Univ (-vec a) . -> . (-opt -Index)))]
@@ -907,7 +926,7 @@
                           . ->... .
                           -Index))]
 [vector-filter (-poly (a b) (cl->*
-                              ((asym-pred a Univ (-PS (-is-type 0 b) -tt))
+                              ((unsafe-shallow:asym-pred a Univ (-PS (-is-type 0 b) -tt))
                                (-vec a)
                                . -> .
                                (-mvec b))
@@ -920,10 +939,10 @@
         (cl->* ((-vec a) . -> . (-mvec a))
                ((-vec a) -Integer . -> . (-mvec a))
                ((-vec a) -Integer -Integer . -> . (-mvec a))))]
-[vector-map (-polydots (c a b) ((list ((list a) (b b) . ->... . c) (-vec a))
-                                ((-vec b) b) . ->... .(-mvec c)))]
-[vector-map! (-polydots (a b) ((list ((list a) (b b) . ->... . a) (-vec a))
-                               ((-vec b) b) . ->... .(-mvec a)))]
+[vector-map (-polydots (c a b) ((list ((list a) (b b) . ->... . c :T+ #f) (-vec a))
+                                ((-vec b) b) . ->... . (-mvec c)))]
+[vector-map! (-polydots (a b) ((list ((list a) (b b) . ->... . a :T+ #f) (-vec a))
+                               ((-vec b) b) . ->... . (-mvec a)))]
 [vector-append (-poly (a) (->* (list) (-vec a) (-mvec a)))]
 [vector-take   (-poly (a) ((-vec a) -Integer . -> . (-mvec a)))]
 [vector-drop   (-poly (a) ((-vec a) -Integer . -> . (-mvec a)))]
@@ -938,27 +957,27 @@
 [box (-poly (a) (a . -> . (-box a)))]
 [box-immutable (-poly (a) (a . -> . (-box a)))]
 [unbox (-poly (a) (cl->*
-                   ((-box a) . -> . a)
+                   ((-box a) . -> . a :T+ #f)
                    (-BoxTop . -> . Univ)))]
 [set-box! (-poly (a) ((-box a) a . -> . -Void))]
 [box-cas! (-poly (a) ((-box a) a a . -> . -Boolean))]
 [unsafe-unbox (-poly (a) (cl->*
-                          ((-box a) . -> . a)
+                          ((-box a) . -> . a :T+ #f)
                           (-BoxTop . -> . Univ)))]
 [unsafe-set-box! (-poly (a) ((-box a) a . -> . -Void))]
 [unsafe-unbox* (-poly (a) (cl->*
-                           ((-box a) . -> . a)
+                           ((-box a) . -> . a :T+ #f)
                            (-BoxTop . -> . Univ)))]
 [unsafe-set-box*! (-poly (a) ((-box a) a . -> . -Void))]
 [unsafe-box*-cas! (-poly (a) ((-box a) a a . -> . -Boolean))]
-[box? (make-pred-ty -BoxTop)]
+[box? (unsafe-shallow:make-pred-ty -BoxTop)]
 
 ;; Section 4.14 (Hash Tables)
-[hash? (make-pred-ty -HashTableTop)]
+[hash? (unsafe-shallow:make-pred-ty -HashTableTop)]
 [hash-eq? (-> -HashTableTop B)]
 [hash-eqv? (-> -HashTableTop B)]
 [hash-equal? (-> -HashTableTop B)]
-[hash-weak? (asym-pred -HashTableTop B (-PS (-is-type 0 -Weak-HashTableTop) (-not-type 0 -Weak-HashTableTop)))]
+[hash-weak? (unsafe-shallow:asym-pred -HashTableTop B (-PS (-is-type 0 -Weak-HashTableTop) (-not-type 0 -Weak-HashTableTop)))]
 [hash (-poly (a b) (->* (list) (make-Rest (list a b)) (-Immutable-HT a b)))]
 [hasheqv (-poly (a b) (->* (list) (make-Rest (list a b)) (-Immutable-HT a b)))]
 [hasheq (-poly (a b) (->* (list) (make-Rest (list a b)) (-Immutable-HT a b)))]
@@ -977,20 +996,20 @@
 [hash-set! (-poly (a b) ((-HT a b) a b . -> . -Void))]
 [hash-set*! (-poly (a b) (->* (list (-HT a b)) (make-Rest (list a b)) -Void))]
 [hash-ref (-poly (a b c)
-                 (cl-> [((-HT a b) a) b]
-                       [((-HT a b) a (-val #f)) (-opt b)]
-                       [((-HT a b) a (-> c)) (Un b c)]
-                       [(-HashTableTop a) Univ]
-                       [(-HashTableTop a (-val #f)) Univ]
-                       [(-HashTableTop a (-> c)) Univ]))]
-[hash-ref! (-poly (a b) (-> (-HT a b) a (-> b) b))]
+                 (cl-> [((-HT a b) a) b :T+ #f]
+                       [((-HT a b) a (-val #f)) (-opt b) :T+ #f]
+                       [((-HT a b) a (-> c :T+ #f)) (Un b c) :T+ #f]
+                       [(-HashTableTop a) Univ :T+ #t]
+                       [(-HashTableTop a (-val #f)) Univ :T+ #t]
+                       [(-HashTableTop a (-> c :T+ #f)) Univ :T+ #t]))]
+[hash-ref! (-poly (a b) (-> (-HT a b) a (-> b :T+ #f) b :T+ #f))]
 [hash-has-key? (-HashTableTop Univ . -> . B)]
 [hash-update! (-poly (a b)
-                     (cl-> [((-HT a b) a (-> b b)) -Void]
-                           [((-HT a b) a (-> b b) (-> b)) -Void]))]
+                     (cl-> [((-HT a b) a (-> b b :T+ #f)) -Void]
+                           [((-HT a b) a (-> b b :T+ #f) (-> b :T+ #f)) -Void]))]
 [hash-update (-poly (a b)
-                    (cl-> [((-HT a b) a (-> b b)) (-Immutable-HT a b)]
-                          [((-HT a b) a (-> b b) (-> b)) (-Immutable-HT a b)]))]
+                    (cl-> [((-HT a b) a (-> b b :T+ #f)) (-Immutable-HT a b)]
+                          [((-HT a b) a (-> b b :T+ #f) (-> b :T+ #f)) (-Immutable-HT a b)]))]
 [hash-remove (-poly (a b) (cl-> [((-HT a b) Univ) (-Immutable-HT a b)]
                                 [(-HashTableTop Univ) (-Immutable-HT Univ Univ)]))]
 [hash-remove! (-poly (a b) (cl-> [((-HT a b) a) -Void]
@@ -998,26 +1017,40 @@
 [hash-clear! (-> -HashTableTop -Void)]
 [hash-clear (-poly (a b) (cl-> [((-HT a b)) (-Immutable-HT a b)]
                                [(-HashTableTop) (-Immutable-HT Univ Univ)]))]
-[hash-copy-clear (-poly (a b) (cl-> [((-Immutable-HT a b)) (-Immutable-HT a b)]
-                                    [((-Mutable-HT a b)) (-Mutable-HT a b)]
-                                    [(-Mutable-HashTableTop) -Mutable-HashTableTop]
-                                    [((-Weak-HT a b)) (-Weak-HT a b)]
-                                    [(-Weak-HashTableTop) -Weak-HashTableTop]
-                                    [((-HT a b)) (-HT a b)]
-                                    [(-HashTableTop) -HashTableTop]))]
+[hash-copy-clear
+ (-poly (a b) (cl->*
+               (->key (-Immutable-HT a b) #:kind (Un (-val #f) (-val 'immutable)) #f
+                      (-Immutable-HT a b))
+               (->key (-Mutable-HT a b) #:kind (Un (-val #f) (-val 'mutable)) #f
+                      (-Mutable-HT a b))
+               (->key -Mutable-HashTableTop #:kind (Un (-val #f) (-val 'mutable)) #t
+                      -Mutable-HashTableTop)
+               (->key (-Weak-HT a b) #:kind (Un (-val #f) (-val 'weak)) #f
+                      (-Weak-HT a b))
+               (->key -Weak-HashTableTop #:kind (Un (-val #f) (-val 'weak)) #f
+                      -Weak-HashTableTop)
+               (->key (-HT a b) #:kind (Un (-val #f) (-val 'immutable) (-val 'mutable) (-val 'ephemeron) (-val 'weak)) #f
+                      (-HT a b))
+               (->key -HashTableTop #:kind (Un (-val #f) (-val 'immutable) (-val 'mutable) (-val 'ephemeron) (-val 'weak)) #f
+                      -HashTableTop)))]
 
-[hash-map (-poly (a b c) (cl-> [((-HT a b) (a b . -> . c)) (-lst c)]
-                               [((-HT a b) (a b . -> . c) Univ) (-lst c)]
-                               [(-HashTableTop (Univ Univ . -> . c)) (-lst c)]
-                               [(-HashTableTop (Univ Univ . -> . c) Univ) (-lst c)]))]
-[hash-for-each (-poly (a b c) (cl-> [((-HT a b) (-> a b c)) -Void]
-                                    [((-HT a b) (-> a b c) Univ) -Void]
-                                    [(-HashTableTop (-> Univ Univ c)) -Void]
-                                    [(-HashTableTop (-> Univ Univ c) Univ) -Void]))]
+[hash-map (-poly (a b c) (cl-> [((-HT a b) (a b . -> . c :T+ #f)) (-lst c)]
+                               [((-HT a b) (a b . -> . c :T+ #f) Univ) (-lst c)]
+                               [(-HashTableTop (Univ Univ . -> . c :T+ #f)) (-lst c)]
+                               [(-HashTableTop (Univ Univ . -> . c :T+ #f) Univ) (-lst c)]))]
+[hash-map/copy (-poly (a b c d) (->key (-HT a b) (a b . -> . (-values (list c d)) :T+ #f)
+                                       #:kind (Un (-val #f) (-val 'immutable) (-val 'mutable) (-val 'ephemeron) (-val 'weak)) #f
+                                       (-HT c d)))]
+[hash-for-each (-poly (a b c) (cl-> [((-HT a b) (-> a b c :T+ #f)) -Void]
+                                    [((-HT a b) (-> a b c :T+ #f) Univ) -Void]
+                                    [(-HashTableTop (-> Univ Univ c :T+ #f)) -Void]
+                                    [(-HashTableTop (-> Univ Univ c :T+ #f) Univ) -Void]))]
 [hash-count (-> -HashTableTop -Index)]
 [hash-empty? (-> -HashTableTop -Boolean)]
 [hash-keys (-poly (a b) (cl-> [((-HT a b)) (-lst a)]
-                              [(-HashTableTop) (-lst Univ)]))]
+                              [((-HT a b) -Boolean) (-lst a)]
+                              [(-HashTableTop) (-lst Univ)]
+                              [(-HashTableTop -Boolean) (-lst Univ)]))]
 [hash-values (-poly (a b) (cl-> [((-HT a b)) (-lst b)]
                                 [(-HashTableTop) (-lst Univ)]))]
 [hash->list (-poly (a b) (cl-> [((-HT a b)) (-lst (-pair a b))]
@@ -1042,10 +1075,10 @@
                             ((-HT a b) -Integer . -> . (Un (-val #f) -Integer))
                             (-> -HashTableTop -Integer (Un (-val #f) -Integer))))]
 [hash-iterate-key (-poly (a b)
-                           (cl->* ((-HT a b) -Integer . -> . a)
+                           (cl->* ((-HT a b) -Integer . -> . a :T+ #f)
                                   (-> -HashTableTop -Integer Univ)))]
 [hash-iterate-value (-poly (a b)
-                           (cl->* ((-HT a b) -Integer . -> . b)
+                           (cl->* ((-HT a b) -Integer . -> . b :T+ #f)
                                   (-> -HashTableTop -Integer Univ)))]
 [hash-iterate-pair (-poly (a b)
                            (cl->* ((-HT a b) -Integer . -> . (-pair a b))
@@ -1059,9 +1092,9 @@
 [unsafe-immutable-hash-iterate-next
   (-poly (a b) ((-Immutable-HT a b) -Integer . -> . (Un (-val #f) -Integer)))]
 [unsafe-immutable-hash-iterate-key
-  (-poly (a b) ((-Immutable-HT a b) -Integer . -> . a))]
+  (-poly (a b) ((-Immutable-HT a b) -Integer . -> . a :T+ #f))]
 [unsafe-immutable-hash-iterate-value
-  (-poly (a b) ((-Immutable-HT a b) -Integer . -> . b))]
+  (-poly (a b) ((-Immutable-HT a b) -Integer . -> . b :T+ #f))]
 [unsafe-immutable-hash-iterate-pair
   (-poly (a b) ((-Immutable-HT a b) -Integer . -> . (-pair a b)))]
 [unsafe-immutable-hash-iterate-key+value
@@ -1072,9 +1105,9 @@
 [unsafe-mutable-hash-iterate-next
   (-poly (a b) ((-Mutable-HT a b) -Integer . -> . (Un (-val #f) -Integer)))]
 [unsafe-mutable-hash-iterate-key
-  (-poly (a b) ((-Mutable-HT a b) -Integer . -> . a))]
+  (-poly (a b) ((-Mutable-HT a b) -Integer . -> . a :T+ #f))]
 [unsafe-mutable-hash-iterate-value
-  (-poly (a b) ((-Mutable-HT a b) -Integer . -> . b))]
+  (-poly (a b) ((-Mutable-HT a b) -Integer . -> . b :T+ #f))]
 [unsafe-mutable-hash-iterate-pair
   (-poly (a b) ((-Mutable-HT a b) -Integer . -> . (-pair a b)))]
 [unsafe-mutable-hash-iterate-key+value
@@ -1085,9 +1118,9 @@
 [unsafe-weak-hash-iterate-next
   (-poly (a b) ((-Weak-HT a b) -Integer . -> . (Un (-val #f) -Integer)))]
 [unsafe-weak-hash-iterate-key
-  (-poly (a b) ((-Weak-HT a b) -Integer . -> . a))]
+  (-poly (a b) ((-Weak-HT a b) -Integer . -> . a :T+ #f))]
 [unsafe-weak-hash-iterate-value
-  (-poly (a b) ((-Weak-HT a b) -Integer . -> . b))]
+  (-poly (a b) ((-Weak-HT a b) -Integer . -> . b :T+ #f))]
 [unsafe-weak-hash-iterate-pair
   (-poly (a b) ((-Weak-HT a b) -Integer . -> . (-pair a b)))]
 [unsafe-weak-hash-iterate-key+value
@@ -1098,12 +1131,24 @@
 [make-weak-custom-hash (->opt (-> Univ Univ Univ) (-> Univ -Nat) [(-> Univ -Nat)] Univ)]
 
 
-[hash-union (-poly (a b) (->* (list (-Immutable-HT a b))  (-HT a b) (-Immutable-HT a b)))]
-[hash-intersect (-poly (a b) (->* (list (-Immutable-HT a b))  (-HT a b) (-Immutable-HT a b)))]
-[hash-union! (-poly (a b) (->* (list (-Mutable-HT a b))  (-HT a b) -Void))]
+[hash-union (-poly (a b) (->optkey (-Immutable-HT a b) []
+                                   #:rest (-HT a b)
+                                   #:combine (-> b b b) #f
+                                   #:combine/key (-> a b b b) #f
+                                   (-Immutable-HT a b)))]
+[hash-intersect (-poly (a b) (->optkey (-Immutable-HT a b) []
+                                       #:rest (-HT a b)
+                                       #:combine (-> b b b) #f
+                                       #:combine/key (-> a b b b) #f
+                                       (-Immutable-HT a b)))]
+[hash-union! (-poly (a b) (->optkey (-Mutable-HT a b) []
+                                   #:rest (-HT a b)
+                                   #:combine (-> b b b) #f
+                                   #:combine/key (-> a b b b) #f
+                                   -Void))]
 
 ;; Section 4.15 (Sequences and Streams)
-[sequence? (make-pred-ty -SequenceTop)]
+[sequence? (unsafe-shallow:make-pred-ty -SequenceTop)]
 [in-sequences
  (-polydots (a) (->* '() (-seq-dots '() a 'a) (-seq-dots '() a 'a)))]
 [in-cycle
@@ -1120,37 +1165,37 @@
 [stop-after (-poly (a) ((-seq a) (a . -> . Univ) . -> . (-seq a)))]
 [make-do-sequence
  (-polydots (a b)
-   ((-> (-values (list (a . -> . (make-ValuesDots '() b 'b))
-                       (a . -> . a)
+   ((-> (-values (list (a . -> . (make-ValuesDots '() b 'b) :T+ #f)
+                       (a . -> . a :T+ #f)
                        a
                        (Un (a . -> . Univ) (-val #f))
                        (Un (->... '() (b b) Univ) (-val #f))
                        (Un (->... (list a) (b b) Univ) (-val #f)))))
     . -> . (-seq-dots '() b 'b)))]
 [sequence-generate
- (-polydots (a) ((-seq-dots '() a 'a) . -> . (-values (list (-> -Boolean) (-> (make-ValuesDots '() a 'a))))))]
+ (-polydots (a) ((-seq-dots '() a 'a) . -> . (-values (list (-> -Boolean) (-> (make-ValuesDots '() a 'a) :T+ #f)))))]
 ;; Doesn't work (mu types are single-valued only):
 ;[sequence-generate*  (-poly (a) ((-seq a) . -> . (-mu t (-values (list (Un (-lst a) (-val #f)) t)))))]
 ;; Doesn't render nicely (but seems to work fine):
 [empty-sequence (-polydots (a) (-seq-dots '() a 'a))]
 [sequence->list (-poly (a) ((-seq a) . -> . (-lst a)))]
 [sequence-length (-SequenceTop . -> . -Nat)]
-[sequence-ref (-polydots (a) ((-seq-dots '() a 'a) -Integer . -> . (make-ValuesDots '() a 'a)))]
+[sequence-ref (-polydots (a) ((-seq-dots '() a 'a) -Integer . -> . (make-ValuesDots '() a 'a) :T+ #f))]
 [sequence-tail (-polydots (a) ((-seq-dots '() a 'a) -Integer . -> . (-seq-dots '() a 'a)))]
 [sequence-append (-polydots (a) (->* '() (-seq-dots '() a 'a) (-seq-dots '() a 'a)))]
 ; We can't express the full type without multiple dotted type variables:
 [sequence-map (-polydots (a b)
                 (cl->*
-                  ((->... '() (b b) a) (-seq-dots '() b 'b) . -> . (-seq a))
-                  ((-> a (make-ValuesDots '() b 'b)) (-seq a) . -> . (-seq-dots '() b 'b))))]
-[sequence-andmap (-polydots (b a) ((->... '() (a a) b) (-seq-dots '() a 'a) . -> . (Un b (-val #t))))]
-[sequence-ormap (-polydots (b a) ((->... '() (a a) b) (-seq-dots '() a 'a) . -> . (Un b (-val #f))))]
+                  ((->... '() (b b) a :T+ #f) (-seq-dots '() b 'b) . -> . (-seq a))
+                  ((-> a (make-ValuesDots '() b 'b) :T+ #f) (-seq a) . -> . (-seq-dots '() b 'b))))]
+[sequence-andmap (-polydots (b a) ((->... '() (a a) b :T+ #f) (-seq-dots '() a 'a) . -> . (Un b (-val #t))))]
+[sequence-ormap (-polydots (b a) ((->... '() (a a) b :T+ #f) (-seq-dots '() a 'a) . -> . (Un b (-val #f))))]
 [sequence-for-each (-polydots (a) ((->... '() (a a) Univ) (-seq-dots '() a 'a) . -> . -Void))]
-[sequence-fold (-polydots (b a) ((->... (list b) (a a) b) b (-seq-dots '() a 'a) . -> . b))]
+[sequence-fold (-polydots (b a) ((->... (list b) (a a) b :T+ #f) b (-seq-dots '() a 'a) . -> . b :T+ #f))]
 [sequence-count (-polydots (a) ((->... '() (a a) Univ) (-seq-dots '() a 'a) . -> . -Nat))]
 [sequence-filter (-polydots (a b c)
                    (cl->*
-                    ((asym-pred a Univ (-PS (-is-type 0 b) -tt))
+                    ((unsafe-shallow:asym-pred a Univ (-PS (-is-type 0 b) -tt))
                      (-seq a)
                      . -> .
                      (-seq b))
@@ -1165,7 +1210,7 @@
 [set-empty? (-poly (e) (-> (-list-or-set e) B))]
 [set-count (-poly (e) (-> (-list-or-set e) -Index))]
 [set-member? (-poly (e) (-> (-list-or-set e) e B))]
-[set-first (-poly (e) (-> (-list-or-set e) e))]
+[set-first (-poly (e) (-> (-list-or-set e) e :T+ #f))]
 [set-rest (-poly (e) (set-abs -set (-> (-set e) (-set e))))]
 [set-add (-poly (e) (set-abs -set (-> (-set e) e (-set e))))]
 [set-remove (-poly (e) (set-abs -set (-> (-set e) Univ (-set e))))]
@@ -1181,8 +1226,8 @@
 [proper-subset? (-poly (e) (set-abs -set (-> (-set e) (-set e) B)))]
 [set-map (-poly (e b) (-> (-list-or-set e) (-> e b) (-lst b)))]
 [set-for-each (-poly (e b) (-> (-list-or-set e) (-> e b) -Void))]
-[generic-set? (asym-pred Univ B (-PS -tt (-not-type 0 (-list-or-set Univ))))]
-[set? (make-pred-ty (-set Univ))]
+[generic-set? (unsafe-shallow:asym-pred Univ B (-PS -tt (-not-type 0 (-list-or-set Univ))))]
+[set? (unsafe-shallow:make-pred-ty (-set Univ))]
 [set-equal? (-poly (e) (-> (-set e) B))]
 [set-eqv? (-poly (e) (-> (-set e) B))]
 [set-eq? (-poly (e) (-> (-set e) B))]
@@ -1193,32 +1238,37 @@
 [set->list (-poly (e) (-> (-set e) (-lst e)))]
 
 ;; Section 4.18 (Procedures)
-[procedure? (make-pred-ty top-func)]
-[compose (-poly (a b c) (-> (-> b c) (-> a b) (-> a c)))]
-[compose1 (-poly (a b c) (-> (-> b c) (-> a b) (-> a c)))]
+[procedure? (unsafe-shallow:make-pred-ty top-func)]
+[compose (-poly (a b c) (-> (-> b c :T+ #f) (-> a b :T+ #f) (-> a c :T+ #f)))]
+[compose1 (-poly (a b c) (-> (-> b c :T+ #f) (-> a b :T+ #f) (-> a c :T+ #f)))]
 [procedure-rename (-poly (a) (-> (-Inter top-func a) -Symbol a))]
 [procedure->method (-poly (a)(-> (-Inter top-func a) a))]
 [procedure-closure-contents-eq? (-> top-func top-func -Boolean)]
 ;; keyword-apply - hard to give a type
 [procedure-arity (-> top-func (Un -Nat -Arity-At-Least (-lst (Un -Nat -Arity-At-Least))))]
-[procedure-arity? (make-pred-ty (Un -Nat -Arity-At-Least (-lst (Un -Nat -Arity-At-Least))))]
+[procedure-arity? (unsafe-shallow:make-pred-ty (Un -Nat -Arity-At-Least (-lst (Un -Nat -Arity-At-Least))))]
 [procedure-arity-includes? (->opt top-func -Nat [Univ] B)]
 [procedure-reduce-arity (-> top-func (Un -Nat -Arity-At-Least (-lst (Un -Nat -Arity-At-Least))) top-func)]
 [procedure-keywords (-> top-func (-values (list (-lst -Keyword) (-opt (-lst -Keyword)))))]
 
-[apply        (-poly (a b) (((list) a . ->* . b) (-lst a) . -> . b))]
-[new-apply-proc (-poly (a b) (((list) a . ->* . b) (-lst a) . -> . b))]
-[kernel:apply (-poly (a b) (((list) a . ->* . b) (-lst a) . -> . b))]
+[apply        (-poly (a b) (((list) a . ->* . b :T+ #f) (-lst a) . -> . b :T+ #f))]
+[new-apply-proc (-poly (a b) (((list) a . ->* . b :T+ #f) (-lst a) . -> . b :T+ #f))]
+[kernel:apply (-poly (a b) (((list) a . ->* . b :T+ #f) (-lst a) . -> . b :T+ #f))]
 [time-apply
  (-polydots (b a) (cl->*
-                   (-> (-> b) -Null (-values (list (-lst* b) -Nat -Nat -Nat)))
-                   (-> (->... '() (a a) b)
+                   (-> (-> b :T+ #f) -Null (-values (list (-lst* b) -Nat -Nat -Nat)))
+                   (-> (->... '() (a a) b :T+ #f)
                        (make-ListDots a 'a)
                        (-values (list (-lst* b) -Nat -Nat -Nat)))))]
 
 ;; Section 4.18.3 (racket/function)
-[identity (-poly (a) (->acc (list a) a null))]
+[identity (-poly (a) (->acc (list a) a null #:T+ #t))]
 [const (-poly (a) (-> a (->* '() Univ a)))]
+[const* (-polydots (a b)
+          (cl->* (-> (->* (list) Univ (-values null)))
+                 (-> a (->* (list) Univ a))
+                 (->... (list a) (b b) (->* (list) Univ (make-ValuesDots (list (-result a)) b 'b)))
+                 (->* (list) Univ (->* (list) Univ ManyUniv))))]
 [negate (-polydots (a b c d)
           (cl->* (-> (-> c Univ : (-PS (-is-type 0 a) (-not-type 0 b)))
                      (-> c -Boolean : (-PS (-not-type 0 b) (-is-type 0 a))))
@@ -1236,16 +1286,66 @@
 ;; doesn't cover cases where we pass multiple of the function's arguments to curry,
 ;; also doesn't express that the returned function is itself curried
 [curry (-polydots (a c b)
-                  (cl->* ((->... (list a) (b b) c) a . -> . (->... '() (b b) c))
-                         ((->... (list a) (b b) c) . -> . (a . -> . (->... '() (b b) c)))))]
+                  (cl->* ((->... (list a) (b b) c :T+ #f) a . -> . (->... '() (b b) c :T+ #f))
+                         ((->... (list a) (b b) c :T+ #f) . -> . (a . -> . (->... '() (b b) c :T+ #f) :T+ #f))))]
 (primitive? (-> Univ B))
 (primitive-closure? (-> Univ B))
 
 ;; Sections 4.19 & 4.20 (Void and Undefined)
 [void (->* '() Univ -Void)]
-[void? (make-pred-ty -Void)]
+[void? (unsafe-shallow:make-pred-ty -Void)]
 
 [unsafe-undefined -Unsafe-Undefined]
+
+;; Section 4.21 (TreeLists)
+
+[treelist (-poly (a) (->* (list) a (-treelist a)))]
+[treelist-empty? (-> (-treelist Univ) B)]
+[treelist-length (-> (-treelist Univ) -Index)]
+[treelist-member?
+ (-poly (a)
+        (cl->* ((-treelist a) a . -> . Univ)
+               ((-treelist a) a (-> a a Univ) . -> . B)))]
+[treelist-first (-poly (a) (-> (-treelist a) a :T+ #f))]
+[treelist-last (-poly (a) (-> (-treelist a) a :T+ #f))]
+[treelist-rest (-poly (a) (-> (-treelist a) (-treelist a)))]
+[treelist-add (-poly (a) (-> (-treelist a) a (-treelist a)))]
+[treelist-cons (-poly (a) (-> (-treelist a) a (-treelist a)))]
+[treelist-delete (-poly (a) (-> (-treelist a) -Index (-treelist a)))]
+[make-treelist (-poly (a) (-> -Nat a (-treelist a)))]
+[treelist-ref (-poly (a) (-> (-treelist a) -Index a :T+ #f))]
+[treelist-insert (-poly (a) (-> (-treelist a) -Index a (-treelist a)))]
+[treelist-set (-poly (a) (-> (-treelist a) -Index a (-treelist a)))]
+[treelist-take (-poly (a) (-> (-treelist a) -Index (-treelist a)))]
+[treelist-drop (-poly (a) (-> (-treelist a) -Index (-treelist a)))]
+[treelist-take-right (-poly (a) (-> (-treelist a) -Index (-treelist a)))]
+[treelist-drop-right (-poly (a) (-> (-treelist a) -Index (-treelist a)))]
+[treelist-sublist (-poly (a) (-> (-treelist a) -Index -Index (-treelist a)))]
+[treelist-reverse (-poly (a) (-> (-treelist a) (-treelist a)))]
+[treelist->list (-poly (a) (-> (-treelist a) (-lst a)))]
+[list->treelist (-poly (a) (-> (-lst a) (-treelist a)))]
+[treelist->vector (-poly (a) (-> (-treelist a) (-vec a)))]
+[vector->treelist (-poly (a) (-> (-vec a) (-treelist a)))]
+[in-treelist (-poly (a) (-> (-treelist a) (-seq a)))]
+[treelist? (unsafe-shallow:make-pred-ty (-treelist Univ))]
+[treelist-append (-poly (a) (->* (list) (-treelist a) (-treelist a)))]
+[treelist-map (-poly (a b) (-> (-treelist a) (-> a b) (-treelist b)))]
+[treelist-for-each (-poly (a b) (-> (-treelist a) (-> a b) -Void))]
+[treelist-filter (-poly (a) (-> (-> a Univ) (-treelist a) (-treelist a)))]
+[treelist-find (-poly (a) (-> (-treelist a) (-> a Univ) a :T+ #f))]
+[treelist-index-of
+ (-poly (a)
+        (cl->* ((-treelist a) a . -> . -Index)
+               ((-treelist a) a (-> a a Univ) . -> . -Index)))]
+[treelist-flatten (Univ . -> . (-treelist Univ))]
+[treelist-append* (-poly (a) (-> (-treelist (-treelist a)) (-treelist a)))]
+[treelist-sort
+(-poly
+  (a b)
+  (cl->*
+   (->key (-treelist a) (-> a a -Boolean) #:key (-opt (-> a a :T+ #f)) #f #:cache-keys? -Boolean #f (-treelist a))
+   (->key (-treelist a) (-> b b -Boolean) #:key (-> a b :T+ #f) #t #:cache-keys? -Boolean #f (-treelist a))))]
+
 
 ;; Section 5.2 (Structure Types)
 [make-struct-type
@@ -1271,21 +1371,21 @@
         Univ]
        (-values (list (-poly (a) (-struct-property a #f)) (-> Univ B) (-> Univ Univ))))]
 
-[struct-type-property? (make-pred-ty (-struct-property -Bottom #f))]
+[struct-type-property? (unsafe-shallow:make-pred-ty (-struct-property -Bottom #f))]
 [struct-type-property-accessor-procedure? (-> Univ B)]
 [struct-type-property-predicate-procedure? (->opt Univ [(-opt (-struct-property -Bottom #f))] B)]
 
 ;; Section 5.6 (Structure Utilities)
 [struct->vector (Univ . -> . (-vec Univ))]
 [struct? (-> Univ -Boolean)]
-[struct-type? (make-pred-ty -StructTypeTop)]
+[struct-type? (unsafe-shallow:make-pred-ty -StructTypeTop)]
 
 ;; Section 6.2 (Classes)
 [object% (-class)]
 
 ;; Section 6.11 (Object, Class, and Interface Utilities)
-[object? (make-pred-ty (-object))]
-[class? (make-pred-ty -ClassTop)]
+[object? (unsafe-shallow:make-pred-ty (-object))]
+[class? (unsafe-shallow:make-pred-ty -ClassTop)]
 ;; TODO: interface?
 ;;       generic?
 [object=? (-> (-object) (-object) -Boolean)]
@@ -1304,7 +1404,7 @@
 ;; TODO: class-info (is this sound to allow?)
 
 ;; Section 7.8 (Unit Utilities)
-[unit? (make-pred-ty -UnitTop)]
+[unit? (unsafe-shallow:make-pred-ty -UnitTop)]
 
 ;; Section 9.1
 [exn:misc:match? (-> Univ B)]
@@ -1312,20 +1412,43 @@
 [match:error ((list) Univ . ->* . (Un))]
 ;[match:error (Univ . -> . (Un))]
 [match-equality-test (-Param (Univ Univ . -> . Univ) (Univ Univ . -> . Univ))]
-[matchable? (make-pred-ty (Un -String -Bytes))]
+[matchable? (unsafe-shallow:make-pred-ty (Un -String -Bytes))]
 [syntax-srclocs (Univ . -> . Univ)]
+
+;; hash table pattern matching
+[hash-state (-poly (a b) (-> (-HT a b) (-lst a) (-lst b)
+                             (-prefab 'hash-state (-HT a b) (-lst a) (-lst b))))]
+
+[hash-state-step
+ (-poly (a c) (-> a (-> (Un c -Unsafe-Undefined)) Univ
+                  (-poly (b) (-> (-prefab 'hash-state (-HT a b) (-lst a) (-lst b))
+                                 (-values (list B (-> (Un b c))
+                                                (-prefab 'hash-state
+                                                         (-HT a b)
+                                                         (-lst a)
+                                                         (-lst b))))))))]
+[hash-shortcut-step
+ (-poly (a c) (-> a (-> (Un c -Unsafe-Undefined))
+                  (-poly (b) (-> (-HT a b)
+                                 (-values (list B (-> (Un b c))))))))]
+
+[invoke-thunk (-poly (a) (-> (-> a) a))]
+[hash-state-closed? (-poly (a b) (-> (-prefab 'hash-state (-HT a b) (-lst a) (-lst b)) B))]
+[hash-state-residue (-poly (a b) (-> (-prefab 'hash-state (-HT a b) (-lst a) (-lst b)) (-HT a b)))]
+[undef -Unsafe-Undefined]
+[user-def Univ]
 
 ;; Section 10.1
 [values (-polydots (a b) (cl->*
                            (-> (-values null))
-                           (->acc (list a) a null)
+                           (->acc (list a) a null #:T+ #t)
                            ((list a) (b b) . ->... . (make-ValuesDots (list (-result a)) b 'b))
                            (->* (list) Univ ManyUniv)))]
 [call-with-values
   (-polydots (b a)
     (cl->*
-     ((-> (make-ValuesDots null a 'a)) (null (a a) . ->... . b) . -> .  b)
-     ((-> ManyUniv) ((list) Univ . ->* . b) . -> . b)))]
+     ((-> (make-ValuesDots null a 'a) :T+ #f) (null (a a) . ->... . b :T+ #f) . -> .  b :T+ #f)
+     ((-> ManyUniv) ((list) Univ . ->* . b :T+ #f) . -> . b :T+ #f)))]
 
 ;; Section 10.2
 [raise (cl->* ((Un -Flat -Exn) . -> . (Un))
@@ -1339,16 +1462,15 @@
         (->* (list -String) Univ (Un))
         (->* (list Sym -String) Univ (Un)))]
 
-;raise-type-error (in index)
 [raise-mismatch-error (-> Sym -String Univ (Un))]
-;raise-arity-error
-[raise-syntax-error (->opt (-opt Sym) -String [Univ Univ (-lst (-Syntax Univ))] (Un))]
+[raise-syntax-error (->optkey (-opt Sym) -String [Univ Univ (-lst (-Syntax Univ)) -String] #:exn (-> (-lst (-Syntax Univ)) -String -Cont-Mark-Set -Exn) #f (Un))]
+;raise-argument-error, raise-type-error, etc. (in index)
 
-[unquoted-printing-string? (make-pred-ty -Unquoted-Printing-String)]
+[unquoted-printing-string? (unsafe-shallow:make-pred-ty -Unquoted-Printing-String)]
 [unquoted-printing-string (-> -String -Unquoted-Printing-String)]
 [unquoted-printing-string-value (-> -Unquoted-Printing-String -String)]
 
-[call-with-exception-handler (-poly (a) (-> (-> Univ a) (-> a) a))]
+[call-with-exception-handler (-poly (a) (-> (-> Univ a :T+ #f) (-> a :T+ #f) a :T+ #f))]
 [uncaught-exception-handler (-Param (-> Univ ManyUniv) (-> Univ ManyUniv))]
 
 [error-escape-handler (-Param (-> ManyUniv) (-> ManyUniv))]
@@ -1360,14 +1482,14 @@
 
 ;; Section 10.2.5
 [prop:exn:srclocs (-struct-property (-> -Self (-lst -Srcloc)) #'exn:srclocs?)]
-[exn:srclocs? (make-pred-ty (-has-struct-property #'prop:exn:srclocs))]
+[exn:srclocs? (unsafe-shallow:make-pred-ty (-has-struct-property #'prop:exn:srclocs))]
 [exn:srclocs-accessor (-> Univ (-lst Univ))] ;TODO
 
 [srcloc->string (-> -Srcloc -String)]
 
 ;; Section 10.3 (Delayed Evaluation)
-[promise? (make-pred-ty (-Promise Univ))]
-[force (-poly (a) (->acc (list (-Promise a)) a (list -force)))]
+[promise? (unsafe-shallow:make-pred-ty (-Promise Univ))]
+[force (-poly (a) (->acc (list (-Promise a)) a (list -force) #:T+ #f))]
 [promise-forced? (-poly (a) (-> (-Promise a) B))]
 [promise-running? (-poly (a) (-> (-Promise a) B))]
 
@@ -1375,59 +1497,59 @@
 [call-with-continuation-prompt
  (-polydots (a b d c)
    (cl->*
-    (-> (-> b) (-Prompt-Tagof b (-> (-> d) d)) (Un b d))
-    (-> (-> b) (-Prompt-Tagof b (->... '() (c c) d)) (->... '() (c c) d)
-        (Un b d))
-    (-> (-> b) Univ)))]
+    (-> (-> b :T+ #f) (-Prompt-Tagof b (-> (-> d :T+ #f) d)) (Un b d) :T+ #f)
+    (-> (-> b :T+ #f) (-Prompt-Tagof b (->... '() (c c) d :T+ #f)) (->... '() (c c) d :T+ #f)
+        (Un b d) :T+ #f)
+    (-> (-> b :T+ #f) Univ)))]
 [abort-current-continuation
  (-polydots (a b d e c)
    (cl->*
-    (->... (list (-Prompt-Tagof b (->... '() (c c) d))) (c c) e)
-    (->... (list (-Prompt-Tagof b (->... '() (c c) ManyUniv))) (c c) e)))]
+    (->... (list (-Prompt-Tagof b (->... '() (c c) d :T+ #f))) (c c) e :T+ #f)
+    (->... (list (-Prompt-Tagof b (->... '() (c c) ManyUniv))) (c c) e :T+ #f)))]
 [make-continuation-prompt-tag
  (-poly (a b) (->opt [Sym] (-Prompt-Tagof a b)))]
 ;; default-continuation-prompt-tag is defined in "base-contracted.rkt"
 [call-with-current-continuation
  (-polydots (a b c)
-   (cl->* (->opt (-> (-> (Un)) (-values null)) (-Prompt-TagTop) (-values null))
+   (cl->* (->opt (-> (-> (Un)) (-values null)) (-Prompt-TagTop) (-values null) :T+ #f)
           (->opt (-> (->... (list a) (c c) (Un))
-                     (make-ValuesDots (list (-result b)) c 'c))
+                     (make-ValuesDots (list (-result b)) c 'c) :T+ #f)
                  (-Prompt-TagTop)
-                 (make-ValuesDots (list (-result (Un a b))) c 'c))))]
+                 (make-ValuesDots (list (-result (Un a b))) c 'c) :T+ #f)))]
 [call/cc
  (-polydots (a b c)
-   (cl->* (->opt (-> (-> (Un)) (-values null)) (-Prompt-TagTop) (-values null))
+   (cl->* (->opt (-> (-> (Un)) (-values null)) (-Prompt-TagTop) (-values null) :T+ #f)
           (->opt (-> (->... (list a) (c c) (Un))
-                     (make-ValuesDots (list (-result b)) c 'c))
+                     (make-ValuesDots (list (-result b)) c 'c) :T+ #f)
                  (-Prompt-TagTop)
-                 (make-ValuesDots (list (-result (Un a b))) c 'c))))]
+                 (make-ValuesDots (list (-result (Un a b))) c 'c) :T+ #f)))]
 [call-with-composable-continuation
  (-polydots (b c a)
    (-> ;; takes a continuation and should return the same
        ;; type as the continuation's input type
-       (-> (->... '() (a a) b) (make-ValuesDots '() a 'a))
+       (-> (->... '() (a a) b :T+ #f) (make-ValuesDots '() a 'a) :T+ #f)
        (-Prompt-Tagof b c)
        ;; the continuation's input is the same as the
        ;; return type here
-       (make-ValuesDots '() a 'a)))]
+       (make-ValuesDots '() a 'a) :T+ #f))]
 [call-with-escape-continuation
  (-polydots (a b c)
-   (cl->* (-> (-> (-> (Un)) (-values null)) (-values null))
+   (cl->* (-> (-> (-> (Un)) (-values null)) (-values null) :T+ #f)
           (-> (-> (->... (list a) (c c) (Un))
-                  (make-ValuesDots (list (-result b)) c 'c))
-              (make-ValuesDots (list (-result (Un a b))) c 'c))))]
+                  (make-ValuesDots (list (-result b)) c 'c) :T+ #f)
+              (make-ValuesDots (list (-result (Un a b))) c 'c) :T+ #f)))]
 [call/ec
  (-polydots (a b c)
-   (cl->* (-> (-> (-> (Un)) (-values null)) (-values null))
+   (cl->* (-> (-> (-> (Un)) (-values null)) (-values null) :T+ #f)
           (-> (-> (->... (list a) (c c) (Un))
-                  (make-ValuesDots (list (-result b)) c 'c))
-              (make-ValuesDots (list (-result (Un a b))) c 'c))))]
-[call-with-continuation-barrier (-poly (a) (-> (-> a) a))]
+                  (make-ValuesDots (list (-result b)) c 'c) :T+ #f)
+              (make-ValuesDots (list (-result (Un a b))) c 'c) :T+ #f)))]
+[call-with-continuation-barrier (-poly (a) (-> (-> a :T+ #f) a :T+ #f))]
 [continuation-prompt-available? (-> -Prompt-TagTop B)]
 [continuation?
- (asym-pred Univ B (-PS (-is-type 0 top-func) -tt))]
-[continuation-prompt-tag? (make-pred-ty -Prompt-TagTop)]
-[dynamic-wind (-poly (a) (-> (-> ManyUniv) (-> a) (-> ManyUniv) a))]
+ (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 top-func) -tt))]
+[continuation-prompt-tag? (unsafe-shallow:make-pred-ty -Prompt-TagTop)]
+[dynamic-wind (-poly (a) (-> (-> ManyUniv) (-> a :T+ #f) (-> ManyUniv) a :T+ #f))]
 
 ;; Section 10.5 (Continuation Marks)
 ;; continuation-marks needs type for continuations as other
@@ -1456,15 +1578,15 @@
  (-poly (a b)
         (cl->*
          (-> (-opt -Cont-Mark-Set) (-Continuation-Mark-Keyof a)
-             (-opt a))
+             (-opt a) :T+ #f)
          (->opt (-opt -Cont-Mark-Set) (-Continuation-Mark-Keyof a)
                 [b -Prompt-TagTop]
-                (Un a b))
+                (Un a b) :T+ #f)
          (->opt (-opt -Cont-Mark-Set) Univ [Univ -Prompt-TagTop] Univ)))]
 [call-with-immediate-continuation-mark
- (-poly (a) (->opt Univ (-> Univ a) [Univ] a))]
-[continuation-mark-key? (make-pred-ty -Continuation-Mark-KeyTop)]
-[continuation-mark-set? (make-pred-ty -Cont-Mark-Set)]
+ (-poly (a) (->opt Univ (-> Univ a :T+ #f) [Univ] a :T+ #f))]
+[continuation-mark-key? (unsafe-shallow:make-pred-ty -Continuation-Mark-KeyTop)]
+[continuation-mark-set? (unsafe-shallow:make-pred-ty -Cont-Mark-Set)]
 [make-continuation-mark-key
  (-poly (a) (->opt [-Symbol] (-Continuation-Mark-Keyof a)))]
 [continuation-mark-set->context
@@ -1481,11 +1603,11 @@
 ;; Section 11.1 (Threads)
 
 ;; Section 11.1.1
-[thread (-> (-> Univ) -Thread)]
-[thread? (make-pred-ty -Thread)]
+[thread (->key (-> ManyUniv) #:keep (Un (-val #f) (-val 'results)) #f #:pool Univ #f -Thread)]
+[thread? (unsafe-shallow:make-pred-ty -Thread)]
 [current-thread (-> -Thread)]
 [thread/suspend-to-kill (-> (-> Univ) -Thread)]
-[call-in-nested-thread (-poly (a) (->opt (-> a) [-Custodian] a))]
+[call-in-nested-thread (-poly (a) (->opt (-> a :T+ #f) [-Custodian] a :T+ #f))]
 
 ;; Section 11.1.2
 [thread-suspend (-Thread . -> . -Void)]
@@ -1506,31 +1628,31 @@
 [thread-send
  (-poly (a) (cl->* (-> -Thread Univ -Void)
                    (-> -Thread Univ (-val #f) (-opt -Void))
-                   (-> -Thread Univ (-> a) (Un -Void a))))]
+                   (-> -Thread Univ (-> a :T+ #f) (Un -Void a) :T+ #f)))]
 [thread-receive (-> Univ)]
 [thread-try-receive (-> Univ)]
 [thread-receive-evt (-> (-mu x (-evt x)))]
 [thread-rewind-receive (-> (-lst Univ) -Void)]
 
 ;; Section 11.2.1
-[evt? (make-pred-ty (-evt Univ))]
-[sync (-poly (a) (->* '() (-evt a) a))]
+[evt? (unsafe-shallow:make-pred-ty (-evt Univ))]
+[sync (-poly (a) (->* '() (-evt a) a :T+ #f))]
 [sync/timeout
  (-poly (a b)
    (cl->*
-    (->* (list (-val #f)) (-evt a) a)
-    (->* (list -NonNegReal) (-evt a) (-opt a))
-    (->* (list (-> b)) (-evt a) (Un a b))))]
-[sync/enable-break (-poly (a) (->* '() (-evt a) a))]
+    (->* (list (-val #f)) (-evt a) a :T+ #f)
+    (->* (list -NonNegReal) (-evt a) (-opt a) :T+ #f)
+    (->* (list (-> b)) (-evt a) (Un a b) :T+ #f)))]
+[sync/enable-break (-poly (a) (->* '() (-evt a) a :T+ #f))]
 [sync/timeout/enable-break
  (-poly (a b)
    (cl->*
-    (->* (list (-val #f)) (-evt a) a)
-    (->* (list -NonNegReal) (-evt a) (-opt a))
-    (->* (list (-> b)) (-evt a) (Un a b))))]
+    (->* (list (-val #f)) (-evt a) a :T+ #f)
+    (->* (list -NonNegReal) (-evt a) (-opt a) :T+ #f)
+    (->* (list (-> b :T+ #f)) (-evt a) (Un a b) :T+ #f)))]
 [choice-evt (-poly (a) (->* '() (-evt a) (-evt a)))]
-[wrap-evt (-poly (a b) (-> (-evt a) (-> a b) (-evt b)))]
-[handle-evt (-poly (a b) (-> (-evt a) (-> a b) (-evt b)))]
+[wrap-evt (-poly (a b) (-> (-evt a) (-> a b :T+ #f) (-evt b)))]
+[handle-evt (-poly (a b) (-> (-evt a) (-> a b :T+ #f) (-evt b)))]
 [guard-evt (-poly (a) (-> (-> (-evt a)) (-evt a)))]
 [nack-guard-evt
  (-poly (a)
@@ -1542,50 +1664,50 @@
 [replace-evt (-poly (a b)
                (cl->*
                  (-> (-evt a) (-> a (-evt b)) (-evt b))
-                 (-> (-evt a) (-> a b) (-mu x (-evt x)))))]
+                 (-> (-evt a) (-> a b :T+ #f) (-mu x (-evt x)))))]
 [never-evt (-evt (Un))]
 [system-idle-evt (-> (-evt -Void))]
 [alarm-evt (-> -Real (-mu x (-evt x)))]
-[handle-evt? (asym-pred Univ B (-PS (-is-type 0 (-evt Univ)) -tt))]
+[handle-evt? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 (-evt Univ)) -tt))]
 [prop:evt (-struct-property (Un (-evt Univ) (-> -Self ManyUniv) -Nat) #'evt?)]
 [current-evt-pseudo-random-generator
  (-Param -Pseudo-Random-Generator -Pseudo-Random-Generator)]
 
 ;; Section 11.2.2
 [make-channel (-poly (a) (-> (-channel a)))]
-[channel? (make-pred-ty -ChannelTop)]
-[channel-get (-poly (a) ((-channel a) . -> . a))]
-[channel-try-get (-poly (a) ((-channel a) . -> . (Un a (-val #f))))]
+[channel? (unsafe-shallow:make-pred-ty -ChannelTop)]
+[channel-get (-poly (a) ((-channel a) . -> . a :T+ #f))]
+[channel-try-get (-poly (a) ((-channel a) . -> . (Un a (-val #f)) :T+ #f))]
 [channel-put (-poly (a) ((-channel a) a . -> . -Void))]
 [channel-put-evt (-poly (a) (-> (-channel a) a (-mu x (-evt x))))]
-[channel-put-evt? (asym-pred Univ B (-PS (-is-type 0 (-mu x (-evt x))) -tt))]
+[channel-put-evt? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 (-mu x (-evt x))) -tt))]
 
 ;; Section 11.2.3 (Semaphores)
-[semaphore? (make-pred-ty -Semaphore)]
+[semaphore? (unsafe-shallow:make-pred-ty -Semaphore)]
 [make-semaphore (->opt [-Nat] -Semaphore)]
 [semaphore-post (-> -Semaphore -Void)]
 [semaphore-wait (-> -Semaphore -Void)]
 [semaphore-try-wait? (-> -Semaphore B)]
 [semaphore-wait/enable-break (-> -Semaphore -Void)]
 [semaphore-peek-evt (-> -Semaphore (-mu x (-evt x)))]
-[semaphore-peek-evt? (asym-pred Univ B (-PS (-is-type 0 (-mu x (-evt x))) -tt))]
+[semaphore-peek-evt? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 (-mu x (-evt x))) -tt))]
 [call-with-semaphore
  (-polydots (b a)
-   (cl->* (->... (list -Semaphore (->... '() [a a] b))
-                 [a a] b)
-          (->... (list -Semaphore (->... '() [a a] b) (-opt (-> b)))
-                 [a a] b)))]
+   (cl->* (->... (list -Semaphore (->... '() [a a] b :T+ #f))
+                 [a a] b :T+ #f)
+          (->... (list -Semaphore (->... '() [a a] b :T+ #f) (-opt (-> b)))
+                 [a a] b :T+ #f)))]
 [call-with-semaphore/enable-break
  (-polydots (b a)
-   (cl->* (->... (list -Semaphore (->... '() [a a] b))
-                 [a a] b)
-          (->... (list -Semaphore (->... '() [a a] b) (-opt (-> b)))
-                 [a a] b)))]
+   (cl->* (->... (list -Semaphore (->... '() [a a] b :T+ #f))
+                 [a a] b :T+ #f)
+          (->... (list -Semaphore (->... '() [a a] b :T+ #f) (-opt (-> b)))
+                 [a a] b :T+ #f)))]
 
 ;; Section 11.3.1 (Thread Cells)
-[thread-cell? (make-pred-ty -ThreadCellTop)]
+[thread-cell? (unsafe-shallow:make-pred-ty -ThreadCellTop)]
 [make-thread-cell (-poly (a) (->opt a [Univ] (-thread-cell a)))]
-[thread-cell-ref (-poly (a) (-> (-thread-cell a) a))]
+[thread-cell-ref (-poly (a) (-> (-thread-cell a) a :T+ #f))]
 [thread-cell-set! (-poly (a) (-> (-thread-cell a) a -Void))]
 [current-preserved-thread-cell-values
  (cl->* (-> Univ) (-> Univ -Void))]
@@ -1597,27 +1719,27 @@
 [extend-parameterization (-poly (a b) (-> Univ (-Param a b) a Univ))]
 
 [make-parameter (-poly (a b) (cl-> [(a) (-Param a a)]
-                                   [(b (a . -> . b)) (-Param a b)]))]
-[make-derived-parameter (-poly (a b c d) (-> (-Param a b) (-> c a) (-> b d) (-Param c d)))]
-[parameter? (make-pred-ty (-Param -Bottom Univ))]
+                                   [(b (a . -> . b :T+ #f)) (-Param a b)]))]
+[make-derived-parameter (-poly (a b c d) (-> (-Param a b) (-> c a :T+ #f) (-> b d :T+ #f) (-Param c d)))]
+[parameter? (unsafe-shallow:make-pred-ty (-Param -Bottom Univ))]
 [parameter-procedure=? (-poly (a b c d) (-> (-Param a b) (-Param c d) B))]
 
 [current-parameterization (-> -Parameterization)]
-[call-with-parameterization (-poly (a) (-> -Parameterization (-> a) a))]
-[parameterization? (make-pred-ty -Parameterization)]
+[call-with-parameterization (-poly (a) (-> -Parameterization (-> a :T+ #f) a :T+ #f))]
+[parameterization? (unsafe-shallow:make-pred-ty -Parameterization)]
 
 ;; Section 11.4 (Futures)
-[future (-poly (A) ((-> A) . -> . (-future A)))]
-[touch (-poly (A) ((-future A) . -> . A))]
+[future (-poly (A) ((-> A :T+ #f) . -> . (-future A)))]
+[touch (-poly (A) ((-future A) . -> . A :T+ #f))]
 [futures-enabled? (-> -Boolean)]
 [current-future (-> (-opt (-future Univ)))]
-[future? (make-pred-ty (-future Univ))]
-[would-be-future (-poly (A) ((-> A) . -> . (-future A)))]
+[future? (unsafe-shallow:make-pred-ty (-future Univ))]
+[would-be-future (-poly (A) ((-> A :T+ #f) . -> . (-future A)))]
 [processor-count (-> -PosInt)]
 
 ;; Section 11.4.2 (Future Semaphores)
 [make-fsemaphore (-> -Nat -FSemaphore)]
-[fsemaphore? (make-pred-ty -FSemaphore)]
+[fsemaphore? (unsafe-shallow:make-pred-ty -FSemaphore)]
 [fsemaphore-post (-> -FSemaphore -Void)]
 [fsemaphore-wait (-> -FSemaphore -Void)]
 [fsemaphore-try-wait? (-> -FSemaphore B)]
@@ -1625,8 +1747,8 @@
 
 ;; Section 11.5 (Places)
 [place-enabled? (-> -Boolean)]
-[place? (make-pred-ty -Place)]
-[place-channel? (make-pred-ty -Place-Channel)]
+[place? (unsafe-shallow:make-pred-ty -Place)]
+[place-channel? (unsafe-shallow:make-pred-ty -Place-Channel)]
 ;; FIXME: the `#:at` keyword is for remote places, not supported yet
 [dynamic-place (->key (Un -Module-Path -Path) Sym
                       #:at (-val #f) #f
@@ -1653,7 +1775,7 @@
 ;; Section 12 (Macros)
 
 ;; Section 12.2
-[syntax? (make-pred-ty (-Syntax Univ))]
+[syntax? (unsafe-shallow:make-pred-ty (-Syntax Univ))]
 
 [syntax-source (-> (-Syntax Univ) Univ)]
 [syntax-line (-> (-Syntax Univ) (-opt -PosInt))]
@@ -1663,7 +1785,7 @@
 
 [syntax-original? (-poly (a) (-> (-Syntax a) B))]
 [syntax-source-module (->opt (-Syntax Univ) [Univ] (Un (-val #f) -Path Sym -Module-Path-Index))]
-[syntax-e (-poly (a) (->acc (list (-Syntax a)) a (list -syntax-e)))]
+[syntax-e (-poly (a) (->acc (list (-Syntax a)) a (list -syntax-e) #:T+ #f))]
 [syntax->list (-poly (a)
                 (cl->* (-> (-Syntax (-lst a)) (-lst a))
                        (-> (-Syntax Univ)
@@ -1696,7 +1818,7 @@
     (->opt ctxt Pre  [srcloc prop cert] A)
     (->opt ctxt Univ [srcloc prop cert] S)))]
 
-[identifier? (make-pred-ty (-Syntax Sym))]
+[identifier? (unsafe-shallow:make-pred-ty (-Syntax Sym))]
 
 [generate-temporaries (-> (Un (-Syntax (-lst Univ)) (-lst Univ)) (-lst (-Syntax Sym)))]
 [identifier-prune-lexical-context (->opt (-Syntax Sym) [(-lst Sym)] (-Syntax Sym))]
@@ -1756,7 +1878,7 @@
  (Ident . ->opt . [(Un -Int (-val #f))] -Symbol)]
 
 ;; Section 12.4
-[set!-transformer? (make-pred-ty (-has-struct-property #'prop:set!-transformer))]
+[set!-transformer? (unsafe-shallow:make-pred-ty (-has-struct-property #'prop:set!-transformer))]
 [make-set!-transformer (-> (-> (-Syntax Univ) (-Syntax Univ)) Univ)]
 [set!-transformer-procedure (-> Univ (-> (-Syntax Univ) (-Syntax Univ)))]
 [prop:set!-transformer (-struct-property (Un -Nat
@@ -1764,7 +1886,7 @@
                                                    [(-Self (-Syntax Univ)) (-Syntax Univ)]))
                                          #'set!-transformer?)]
 
-[rename-transformer? (make-pred-ty (-has-struct-property #'prop:rename-transformer))]
+[rename-transformer? (unsafe-shallow:make-pred-ty (-has-struct-property #'prop:rename-transformer))]
 [make-rename-transformer (->opt (-Syntax Sym) [(-> (-Syntax Sym) (-Syntax Sym))] Univ)]
 [rename-transformer-target (-> Univ (-Syntax Sym))]
 [prop:rename-transformer (-struct-property (Un -Nat (-Syntax Sym) (-> -Self (-Syntax Sym)))
@@ -1818,7 +1940,7 @@
          Univ]
         (-Syntax Univ))]
 
-[internal-definition-context? (make-pred-ty -Internal-Definition-Context)]
+[internal-definition-context? (unsafe-shallow:make-pred-ty -Internal-Definition-Context)]
 [syntax-local-make-definition-context (->opt [(-opt -Internal-Definition-Context)] -Internal-Definition-Context)]
 [syntax-local-bind-syntaxes (-> (-lst (-Syntax Sym)) (-opt (-Syntax Univ)) -Internal-Definition-Context -Void)]
 [internal-definition-context-introduce
@@ -1891,9 +2013,9 @@
 [current-locale (-Param -String -String)]
 
 ;; Section 13.1.2
-[input-port? (make-pred-ty -Input-Port)]
-[output-port? (make-pred-ty -Output-Port)]
-[port? (make-pred-ty -Port)]
+[input-port? (unsafe-shallow:make-pred-ty -Input-Port)]
+[output-port? (unsafe-shallow:make-pred-ty -Output-Port)]
+[port? (unsafe-shallow:make-pred-ty -Port)]
 
 [close-input-port (-> -Input-Port -Void)]
 [close-output-port (-> -Output-Port -Void)]
@@ -1905,11 +2027,11 @@
 [current-output-port (-Param -Output-Port -Output-Port)]
 [current-error-port (-Param -Output-Port -Output-Port)]
 
-[file-stream-port? (asym-pred Univ B (-PS (-is-type 0 -Port) -tt))]
-[terminal-port? (asym-pred Univ B (-PS (-is-type 0 -Port) -tt))]
+[file-stream-port? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 -Port) -tt))]
+[terminal-port? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 -Port) -tt))]
 
 [eof (-val eof)]
-[eof-object? (make-pred-ty (-val eof))]
+[eof-object? (unsafe-shallow:make-pred-ty (-val eof))]
 
 ;; Section 13.1.3
 [flush-output (->opt [-Output-Port] -Void)]
@@ -1949,28 +2071,28 @@
         (-values (list -Input-Port -Output-Port)))]
 
 
-[call-with-input-file (-poly (a) (-Pathlike (-Input-Port . -> . a) #:mode (Un (-val 'binary) (-val 'text)) #f . ->key .  a))]
-[call-with-output-file (-poly (a) (-Pathlike (-Output-Port . -> . a)
+[call-with-input-file (-poly (a) (-Pathlike (-Input-Port . -> . a :T+ #f) #:mode (Un (-val 'binary) (-val 'text)) #f . ->key .  a :T+ #f))]
+[call-with-output-file (-poly (a) (-Pathlike (-Output-Port . -> . a :T+ #f)
                                    #:exists (one-of/c 'error 'append 'update 'replace 'truncate 'truncate/replace) #f
                                    #:mode (one-of/c 'binary 'text) #f
-                                   . ->key .  a))]
+                                   . ->key .  a :T+ #f))]
 
-[call-with-input-file* (-poly (a) (-Pathlike (-Input-Port . -> . a) #:mode (Un (-val 'binary) (-val 'text)) #f . ->key .  a))]
-[call-with-output-file* (-poly (a) (-Pathlike (-Output-Port . -> . a)
+[call-with-input-file* (-poly (a) (-Pathlike (-Input-Port . -> . a :T+ #f) #:mode (Un (-val 'binary) (-val 'text)) #f . ->key .  a :T+ #f))]
+[call-with-output-file* (-poly (a) (-Pathlike (-Output-Port . -> . a :T+ #f)
                                    #:exists (one-of/c 'error 'append 'update 'replace 'truncate 'truncate/replace) #f
                                    #:mode (one-of/c 'binary 'text) #f
-                                   . ->key .  a))]
+                                   . ->key .  a :T+ #f))]
 
 [with-input-from-file
- (-poly (a) (->key -Pathlike (-> a) #:mode (one-of/c 'binary 'text) #f a))]
+ (-poly (a) (->key -Pathlike (-> a :T+ #f) #:mode (one-of/c 'binary 'text) #f a :T+ #f))]
 [with-output-to-file
- (-poly (a) (->key -Pathlike (-> a)
+ (-poly (a) (->key -Pathlike (-> a :T+ #f)
                    #:exists (one-of/c 'error 'append 'update 'can-update
                            'replace 'truncate
                            'must-truncate 'truncate/replace)
                    #f
                    #:mode (one-of/c 'binary 'text) #f
-                   a))]
+                   a :T+ #f))]
 |#
 
 [port-try-file-lock? (-> (Un -Input-Port -Output-Port) (one-of/c 'shared 'exclusive) B)]
@@ -2067,7 +2189,7 @@
 [port->list
  (-poly (a) (cl->*
              (-> (-lst Univ))
-             (->opt (-> -Input-Port a) [-Input-Port] (-lst a))))]
+             (->opt (-> -Input-Port a :T+ #f) [-Input-Port] (-lst a))))]
 [port->string (->optkey [-Input-Port] #:close? Univ #f -String)]
 [port->bytes  (->optkey [-Input-Port] #:close? Univ #f -Bytes)]
 
@@ -2082,18 +2204,18 @@
 
 [call-with-input-string
  (-polydots (a)
-   (-> -String (-> -Input-Port (make-ValuesDots '() a 'a))
-       (make-ValuesDots '() a 'a)))]
+   (-> -String (-> -Input-Port (make-ValuesDots '() a 'a) :T+ #f)
+       (make-ValuesDots '() a 'a) :T+ #f))]
 [call-with-input-bytes
  (-polydots (a)
-   (-> -Bytes (-> -Input-Port (make-ValuesDots '() a 'a))
-       (make-ValuesDots '() a 'a)))]
+   (-> -Bytes (-> -Input-Port (make-ValuesDots '() a 'a) :T+ #f)
+       (make-ValuesDots '() a 'a) :T+ #f))]
 
-[with-input-from-string (-poly (a) (-> -String (-> a) a))]
-[with-input-from-bytes (-poly (a) (-> -Bytes (-> a) a))]
+[with-input-from-string (-poly (a) (-> -String (-> a :T+ #f) a :T+ #f))]
+[with-input-from-bytes (-poly (a) (-> -Bytes (-> a :T+ #f) a :T+ #f))]
 
 ;; Section 13.1.10.2
-[input-port-append  (->* (list Univ) -Input-Port -Input-Port)]
+[input-port-append  (->optkey Univ [] #:rest -Input-Port #:name Univ #f -Input-Port)]
 
 [make-input-port/read-to-peek
  (let ([specials-func (-> (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)])
@@ -2324,7 +2446,7 @@
 [pretty-print-show-inexactness (-Param Univ B)]
 [pretty-print-abbreviate-read-macros (-Param Univ B)]
 
-[pretty-print-style-table? (make-pred-ty -Pretty-Print-Style-Table)]
+[pretty-print-style-table? (unsafe-shallow:make-pred-ty -Pretty-Print-Style-Table)]
 [pretty-print-current-style-table (-Param -Pretty-Print-Style-Table -Pretty-Print-Style-Table)]
 [pretty-print-extend-style-table (-> (-opt -Pretty-Print-Style-Table) (-lst Sym) (-lst Sym) -Pretty-Print-Style-Table)]
 [pretty-print-remap-stylable (-Param (-> Univ (-opt Sym)) (-> Univ (-opt Sym)))]
@@ -2346,20 +2468,16 @@
 ;; Section 13.7
 
 ;; Section 13.7.1
-[readtable? (make-pred-ty -Read-Table)]
+[readtable? (unsafe-shallow:make-pred-ty -Read-Table)]
 [make-readtable
- (cl->*
-  (-> -Read-Table -Read-Table)
-  (-> -Read-Table
-      (-opt -Char) (Un (one-of/c 'terminating-macro 'non-terminating-macro 'dispatch-macro) -Char)
-      (-> -Char -Input-Port (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)
-      -Read-Table)
-  (-> -Read-Table
-      (-opt -Char) (Un (one-of/c 'terminating-macro 'non-terminating-macro 'dispatch-macro) -Char)
-      (-> -Char -Input-Port (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)
-      (-opt -Char) (Un (one-of/c 'terminating-macro 'non-terminating-macro 'dispatch-macro) -Char)
-      (-> -Char -Input-Port (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)
-      -Read-Table))]
+ (->* (list (-opt -Read-Table))
+      (make-Rest
+       (list (-opt -Char)
+             (Un (one-of/c 'terminating-macro 'non-terminating-macro 'dispatch-macro) -Char)
+             (Un (-> -Char -Input-Port (-opt -PosInt) (-opt -Nat)
+                     (-opt -PosInt) (-opt -Nat) Univ)
+                 (-opt -Read-Table))))
+      -Read-Table)]
 
 [readtable-mapping (-> -Read-Table -Char
                        (-values (list
@@ -2383,14 +2501,14 @@
 ;; Nothing defined here
 
 ;; Section 13.7.3
-[special-comment? (make-pred-ty -Special-Comment)]
+[special-comment? (unsafe-shallow:make-pred-ty -Special-Comment)]
 [make-special-comment (-> Univ -Special-Comment)]
 [special-comment-value (-> -Special-Comment Univ)]
 
 ;; Section 13.8
 [prop:custom-write (-struct-property (-> -Self -Output-Port (Un B (-val 1) (-val 0)) ManyUniv)
                                      #'custom-write?)]
-[custom-write? (make-pred-ty (-has-struct-property #'prop:custom-write))]
+[custom-write? (unsafe-shallow:make-pred-ty (-has-struct-property #'prop:custom-write))]
 [custom-write-accessor (-> (-has-struct-property #'prop:custom-write)
                            (-some-res (me) (-> me -Output-Port (Un B (-val 1) (-val 0)) ManyUniv) : #:+ me))]
 
@@ -2399,7 +2517,7 @@
                                                   (-val 'maybe)
                                                   (-val 'always))
                                               #'custom-print-quotable?)]
-[custom-print-quotable? (make-pred-ty (-has-struct-property #'prop:custom-print-quotable))]
+[custom-print-quotable? (unsafe-shallow:make-pred-ty (-has-struct-property #'prop:custom-print-quotable))]
 [custom-print-quotable-accessor (-> (-has-struct-property #'prop:custom-print-quotable)
                                     (Un (-val 'self)
                                         (-val 'never)
@@ -2416,13 +2534,13 @@
 [sha256-bytes (->opt (Un -Bytes -Input-Port) [-Nat (Un -Nat (-val #f))] -Bytes)]
 
 ;; Section 14.1 (Namespaces)
-[namespace? (make-pred-ty -Namespace)]
+[namespace? (unsafe-shallow:make-pred-ty -Namespace)]
 [make-namespace (->opt [(one-of/c  'empty 'initial)] -Namespace)]
 [make-empty-namespace (-> -Namespace)]
 [make-base-empty-namespace (-> -Namespace)]
 [make-base-namespace (-> -Namespace)]
 
-[namespace-anchor? (make-pred-ty -Namespace-Anchor)]
+[namespace-anchor? (unsafe-shallow:make-pred-ty -Namespace-Anchor)]
 [namespace-anchor->empty-namespace (-> -Namespace-Anchor -Namespace)]
 [namespace-anchor->namespace (-> -Namespace-Anchor -Namespace)]
 
@@ -2445,7 +2563,7 @@
 [namespace-syntax-introduce (-poly (a) (-> (-Syntax a) (-Syntax a)))]
 [module-provide-protected? (-> -Module-Path-Index Sym B)]
 
-[variable-reference? (make-pred-ty -Variable-Reference)]
+[variable-reference? (unsafe-shallow:make-pred-ty -Variable-Reference)]
 [variable-reference->empty-namespace (-> -Variable-Reference -Namespace)]
 [variable-reference->namespace (-> -Variable-Reference -Namespace)]
 [variable-reference->resolved-module-path (-> -Variable-Reference (-opt -Resolved-Module-Path))]
@@ -2484,7 +2602,7 @@
 [current-compile (-Param (-> Univ B -Compiled-Expression) (-> Univ B -Compiled-Expression))]
 [compile (-> Univ -Compiled-Expression)]
 [compile-syntax (-> (-Syntax Univ) -Compiled-Expression)]
-[compiled-expression? (make-pred-ty -Compiled-Expression)]
+[compiled-expression? (unsafe-shallow:make-pred-ty -Compiled-Expression)]
 
 [compile-enforce-module-constants (-Param B B)]
 [compile-allow-set!-undefined (-Param B B)]
@@ -2493,10 +2611,10 @@
 [load-on-demand-enabled (-Param B B)]
 
 ;; Section 14.4 (Module Names and Loading)
-[resolved-module-path? (make-pred-ty -Resolved-Module-Path)]
+[resolved-module-path? (unsafe-shallow:make-pred-ty -Resolved-Module-Path)]
 [make-resolved-module-path (-> (Un -Symbol -Path) -Resolved-Module-Path)]
 [resolved-module-path-name (-> -Resolved-Module-Path (Un -Path -Symbol))]
-[module-path? (asym-pred Univ B (-PS (-is-type 0 -Module-Path) -tt))]
+[module-path? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 -Module-Path) -tt))]
 
 [current-module-name-resolver (-Param (cl->* (-Resolved-Module-Path Univ . -> . Univ)
                                              ((Un -Module-Path -Path)
@@ -2514,7 +2632,7 @@
                                      (-opt -Resolved-Module-Path))]
 [current-module-declare-source (-Param (-opt (Un -Symbol -Path))
                                        (-opt (Un -Symbol -Path)))]
-[module-path-index? (make-pred-ty -Module-Path-Index)]
+[module-path-index? (unsafe-shallow:make-pred-ty -Module-Path-Index)]
 [module-path-index-resolve (-> -Module-Path-Index -Resolved-Module-Path)]
 [module-path-index-split (-> -Module-Path-Index
                              (-values
@@ -2524,7 +2642,7 @@
 [module-path-index-join (-> (-opt -Module-Path)
                             (-opt (Un -Module-Path-Index -Resolved-Module-Path))
                             -Module-Path-Index)]
-[compiled-module-expression? (make-pred-ty -Compiled-Module-Expression)]
+[compiled-module-expression? (unsafe-shallow:make-pred-ty -Compiled-Module-Expression)]
 [module-compiled-name (-> -Compiled-Module-Expression -Symbol)]
 [module-compiled-imports (-> -Compiled-Module-Expression
                              (-lst (-pair (-opt -Integer)
@@ -2561,14 +2679,14 @@
  (let ((mod (Un -Module-Path -Resolved-Module-Path -Module-Path-Index)))
   (-poly (a)
    (cl->* (-> mod (Un (one-of/c #f 0) -Void) -Void)
-          (-> mod (Un (one-of/c #f 0) -Void) (-> a) (Un -Void a))
+          (-> mod (Un (one-of/c #f 0) -Void) (-> a :T+ #f) (Un -Void a))
           (->opt mod Sym [(-> Univ)] Univ))))]
 
 [dynamic-require-for-syntax
  (let ((mod (Un -Module-Path -Resolved-Module-Path -Module-Path-Index)))
   (-poly (a)
    (cl->* (-> mod (-val #f) -Void)
-          (-> mod (-val #f) (-> a) (Un -Void a))
+          (-> mod (-val #f) (-> a :T+ #f) (Un -Void a))
           (->opt mod Sym [(-> Univ)] Univ))))]
 
 [module-declared?
@@ -2616,12 +2734,12 @@
 [chaperone-of? (Univ Univ . -> . B)]
 
 [make-impersonator-property (-> Sym (-values (list -Impersonator-Property (-> Univ B) (-> Univ Univ))))]
-[impersonator-property? (make-pred-ty -Impersonator-Property)]
+[impersonator-property? (unsafe-shallow:make-pred-ty -Impersonator-Property)]
 [impersonator-property-accessor-procedure? (-> Univ B)]
 [impersonator-prop:application-mark -Impersonator-Property]
 
 ;; Section 14.6 (Security Guards)
-[security-guard? (make-pred-ty -Security-Guard)]
+[security-guard? (unsafe-shallow:make-pred-ty -Security-Guard)]
 [make-security-guard
  (->opt -Security-Guard
         (-> Sym (-opt -Path) (-lst Sym) ManyUniv)
@@ -2631,7 +2749,7 @@
 [current-security-guard (-Param -Security-Guard -Security-Guard)]
 
 ;; Section 14.7 (Custodians)
-[custodian? (make-pred-ty -Custodian)]
+[custodian? (unsafe-shallow:make-pred-ty -Custodian)]
 [make-custodian (->opt [-Custodian] -Custodian)]
 [custodian-shutdown-all (-> -Custodian -Void)]
 [current-custodian (-Param -Custodian -Custodian)]
@@ -2641,16 +2759,16 @@
 [custodian-limit-memory (->opt -Custodian -Nat [-Custodian] -Void)]
 
 [make-custodian-box (-poly (a) (-> -Custodian a (-CustodianBox a)))]
-[custodian-box? (make-pred-ty (-poly (a) (-CustodianBox a)))]
-[custodian-box-value (-poly (a) (-> (-CustodianBox a) a))]
+[custodian-box? (unsafe-shallow:make-pred-ty (-poly (a) (-CustodianBox a)))]
+[custodian-box-value (-poly (a) (-> (-CustodianBox a) a :T+ #f))]
 
 ;; Section 14.8 (Thread Groups)
 [make-thread-group (->opt [-Thread-Group] -Thread-Group)]
-[thread-group? (make-pred-ty -Thread-Group)]
+[thread-group? (unsafe-shallow:make-pred-ty -Thread-Group)]
 [current-thread-group (-Param -Thread-Group -Thread-Group)]
 
 ;; Section 14.9 (Structure Inspectors)
-[inspector? (make-pred-ty -Inspector)]
+[inspector? (unsafe-shallow:make-pred-ty -Inspector)]
 [make-inspector (->opt [-Inspector] -Inspector)]
 [make-sibling-inspector (->opt [-Inspector] -Inspector)]
 [current-inspector (-Param -Inspector -Inspector)]
@@ -2670,7 +2788,7 @@
 [struct-type-make-predicate
  (-poly (a)
    (cl->*
-    (-> (make-StructType a) (make-pred-ty a))
+    (-> (make-StructType a) (unsafe-shallow:make-pred-ty a))
     (-> -StructTypeTop (-> Univ B))))]
 [object-name (-> Univ Univ)]
 
@@ -2678,11 +2796,11 @@
 [current-code-inspector (-Param -Inspector -Inspector)]
 
 ;; Section 15.1 (Path Manipulation)
-[path? (make-pred-ty -Path)]
-[path-string? (asym-pred Univ B
+[path? (unsafe-shallow:make-pred-ty -Path)]
+[path-string? (unsafe-shallow:asym-pred Univ B
                          (-PS (-is-type 0 (Un -Path -String))
                               (-not-type 0 -Path)))]
-[path-for-some-system? (make-pred-ty -SomeSystemPath)]
+[path-for-some-system? (unsafe-shallow:make-pred-ty -SomeSystemPath)]
 
 [string->path (-> -String -Path)]
 [bytes->path (cl->* (-> -Bytes -Path) (-> -Bytes -PathConventionType -SomeSystemPath))]
@@ -2773,7 +2891,7 @@
 [simple-form-path (-Pathlike . -> . -Path)]
 [normalize-path (cl->* (-Pathlike [-Pathlike] . ->opt . -Path))]
 [path-get-extension (-SomeSystemPathlike . -> . (-opt -Bytes))]
-[path-has-extension? (-SomeSystemPathlike (Un -String -Bytes) . -> . (-opt -Bytes))]
+[path-has-extension? (-SomeSystemPathlike (Un -String -Bytes) . -> . B)]
 [filename-extension (-SomeSystemPathlike . -> . (-opt -Bytes))]
 [file-name-from-path (-Pathlike . -> . (-opt -Path))]
 [path-only (-SomeSystemPathlike . -> . (-opt -Path))]
@@ -2799,8 +2917,8 @@
    (cl->* (-Pathlike . -> . -NonNegFixnum)
           (-Pathlike (-val #f) . -> . -NonNegFixnum)
           (-Pathlike -Nat . -> . -Void)
-          (-Pathlike (-val #f) (-> a) . -> . (Un a -NonNegFixnum))
-          (-Pathlike -Nat (-> a) . -> . (Un a -Void))))]
+          (-Pathlike (-val #f) (-> a :T+ #f) . -> . (Un a -NonNegFixnum) :T+ #f)
+          (-Pathlike -Nat (-> a :T+ #f) . -> . (Un a -Void) :T+ #f)))]
 
 
 [file-or-directory-permissions
@@ -2812,7 +2930,11 @@
 [file-or-directory-identity (->opt -Pathlike [Univ] -PosInt)]
 [file-size (-> -Pathlike -Nat)]
 
-[copy-file (-> -Pathlike -Pathlike -Void)]
+[copy-file (->optkey -Pathlike -Pathlike [(-lst -Symbol)]
+		     #:exists-ok? Univ #f
+		     #:permissions Univ #f
+		     #:replace-permissions? Univ #f
+		     -Void)]
 [make-file-or-directory-link (-> -Pathlike -Pathlike -Void)]
 
 ;; Section 15.2.3
@@ -2827,10 +2949,10 @@
 [filesystem-root-list (-> (-lst -Path))]
 
 ;; Section 15.2.4
-[filesystem-change-evt? (asym-pred Univ B (-PS (-is-type 0 (-mu x (-evt x))) -tt))]
+[filesystem-change-evt? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 (-mu x (-evt x))) -tt))]
 [filesystem-change-evt-cancel (-> (-mu x (-evt x)) -Void)]
 [filesystem-change-evt (-poly (a) (cl->* (-> -Pathlike (-mu x (-evt x)))
-                                         (-> -Pathlike (-> a) (Un (-mu x (-evt x)) a))))]
+                                         (-> -Pathlike (-> a :T+ #f) (Un (-mu x (-evt x)) a))))]
 
 ;; Section 15.2.5 (racket/file)
 [copy-directory/files (->key -Pathlike -Pathlike
@@ -2851,13 +2973,12 @@
 [fold-files
  (-poly
   (a)
-  (let ([funarg* (-Path (one-of/c 'file 'dir 'link) a . -> . (-values (list a Univ)))]
-        [funarg (-Path (one-of/c 'file 'dir 'link) a . -> . a)])
-     ((Un funarg funarg*) a [(-opt -Pathlike) Univ]. ->opt . a)))]
+  (let ([funarg* (-Path (one-of/c 'file 'dir 'link) a . -> . (-values (list a Univ)) :T+ #f)]
+        [funarg (-Path (one-of/c 'file 'dir 'link) a . -> . a :T+ #f)])
+     ((Un funarg funarg*) a [(-opt -Pathlike) Univ]. ->opt . a :T+ #f)))]
 
 [make-directory* (-> -Pathlike -Void)]
 [make-parent-directory* (-> -Pathlike -Void)]
-#;[make-temporary-file (->opt [-String (Un -Pathlike (-val 'directory) (-val #f)) (-opt -Pathlike)] -Path)]
 
 [put-preferences (->opt (-lst -Symbol) (-lst Univ) [(-> -Path Univ) (-opt -Pathlike)] -Void)]
 [preferences-lock-file-mode (-> (one-of/c 'exists 'file-lock))]
@@ -2883,7 +3004,7 @@
 
 [tcp-accept-ready? (-TCP-Listener . -> . B)]
 [tcp-close (-TCP-Listener . -> . -Void)]
-[tcp-listener? (make-pred-ty -TCP-Listener)]
+[tcp-listener? (unsafe-shallow:make-pred-ty -TCP-Listener)]
 
 [tcp-accept-evt
  (-> -TCP-Listener
@@ -2894,7 +3015,7 @@
                 ((Un -TCP-Listener -Port) [(-val #f)] . ->opt . (-values (list -String -String)))
                 ((Un -TCP-Listener -Port) (-val #t) . -> . (-values (list -String -Index -String -Index))))]
 
-[tcp-port? (asym-pred Univ B (-PS (-is-type 0 (Un -Input-Port -Output-Port)) -tt))]
+[tcp-port? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 (Un -Input-Port -Output-Port)) -tt))]
 [port-number? (Univ . -> . B)]
 [listen-port-number? (Univ . -> . B)]
 
@@ -2915,7 +3036,7 @@
 [udp-receive!/enable-break (->opt -UDP-Socket -Bytes [-Int -Int] (-values (list -Nat -String -Nat)))]
 
 [udp-close (-> -UDP-Socket -Void)]
-[udp? (make-pred-ty -UDP-Socket)]
+[udp? (unsafe-shallow:make-pred-ty -UDP-Socket)]
 [udp-bound? (-> -UDP-Socket B)]
 [udp-connected? (-> -UDP-Socket B)]
 
@@ -2984,7 +3105,7 @@
 [subprocess-status (-> -Subprocess (Un (-val 'running) -Nat))]
 [subprocess-kill (-> -Subprocess Univ -Void)]
 [subprocess-pid (-> -Subprocess -Nat)]
-[subprocess? (make-pred-ty -Subprocess)]
+[subprocess? (unsafe-shallow:make-pred-ty -Subprocess)]
 [current-subprocess-custodian-mode (-Param (one-of/c #f 'kill 'interrupt)
                                            (one-of/c #f 'kill 'interrupt))]
 [subprocess-group-enabled (-Param Univ B)]
@@ -3118,7 +3239,7 @@
 	      (-lst* (-opt -Input-Port) (-opt -Output-Port) -Nat (-opt -Input-Port) fun-type))))))]
 
 ;; Section 15.5 (Logging)
-[logger? (make-pred-ty -Logger)]
+[logger? (unsafe-shallow:make-pred-ty -Logger)]
 [make-logger (->opt [(-opt Sym) (-opt -Logger)] -Logger)]
 [logger-name (-> -Logger (-opt Sym))]
 [current-logger (-Param -Logger -Logger)]
@@ -3127,23 +3248,23 @@
                     (->opt -Logger -Log-Level (Un (-val #f) -Symbol) -String Univ [Univ] -Void))]
 [log-level? (->opt -Logger -Log-Level [(-opt -Symbol)] B)]
 
-[log-receiver? (make-pred-ty -Log-Receiver)]
+[log-receiver? (unsafe-shallow:make-pred-ty -Log-Receiver)]
 [make-log-receiver (opt-fn (list -Logger -Log-Level) (list (-opt -Symbol)) -Log-Receiver #:rest (make-Rest (list -Log-Level (-opt -Symbol))))]
 
 ;; Section 15.5.4 (Additional Logging Functions, racket/logging)
-[log-level/c (make-pred-ty (one-of/c 'none 'fatal 'error 'warning 'info 'debug))]
+[log-level/c (unsafe-shallow:make-pred-ty (one-of/c 'none 'fatal 'error 'warning 'info 'debug))]
 [with-intercepted-logging
  (-polydots (a)
    (->* (list (-> (-vec* -Symbol -String Univ (-opt -Symbol)) Univ)
-              (-> (make-ValuesDots null a 'a)))
+              (-> (make-ValuesDots null a 'a) :T+ #f))
         (-opt (one-of/c 'none 'fatal 'error 'warning 'info 'debug))
-        (make-ValuesDots null a 'a)))]
+        (make-ValuesDots null a 'a) :T+ #f))]
 [with-logging-to-port
  (-polydots (a)
-   (->* (list -Output-Port (-> (make-ValuesDots null a 'a))
+   (->* (list -Output-Port (-> (make-ValuesDots null a 'a) :T+ #f)
               (one-of/c 'none 'fatal 'error 'warning 'info 'debug))
         (-opt -Symbol)
-        (make-ValuesDots null a 'a)))]
+        (make-ValuesDots null a 'a) :T+ #f))]
 
 ;; Section 15.6 (Time)
 [seconds->date (cl->* (-Real . -> . -Date)
@@ -3156,15 +3277,15 @@
  (->opt [(Un (-val #f) (-val 'subprocesses) -Thread)] -Fixnum)]
 
 ;; Section 15.7
-[environment-variables? (make-pred-ty -Environment-Variables)]
+[environment-variables? (unsafe-shallow:make-pred-ty -Environment-Variables)]
 [current-environment-variables (-Param -Environment-Variables)]
-[bytes-environment-variable-name? (asym-pred Univ B (-PS (-is-type 0 -Bytes) -tt))]
+[bytes-environment-variable-name? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 -Bytes) -tt))]
 [make-environment-variables (->* null -Bytes -Environment-Variables)]
 [environment-variables-ref (-> -Environment-Variables -Bytes (-opt -Bytes))]
 [environment-variables-set! (->opt -Environment-Variables -Bytes (-opt -Bytes) [(-> Univ)] Univ)]
 [environment-variables-names (-> -Environment-Variables  (-lst -Bytes))]
 [environment-variables-copy (-> -Environment-Variables -Environment-Variables)]
-[string-environment-variable-name? (asym-pred Univ B (-PS (-is-type 0 -String) -tt))]
+[string-environment-variable-name? (unsafe-shallow:asym-pred Univ B (-PS (-is-type 0 -String) -tt))]
 [getenv (-> -String (Un -String (-val #f)))]
 [putenv (-> -String -String B)]
 
@@ -3206,30 +3327,30 @@
                                    (-lst Univ))
                             (-pair label-sym
                                    (-lst -String))))
-                  (->... (list (-lst Univ)) [-String a] b)
+                  (->... (list (-lst Univ)) [-String a] b :T+ #f)
                   (-lst -String)
                   [(-> -String Univ)
                    ;; Still permits unknown-proc args that accept rest arguments
                    (-> -String Univ)]
-                  b))))]
+                  b :T+ #f))))]
 
 ;; Section 16.1 (Weak Boxes)
 [make-weak-box (-poly (a) (-> a (-weak-box a)))]
 [weak-box-value
  (-poly (a b)
-   (cl->* (-> (-weak-box a) (-opt a))
-          (-> (-weak-box a) b (Un b a))
+   (cl->* (-> (-weak-box a) (-opt a) :T+ #f)
+          (-> (-weak-box a) b (Un b a) :T+ #f)
           (->opt -Weak-BoxTop [Univ] Univ)))]
-[weak-box? (make-pred-ty -Weak-BoxTop)]
+[weak-box? (unsafe-shallow:make-pred-ty -Weak-BoxTop)]
 
 ;; Section 16.2 (Ephemerons)
 [make-ephemeron (-poly (k v) (-> k v (-Ephemeron v)))]
-[ephemeron? (make-pred-ty (-Ephemeron Univ))]
-[ephemeron-value (-poly (v) (-> (-Ephemeron v) (Un (-val #f) v)))]
+[ephemeron? (unsafe-shallow:make-pred-ty (-Ephemeron Univ))]
+[ephemeron-value (-poly (v) (-> (-Ephemeron v) (Un (-val #f) v) :T+ #f))]
 
 ;; Section 16.3 (Wills and Executors)
 [make-will-executor (-> -Will-Executor)]
-[will-executor? (make-pred-ty -Will-Executor)]
+[will-executor? (unsafe-shallow:make-pred-ty -Will-Executor)]
 [will-register (-poly (a) (-> -Will-Executor a (-> a ManyUniv) -Void))]
 [will-execute (-> -Will-Executor ManyUniv)]
 [will-try-execute (-> -Will-Executor ManyUniv)]
@@ -3251,12 +3372,12 @@
 ;; Section 17.2 (Unsafe Data Extraction)
 [unsafe-car (-poly (a b)
                    (cl->*
-                    (->acc (list (-pair a b)) a (list -car))
-                    (->* (list (-lst a)) a)))]
+                    (->acc (list (-pair a b)) a (list -car) #:T+ #f)
+                    (->* (list (-lst a)) a :T+ #f)))]
 [unsafe-cdr (-poly (a b)
                    (cl->*
-                    (->acc (list (-pair a b)) b (list -cdr))
-                    (->* (list (-lst a)) (-lst a))))]
+                    (->acc (list (-pair a b)) b (list -cdr) #:T+ #f)
+                    (->* (list (-lst a)) (-lst a) :T+ #f)))]
 [unsafe-vector-length (-VectorTop . -> . -Index)]
 [unsafe-vector*-length (-VectorTop . -> . -Index)]
 [unsafe-struct-ref top-func]
@@ -3267,8 +3388,8 @@
 [unsafe-fxvector-ref (-FxVector -Fixnum . -> . -Fixnum)]
 
 ;; Section 17.4 (Unsafe Undefined)
-[check-not-unsafe-undefined (-poly (a) (-> a -Symbol a))]
-[check-not-unsafe-undefined/assign (-poly (a) (-> a -Symbol a))]
+[check-not-unsafe-undefined (-poly (a) (-> a -Symbol a :T+ #f))]
+[check-not-unsafe-undefined/assign (-poly (a) (-> a -Symbol a :T+ #f))]
 
 ;; Section 18.2 (Libraries and Collections)
 [find-library-collection-paths (->opt [(-lst -Pathlike) (-lst -Pathlike)] (-lst -Path))]
@@ -3277,7 +3398,7 @@
  (-poly (a)
         (cl->*
          (->optkey -Pathlike -Pathlike [] #:rest -Pathlike #:check-compiled? Univ #f -Path)
-         (->optkey -Pathlike -Pathlike [] #:rest -Pathlike #:fail (-String . -> . a) #f #:check-compiled? Univ #f (Un a -Path))))]
+         (->optkey -Pathlike -Pathlike [] #:rest -Pathlike #:fail (-String . -> . a :T+ #f) #f #:check-compiled? Univ #f (Un a -Path) :T+ #f)))]
 [collection-path (->* (list) -Pathlike -Path)]
 [current-library-collection-paths (-Param (-lst -Path) (-lst -Path))]
 [current-library-collection-links
@@ -3289,8 +3410,8 @@
 ;; Typed Racket Reference
 ;; Section 4
 [assert (-poly (a b) (cl->*
-                      (Univ (make-pred-ty (list a) Univ b) . -> . b)
-                      (-> (Un a (-val #f)) a)))]
+                      (Univ (unsafe-shallow:make-pred-ty (list a) Univ b) . -> . b :T+ #f)
+                      (-> (Un a (-val #f)) a :T+ #f)))]
 [defined? (->* (list Univ) -Boolean : (-PS (-not-type 0 -Undefined) (-is-type 0 -Undefined)))]
 
 ;; Syntax Manual
@@ -3364,9 +3485,9 @@
  (-poly (a)
   (cl->*
    (->optkey -Pathlike [(-> -Input-Port (Un))] #:mode (one-of/c 'binary 'text) #f (-lst Univ))
-   (->optkey -Pathlike [(-> -Input-Port a)] #:mode (one-of/c 'binary 'text) #f (-lst a)))))
+   (->optkey -Pathlike [(-> -Input-Port a :T+ #f)] #:mode (one-of/c 'binary 'text) #f (-lst a)))))
 [call-with-atomic-output-file
- (-poly (a) (->opt -Pathlike (-> -Output-Port -Path a) [(-opt -Security-Guard)] a))]
+ (-poly (a) (->opt -Pathlike (-> -Output-Port -Path a :T+ #f) [(-opt -Security-Guard)] a :T+ #f))]
 (get-preference
  (let ((use-lock-type Univ)
        (timeout-lock-there-type (-opt (-> -Path Univ)))
@@ -3438,8 +3559,8 @@
   (->key
    (-opt -Pathlike)
    (one-of/c 'shared 'exclusive)
-   (-> a)
-   (-> a)
+   (-> a :T+ #f)
+   (-> a :T+ #f)
    #:lock-file
    (-opt -Pathlike)
    #f
@@ -3449,49 +3570,49 @@
    #:max-delay
    -Real
    #f
-   a)))
+   a :T+ #f)))
 (sort
  (-poly
   (a b)
   (cl->*
-   (->key (-lst a) (-> a a -Boolean) #:key (-opt (-> a a)) #f #:cache-keys? -Boolean #f (-lst a))
-   (->key (-lst a) (-> b b -Boolean) #:key (-> a b) #t #:cache-keys? -Boolean #f (-lst a)))))
+   (->key (-lst a) (-> a a -Boolean) #:key (-opt (-> a a :T+ #f)) #f #:cache-keys? -Boolean #f (-lst a))
+   (->key (-lst a) (-> b b -Boolean) #:key (-> a b :T+ #f) #t #:cache-keys? -Boolean #f (-lst a)))))
 (vector-sort
  (-poly
   (a b)
   (cl->*
-   (->optkey (-vec a) (-> a a -Boolean) [-Integer (-opt -Integer)] #:key (-opt (-> a a)) #f #:cache-keys? -Boolean #f (-vec a))
-   (->optkey (-vec a) (-> b b -Boolean) [-Integer (-opt -Integer)] #:key (-> a b) #t #:cache-keys? -Boolean #f (-vec a)))))
+   (->optkey (-vec a) (-> a a -Boolean) [-Integer (-opt -Integer)] #:key (-opt (-> a a :T+ #f)) #f #:cache-keys? -Boolean #f (-vec a))
+   (->optkey (-vec a) (-> b b -Boolean) [-Integer (-opt -Integer)] #:key (-> a b :T+ #f) #t #:cache-keys? -Boolean #f (-vec a)))))
 (vector-sort!
  (-poly
   (a b)
   (cl->*
-   (->optkey (-vec a) (-> a a -Boolean) [-Integer (-opt -Integer)] #:key (-opt (-> a a)) #f #:cache-keys? -Boolean #f -Void)
-   (->optkey (-vec a) (-> b b -Boolean) [-Integer (-opt -Integer)] #:key (-> a b) #t #:cache-keys? -Boolean #f -Void))))
+   (->optkey (-vec a) (-> a a -Boolean) [-Integer (-opt -Integer)] #:key (-opt (-> a a :T+ #f)) #f #:cache-keys? -Boolean #f -Void)
+   (->optkey (-vec a) (-> b b -Boolean) [-Integer (-opt -Integer)] #:key (-> a b :T+ #f) #t #:cache-keys? -Boolean #f -Void))))
 (check-duplicates
  (-poly
   (a b c)
   (cl->*
    (->optkey (-lst a) ((-> a a Univ))
-             #:key (-> a a) #f
-             (-opt a))
+             #:key (-> a a :T+ #f) #f
+             (-opt a) :T+ #f)
    (->optkey (-lst a) ((-> b b Univ))
-             #:key (-> a b) #f
-             (-opt a))
+             #:key (-> a b :T+ #f) #f
+             (-opt a) :T+ #f)
    (->optkey (-lst a) ((-> a a Univ))
-             #:key (-> a a) #f
-             #:default (-> c) #f
-             (Un a c))
+             #:key (-> a a :T+ #f) #f
+             #:default (-> c :T+ #f) #f
+             (Un a c) :T+ #f)
    (->optkey (-lst a) ((-> b b Univ))
-             #:key (-> a b) #f
-             #:default (-> c) #f
-             (Un a c)))))
+             #:key (-> a b :T+ #f) #f
+             #:default (-> c :T+ #f) #f
+             (Un a c) :T+ #f))))
 (remove-duplicates
  (-poly
   (a b)
   (cl->*
-   (->optkey (-lst a) ((-> a a Univ)) #:key (-opt (-> a a)) #f (-lst a))
-   (->optkey (-lst a) ((-> b b Univ)) #:key (-opt (-> a b)) #f (-lst a)))))
+   (->optkey (-lst a) ((-> a a Univ)) #:key (-opt (-> a a :T+ #f)) #f (-lst a))
+   (->optkey (-lst a) ((-> b b Univ)) #:key (-opt (-> a b :T+ #f)) #f (-lst a)))))
 (open-input-file (->key -Pathlike
                         #:mode (one-of/c 'binary 'text) #f
                         #:for-module? Univ #f
@@ -3500,6 +3621,7 @@
  (->key
   -Pathlike
   #:permissions -Nat #f
+  #:replace-permissions? Univ #f
   #:mode
   (one-of/c 'binary 'text)
   #f
@@ -3511,6 +3633,7 @@
  (->key
   -Pathlike
   #:permissions -Nat #f
+  #:replace-permissions? Univ #f
   #:mode
   (one-of/c 'binary 'text)
   #f
@@ -3519,12 +3642,12 @@
   #f
   (-values (list -Input-Port -Output-Port))))
 (call-with-input-file
-    (-poly (a) (->key -Pathlike (-> -Input-Port a) #:mode (Un (-val 'binary) (-val 'text)) #f a)))
+    (-poly (a) (->key -Pathlike (-> -Input-Port a :T+ #f) #:mode (Un (-val 'binary) (-val 'text)) #f a :T+ #f)))
 (call-with-output-file
     (-poly (a)
      (->key
       -Pathlike
-      (-> -Output-Port a)
+      (-> -Output-Port a :T+ #f)
       #:exists
       (one-of/c 'error 'append 'update 'replace 'truncate 'truncate/replace 'can-update 'must-truncate)
       #f
@@ -3534,14 +3657,17 @@
       #:permissions
       -Nat
       #f
-      a)))
-(call-with-input-file* (-poly (a) (->key -Pathlike (-> -Input-Port a) #:mode (Un (-val 'binary) (-val 'text)) #f a)))
+      #:replace-permissions?
+      Univ
+      #f
+      a :T+ #f)))
+(call-with-input-file* (-poly (a) (->key -Pathlike (-> -Input-Port a :T+ #f) #:mode (Un (-val 'binary) (-val 'text)) #f a :T+ #f)))
 (call-with-output-file*
  (-poly
   (a)
   (->key
    -Pathlike
-   (-> -Output-Port a)
+   (-> -Output-Port a :T+ #f)
    #:exists
    (one-of/c 'error 'append 'update 'replace 'truncate 'truncate/replace 'can-update 'must-truncate)
    #f
@@ -3551,14 +3677,17 @@
    #:permissions
    -Nat
    #f
-   a)))
-(with-input-from-file (-poly (a) (->key -Pathlike (-> a) #:mode (Un (-val 'binary) (-val 'text)) #f a)))
+   #:replace-permissions?
+   Univ
+   #f
+   a :T+ #f)))
+(with-input-from-file (-poly (a) (->key -Pathlike (-> a :T+ #f) #:mode (Un (-val 'binary) (-val 'text)) #f a :T+ #f)))
 (with-output-to-file
     (-poly
      (a)
      (->key
       -Pathlike
-      (-> a)
+      (-> a :T+ #f)
       #:exists
       (one-of/c 'error 'append 'update 'can-update 'replace 'truncate 'must-truncate 'truncate/replace)
       #f
@@ -3568,7 +3697,10 @@
       #:permissions
       -Nat
       #f
-   a)))
+      #:replace-permissions?
+      Univ
+      #f
+      a :T+ #f)))
 (port->lines
  (->optkey [-Input-Port]
            #:line-mode (one-of/c 'linefeed 'return 'return-linefeed 'any 'any-one) #f

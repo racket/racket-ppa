@@ -2,8 +2,11 @@
 (require racket/contract
          racket/dict
          racket/format
+         racket/file
          racket/path
-         compiler/compilation-path         
+         racket/runtime-path
+         string-constants
+         compiler/compilation-path
          compiler/cm
          "exn-gobbler.rkt")
 
@@ -51,8 +54,7 @@
   (when (eq? (system-path-convention-type) 'unix)
     (check-true
      (path-string=? "a/b/c.rkt"
-                    (build-path "a" "b/c.rkt"))))
-  )
+                    (build-path "a" "b/c.rkt")))))
 
 (define-syntax-rule (time-info str body ...)
   (let ([ms (current-milliseconds)])
@@ -65,11 +67,11 @@
 (define props-default
   `((name             . #f)
     (filepath         . #f)
-    (label            . "My Script 1") ; Should be mandatory
+    (label            . #f) ; Should be mandatory
     (menu-path        . ())
     (shortcut         . #f)
     (shortcut-prefix  . #f) ; should be (get-default-shortcut-prefix), but this depends on gui/base
-    (help-string      . "My amazing script")
+    (help-string      . (string-constant qs-my-script))
     (output-to        . selection) ; outputs the result in a new tab
     (persistent?      . #f)
     (os-types         . (unix macosx windows)) ; list of supported os types
@@ -92,7 +94,7 @@
 ;; ("" if no text is selected), or `#f` to leave the selection as is.
 (define-script @proc-name
   #:label "@label"
-  (λ (selection) 
+  (λ (selection)
     #f))
 })
 
@@ -122,7 +124,7 @@
 (define (get-property-dicts script-filepath)
   ; Ensure the script is compiled for the correct version of Racket
   (compile-user-script script-filepath)
-  
+
   (define the-submod (make-submod-path script-filepath))
   (dynamic-require the-submod #f)
   (define-values (vars syntaxes) (module->exports the-submod))
@@ -148,8 +150,8 @@
   (define filepath (build-path dir filename))
   (define proc-sym 'my-first-script)
   (define proc-name (symbol->string proc-sym))
-  (define label "My First Script")
-  (define help-str "The help-string of the script.")
+  (define label (string-constant qs-my-first-script))
+  (define help-str (string-constant qs-script-help))
   (display-to-file (make-simple-script-string proc-name label
                                               #:script-help-string help-str)
                    filepath
@@ -185,7 +187,7 @@
   #;(compile-user-scripts (list file)))
 
 (define/contract (compile-user-scripts files
-                                       #:exn-gobbler [gb (make-exn-gobbler "Compiling scripts")])
+                                       #:exn-gobbler [gb (make-exn-gobbler (string-constant qs-compiling-scripts))])
   (->* [(listof path-string?)]
        [#:exn-gobbler exn-gobbler?]
        exn-gobbler?)
@@ -195,7 +197,7 @@
     (define cmc (make-caching-managed-compile-zo))
     (for ([f (in-list files)])
       (with-handlers* ([exn:fail? (λ (e) (gobble gb e (path->string f)))])
-        (time-info (format "Compiling ~a" (path->string f))
+        (time-info (format (string-constant qs-compiling) (path->string f))
                    (cmc f)))))
   (log-quickscript-info (exn-gobbler->string gb))
   gb)

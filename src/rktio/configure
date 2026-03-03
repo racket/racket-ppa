@@ -624,8 +624,7 @@ LIBOBJS
 HAVE_DIRENT_NAMELEN
 HAVE_DIRENT_NAMLEN
 RKTIO_NO_ICONV
-HIDE_STANDALONE
-HIDE_NOT_STANDALONE
+AS_STANDALONE
 LTA
 LTO
 LIBSFX
@@ -1813,6 +1812,52 @@ fi
   eval $as_lineno_stack; ${as_lineno_stack:+:} unset as_lineno
 
 } # ac_fn_c_check_header_mongrel
+
+# ac_fn_c_check_decl LINENO SYMBOL VAR INCLUDES
+# ---------------------------------------------
+# Tests whether SYMBOL is declared in INCLUDES, setting cache variable VAR
+# accordingly.
+ac_fn_c_check_decl ()
+{
+  as_lineno=${as_lineno-"$1"} as_lineno_stack=as_lineno_stack=$as_lineno_stack
+  as_decl_name=`echo $2|sed 's/ *(.*//'`
+  as_decl_use=`echo $2|sed -e 's/(/((/' -e 's/)/) 0&/' -e 's/,/) 0& (/g'`
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $as_decl_name is declared" >&5
+$as_echo_n "checking whether $as_decl_name is declared... " >&6; }
+if eval \${$3+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+$4
+int
+main ()
+{
+#ifndef $as_decl_name
+#ifdef __cplusplus
+  (void) $as_decl_use;
+#else
+  (void) $as_decl_name;
+#endif
+#endif
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  eval "$3=yes"
+else
+  eval "$3=no"
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+eval ac_res=\$$3
+	       { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_res" >&5
+$as_echo "$ac_res" >&6; }
+  eval $as_lineno_stack; ${as_lineno_stack:+:} unset as_lineno
+
+} # ac_fn_c_check_decl
 cat >config.log <<_ACEOF
 This file contains any messages produced by compilers while
 running configure, to aid debugging if configure makes a mistake.
@@ -2345,8 +2390,7 @@ use_flag_posix_pthread=no
 
 # For standalone builds:
 rktio_version=1.0
-HIDE_STANDALONE=hide_standalone_
-HIDE_NOT_STANDALONE=
+AS_STANDALONE=f
 
 ###### Autoconfigure #######
 
@@ -3422,6 +3466,7 @@ case "$host_os" in
     ;;
   *mingw*)
     skip_iconv_check=yes
+    PREFLAGS="$PREFLAGS -DWIN32"
     # force pthread off for Windows:
     enable_pthread=no
     ;;
@@ -4555,6 +4600,15 @@ if test "${LFS_CFLAGS}" != "" && test "${LFS_CFLAGS}" != "undefined"; then
   CFLAGS="${CFLAGS} ${LFS_CFLAGS}"
 fi
 
+ac_fn_c_check_decl "$LINENO" "O_CLOEXEC" "ac_cv_have_decl_O_CLOEXEC" "#include <fcntl.h>
+"
+if test "x$ac_cv_have_decl_O_CLOEXEC" = xyes; then :
+
+$as_echo "#define RKTIO_HAS_CLOEXEC 1" >>confdefs.h
+
+fi
+
+
 ############### pthread ###################
 
 if test "${enable_pthread}" = "" ; then
@@ -4579,8 +4633,7 @@ fi
 ############## libtool ################
 
 if test "${enable_standalone}" = "yes" ; then
-   HIDE_STANDALONE=""
-   HIDE_NOT_STANDALONE=hide_not_standalone_
+   AS_STANDALONE=t
    if test "${enable_shared}" = "" ; then
      enable_shared=yes
    fi
@@ -4615,7 +4668,7 @@ if test "${enable_shared}" = "yes" ; then
   fi
 
   # Use only for standalone builds:
-  AR="${LIBTOOLPROG} --mode=link --tag=CC $CC${need_gcc_static_libgcc}${ar_libtool_no_undefined} -release ${rktio_version} -rpath ${abslibdir} \$(ARLIBFLAGS) -o"
+  AR="${LIBTOOLPROG} --mode=link --tag=CC $CC${need_gcc_static_libgcc}${ar_libtool_no_undefined} -release ${rktio_version} -rpath ${abslibdir} -o"
   # Used for a librktio convenience library:
   STATIC_AR="${LIBTOOLPROG} --mode=link --tag=CC $CC -o"
   ARFLAGS=""
@@ -4632,13 +4685,13 @@ else
   ICP=cp
   LTO="o"
   LTA="a"
-  RKTLINKER='$(CC)'
+  RKTLINKER="$CC"
   STATIC_AR="$AR"
   LIBSFX=so
   ICP_LIB=cp
   if test "${make_darwin_dylib}" = "yes" ; then
      LIBSFX="dylib"
-     AR='$(RKTLINKER) --shared -o'
+     AR="${RKTLINKER} --shared -o"
      ARFLAGS=""
      LIBS="${LIBS} -framework CoreFoundation"
      ICP_LIB=cp
@@ -4672,8 +4725,9 @@ CPPFLAGS="$CPPFLAGS $PREFLAGS"
 
 
 
-
 makefiles="Makefile"
+
+cp ${srcdir}/buildmain.zuo main.zuo
 
 ac_config_files="$ac_config_files $makefiles"
 

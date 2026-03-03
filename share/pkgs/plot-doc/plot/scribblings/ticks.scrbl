@@ -242,7 +242,7 @@ The ticks used for radius lines in @racket[polar-axes].
 }
 
 @defstruct[ticks ([layout ticks-layout/c] [format ticks-format/c])]{
-A @racket[ticks] for a near or far axis consists of a @racket[layout] function, which determines the number of ticks and where they will be placed, and a @racket[format] function, which determines the ticks' labels.
+A @racket[ticks] for a near or far axis consists of a @racket[_layout] function, which determines the number of ticks and where they will be placed, and a @racket[_format] function, which determines the ticks' labels.
 }
 
 @defproc[(ticks-generate [ticks ticks?] [min real?] [max real?]) (listof tick?)]{
@@ -606,11 +606,31 @@ Represents a tick with a label.
 }
 
 @defthing[ticks-layout/c contract? #:value (-> real? real? (listof pre-tick?))]{
-The contract for tick layout functions. Note that a layout function returns @racket[pre-tick]s, or unlabeled ticks.
+
+  The contract for tick layout functions in @racket[ticks] structures.  The
+  function receives axis bounds and returns a list of @racket[pre-tick]s to be
+  shown on the axis.
+
+  Note that the layout function returns @racket[pre-tick]s, or unlabeled
+  ticks, and a separate format function is used to produce the labels for the
+  ticks.
+
 }
 
 @defthing[ticks-format/c contract? #:value (-> real? real? (listof pre-tick?) (listof string?))]{
-The contract for tick format functions. A format function receives axis bounds so it can determine how many decimal digits to display (usually by applying @racket[digits-for-range] to the bounds).
+
+  The contract for tick format functions in @racket[ticks] structures.  The
+  format function receives axis bounds and a list of @racket[pre-tick]s. It
+  must return a label for each @racket[pre-tick] in this list.
+
+  The returned labels should be usually distinct, as the plot library will
+  consider ticks with labels that are @racket[string=?] to be duplicates and
+  collapse them, however, this feature can be used by a custom format function
+  to force removal of some ticks from the plot.
+
+  Axis bounds can be used to determine how many decimal digits to display,
+  usually by applying @racket[digits-for-range] to the bounds.
+
 }
 
 @section[#:tag "invertible"]{Invertible Functions}

@@ -33,10 +33,10 @@ the typed racket language.
 (provide (except-out (all-defined-out) -let-internal define-for-variants
                      def-redirect
                      define-for*-variants with-handlers: with-handlers*: define-for/acc:-variants
-                     base-for/flvector: base-for/vector -lambda -define -do -let
+                     base-for/flvector: base-for/vector -define -do -let
                      -let* -let*-values -let-values -let/cc -let/ec -letrec -letrec-values)
          (all-from-out "top-interaction.rkt")
-         (all-from-out "case-lambda.rkt")
+         (except-out (all-from-out "prims-lambda.rkt") -lambda)
          (all-from-out (submod "prims-contract.rkt" forms))
          define-type-alias
          define-new-subtype
@@ -46,11 +46,10 @@ the typed racket language.
          :
          (rename-out [define-typed-struct define-struct:]
                      [define-typed-struct define-struct]
-                     [-struct struct]
-                     [-struct struct:]
-                     [lambda: λ:]
                      [-lambda lambda]
                      [-lambda λ]
+                     [-struct struct]
+                     [-struct struct:]
                      [-define define]
                      [-let let]
                      [-let* let*]
@@ -74,6 +73,7 @@ the typed racket language.
                      [for/hash: for/hash]
                      [for/hasheq: for/hasheq]
                      [for/hasheqv: for/hasheqv]
+                     [for/hashalw: for/hashalw]
                      [for/and: for/and]
                      [for/or: for/or]
                      [for/sum: for/sum]
@@ -90,6 +90,7 @@ the typed racket language.
                      [for*/hash: for*/hash]
                      [for*/hasheq: for*/hasheq]
                      [for*/hasheqv: for*/hasheqv]
+                     [for*/hashalw: for*/hashalw]
                      [for*/and: for*/and]
                      [for*/or: for*/or]
                      [for*/sum: for*/sum]
@@ -111,7 +112,7 @@ the typed racket language.
          "top-interaction.rkt"
          "base-types.rkt"
          "base-types-extra.rkt"
-         "case-lambda.rkt"
+         "prims-lambda.rkt"
          "prims-struct.rkt"
          "ann-inst.rkt"
          racket/unsafe/ops
@@ -168,19 +169,6 @@ the typed racket language.
 (define-for-syntax (with-type* expr ty)
   (with-type #`(ann #,expr #,ty)))
 
-(define-syntax (plambda: stx)
-  (syntax-parse stx
-    [(plambda: tvars:type-variables formals . body)
-     (plambda-property
-       (syntax/loc stx (lambda: formals . body))
-       #'(tvars.vars ...)) ]))
-
-(define-syntax (popt-lambda: stx)
-  (syntax-parse stx
-    [(popt-lambda: tvars:type-variables formals . body)
-     (plambda-property
-       (syntax/loc stx (opt-lambda: formals . body))
-       #'(tvars.vars ...))]))
 
 (define-syntax (pdefine: stx)
   (syntax-parse stx #:literals (:)
@@ -190,16 +178,6 @@ the typed racket language.
          (begin
           (: nm : type)
           (define (nm . formals.ann-formals) . body))))]))
-
-(define-syntax (lambda: stx)
-  (syntax-parse stx
-    [(lambda: formals:annotated-formals . body)
-     (syntax/loc stx (-lambda formals.ann-formals . body))]))
-
-(define-syntax (opt-lambda: stx)
-  (syntax-parse stx
-    [(opt-lambda: formals:opt-lambda-annotated-formals . body)
-     (syntax/loc stx (-lambda formals.ann-formals . body))]))
 
 (define-syntaxes (-let-internal -let* -letrec)
   (let ([mk (lambda (form)
@@ -330,16 +308,29 @@ the typed racket language.
            (pattern (~seq (~and kw (~or #:break #:final)) guard-expr:expr)
                     #:with (expand ...) #'(kw guard-expr)))
          (define-syntax-class for-kw
+           (pattern #:when)
+           (pattern #:unless)
+           (pattern #:do)
+           (pattern #:splice))
+         (define-syntax-class for-when
            (pattern #:when
                     #:with replace-with #'when)
            (pattern #:unless
                     #:with replace-with #'unless))
          (syntax-parse clauses
-           [(head:for-clause next:for-clause ... kw:for-kw guard b:break-clause ... rest ...)
+           [(when:for-when guard) ; we end on a keyword clause
+            (quasisyntax/loc stx
+              (when.replace-with guard
+                #,@body))]
+           [(when:for-when guard rest ...)
+            (quasisyntax/loc stx
+              (when.replace-with guard
+                #,(loop #'(rest ...))))]
+           [(head:for-clause ... kw:for-kw expr b:break-clause ... rest ...)
             (add-ann
              (quasisyntax/loc stx
                (for
-                (head.expand ... next.expand ... ... kw guard b.expand ... ...)
+                (head.expand ... ... kw expr b.expand ... ...)
                 #,(loop #'(rest ...))))
              #'Void)]
            [(head:for-clause ...) ; we reached the end
@@ -348,15 +339,7 @@ the typed racket language.
                (for
                 (head.expand ... ...)
                 #,@body))
-             #'Void)]
-           [(kw:for-kw guard) ; we end on a keyword clause
-            (quasisyntax/loc stx
-              (kw.replace-with guard
-                #,@body))]
-           [(kw:for-kw guard rest ...)
-            (quasisyntax/loc stx
-              (kw.replace-with guard
-                #,(loop #'(rest ...))))])))]))
+             #'Void)])))]))
 
 (begin-for-syntax
   (define-splicing-syntax-class optional-standalone-annotation*
@@ -393,8 +376,8 @@ the typed racket language.
          stx
        (begin (define-syntax name (define-for-variant #'untyped-name)) ...))]))
 
-;; for/vector:, for/flvector:, for/and:, for/first: and
-;; for/last:'s expansions can't currently be handled by the typechecker.
+;; for/first: and for/and:'s expansions
+;; can't currently be handled by the typechecker.
 (define-for-variants
   (for/list: for/list)
   (for/and: for/and)
@@ -623,6 +606,7 @@ the typed racket language.
 (define-syntax for/hash:    (define-for/hash:-variant #'make-immutable-hash))
 (define-syntax for/hasheq:  (define-for/hash:-variant #'make-immutable-hasheq))
 (define-syntax for/hasheqv: (define-for/hash:-variant #'make-immutable-hasheqv))
+(define-syntax for/hashalw: (define-for/hash:-variant #'make-immutable-hashalw))
 
 (define-for-syntax (define-for*/hash:-variant hash-maker)
   (lambda (stx)
@@ -645,6 +629,7 @@ the typed racket language.
 (define-syntax for*/hash:    (define-for*/hash:-variant #'make-immutable-hash))
 (define-syntax for*/hasheq:  (define-for*/hash:-variant #'make-immutable-hasheq))
 (define-syntax for*/hasheqv: (define-for*/hash:-variant #'make-immutable-hasheqv))
+(define-syntax for*/hashalw: (define-for*/hash:-variant #'make-immutable-hashalw))
 
 
 (define-syntax (provide: stx)
@@ -683,47 +668,6 @@ the typed racket language.
         (quasisyntax/loc stx (#,l/c k.ann-name . body))]))
     (values (mk #'let/cc) (mk #'let/ec))))
 
-
-;; lambda with optional type annotations, uses syntax properties
-(define-syntax (-lambda stx)
-  (syntax-parse stx
-    #:literals (:)
-    [(_ vars:maybe-lambda-type-vars
-        formals:lambda-formals
-        return:return-ann
-        (~describe "body expression or definition" e) ...
-        (~describe "body expression" last-e))
-     ;; Annotate the last expression with the return type. Should be correct
-     ;; since if a function returns, it has to do so through the last expression
-     ;; even with continuations.
-     (define/with-syntax last-e*
-       (if (attribute return.type)
-           #`(ann last-e #,(attribute return.type))
-           #'last-e))
-
-     ;; if the lambda form being checked is a polymorphic function, tag its
-     ;; parameters with property `from-lambda'.
-     (define (maybe-set-from-lambda type-vars formals)
-       (cond
-         [(and type-vars (stx-list? formals))
-          (stx-map (lambda (x)
-                     (from-plambda-property x #t))
-                   formals)]
-         [type-vars (from-plambda-property formals #t)]
-         [else formals]))
-
-     (define d (with-syntax ([erase-formals (maybe-set-from-lambda
-                                             (attribute vars.type-vars)
-                                             (attribute formals.erased))])
-                 (syntax/loc stx (λ erase-formals e ... last-e*))))
-     (define d/prop
-       (if (attribute formals.kw-property)
-           (kw-lambda-property d (attribute formals.kw-property))
-           (opt-lambda-property d (attribute formals.opt-property))))
-     ;; attach a plambda property if necessary
-     (if (attribute vars.type-vars)
-         (plambda-property d/prop (attribute vars.type-vars))
-         d/prop)]))
 
 ;; for backwards compatibility, note that this only accepts formals
 ;; with type annotations and also accepts type variables differently

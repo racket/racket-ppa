@@ -111,9 +111,10 @@
      add-can-close-dialog-callback
      
      add-check
-     
+     add-boolean-option-with-ask-me
      show-dialog
-     hide-dialog))
+     hide-dialog
+     show-tab-panel))
   
   (define-signature autosave-class^
     (autosavable<%>))
@@ -184,6 +185,8 @@
    (open text-search^)
    (open text-first-line^)
    (open text-inline-overview^)
+   (open text-indent-guides^)
+   (open text-max-width-paragraph^)
    (open text-mixed-in-classes^)))
 
 (define-signature text^ extends text-class^
@@ -288,6 +291,7 @@
      open-file
      install-recent-items
      add-to-recent
+     update-currently-open-files
      set-recent-position
      set-recent-items-frame-superclass
      size-recently-opened-files))
@@ -361,6 +365,7 @@
     (register-color-preference
      add-to-preferences-panel
      build-color-selection-panel
+     normalize-color-selection-button-widths
      add-background-preferences-panel
      marshall-style-delta
      unmarshall-style-delta
@@ -379,7 +384,16 @@
      register-color-scheme-entry-change-callback
      add-color-scheme-entry
      register-info-based-color-schemes
-     get-color-scheme-names))
+     get-color-scheme-names
+     get-inverted-base-color-scheme
+
+     white-on-black-color-scheme?))
+  (define-signature color-prefs/int^ extends color-prefs^
+    (change-colors-to-match-color-scheme
+     lookup-color-scheme
+     built-in-wob-color-scheme
+     built-in-color-scheme
+     update-dark-light-preferences-panel-ordering))
   
   (define-signature racket-class^
     (text<%>

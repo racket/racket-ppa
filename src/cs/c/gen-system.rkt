@@ -1,10 +1,13 @@
 (module gen-system '#%kernel
   
-  ;; Command-line argument: <dest-file> <target-machine> <cross-target-machine> <srcdir> <slsp-suffix>
+  ;; Command-line argument: <dest-file> <target-machine> <kernel-target-machine> <cross-target-machine> <srcdir> <slsp-suffix> <macosx-or-other>
 
-  (define-values (machine) (string->symbol (vector-ref (current-command-line-arguments) 1)))
-  (define-values (srcdir) (vector-ref (current-command-line-arguments) 3))
-  (define-values (slsp-suffix) (vector-ref (current-command-line-arguments) 4))
+  (define-values (target-machine) (string->symbol (vector-ref (current-command-line-arguments) 1)))
+  (define-values (machine) (string->symbol (vector-ref (current-command-line-arguments) 2)))
+  (define-values (cross-target-machine) (vector-ref (current-command-line-arguments) 3))
+  (define-values (srcdir) (vector-ref (current-command-line-arguments) 4))
+  (define-values (slsp-suffix) (vector-ref (current-command-line-arguments) 5))
+  (define-values (macosx?) (equal? "macosx" (vector-ref (current-command-line-arguments) 6)))
 
   (define-values (definitions)
     (call-with-input-file
@@ -34,7 +37,9 @@
 
   (define-values (parse-cond)
     (lambda (e)
-      (if (matches? e '(case (machine-type) . _))
+      (if (if (matches? e '(case (machine-type) . _))
+              #t
+              (matches? e '(case (reflect-machine-type) . _)))
           (letrec-values ([(loop)
                            (lambda (l)
                              (if (null? l)
@@ -57,14 +62,14 @@
           (if (matches? e '(string->utf8 _))
               (string->bytes/utf-8 (cadr e))
               (if (matches? e '(if unix-style-macos? _ _))
-                  (if (eq? (system-type) 'macosx)
+                  (if macosx?
                       (parse-expr (cadddr e))
                       (parse-expr (caddr e)))
-                  (if (matches? e '(if unix-link-shared? _ _))
+                  (if (matches? e 'unix-link)
                       ;; Currently assuming shared-library mode is not a cross compile:
                       (if (eq? (system-type 'link) 'shared)
-                          (parse-expr (caddr e))
-                          (parse-expr (cadddr e)))
+                          'shared
+                          'static)
                       (error 'parse-expr "could not parse ~e" e)))))))
 
   (define-values (matches?)
@@ -100,11 +105,15 @@
          "win32\\x86_64"
          (if (eq? machine 'a6nt)
              "win32\\x86_64"
-             (if (eq? machine 'ti3nt)
-                 "win32\\i386"
+             (if (eq? machine 'arm64nt)
+                 "win32\\arm64"
                  (if (eq? machine 'ti3nt)
                      "win32\\i386"
-                     (format "~a-~a" arch os*)))))
+                     (if (eq? machine 'ti3nt)
+                         "win32\\i386"
+                         (if (eq? machine 'tarm64nt)
+                             "win32\\arm64"
+                             (format "~a-~a" arch os*)))))))
      slsp-suffix))
 
   (define-values (ht)
@@ -118,6 +127,12 @@
                         (if (eq? arch 'ppc)
                             32
                             64)))
+          'so-find (if (equal? slsp-suffix "")
+                       (if (eq? os 'unix)
+                           'system
+                           'natipkg)
+                       (string->symbol (substring slsp-suffix 1)))
+          'platform lib-subpath
           'gc 'cs
           'vm 'chez-scheme
           'link link
@@ -130,9 +145,9 @@
                          '#(supported scalable low-latency #f)
                          ;; Warning: not necessarily right for cross compilation:
                          (system-type 'fs-change))
-          'target-machine (if (equal? "any" (vector-ref (current-command-line-arguments) 2))
+          'target-machine (if (equal? "any" cross-target-machine)
                               #f
-                              machine)))
+                              target-machine)))
 
   (call-with-output-file
    (vector-ref (current-command-line-arguments) 0)

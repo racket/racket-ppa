@@ -30,7 +30,6 @@
 #define O_BINARY 0
 #endif /* O_BINARY */
 
-static INT boot_count;
 static IBOOL verbose;
 
 typedef enum { UNINITIALIZED, BOOTING, RUNNING, DEINITIALIZED } heap_state;
@@ -40,13 +39,13 @@ static heap_state current_state = UNINITIALIZED;
 /* INITIALIZATION SUPPORT */
 
 /* locally defined functions */
-static void main_init PROTO((void));
-static void idiot_checks PROTO((void));
-static INT run_script PROTO((const char *who, const char *scriptfile, INT argc, const char *argv[], IBOOL programp));
+static void main_init(void);
+static void idiot_checks(void);
+static INT run_script(const char *who, const char *scriptfile, INT argc, const char *argv[], IBOOL programp);
 
 extern void scheme_include(void);
 
-static void main_init() {
+static void main_init(void) {
     ptr tc = get_thread_context();
     ptr p;
     INT i;
@@ -147,14 +146,16 @@ static void main_init() {
 
 static ptr fixtest = FIX(-1);
 
-static void idiot_checks() {
+static void idiot_checks(void) {
   IBOOL oops = 0;
 
-  if (bytes_per_segment < S_pagesize) {
+#ifndef PORTABLE_BYTECODE
+  if (minimum_segment_request * bytes_per_segment < S_pagesize) {
     fprintf(stderr, "bytes_per_segment (%x) < S_pagesize (%lx)\n",
               bytes_per_segment, (long)S_pagesize);
     oops = 1;
   }
+#endif
   if (sizeof(iptr) != sizeof(ptr)) {
     fprintf(stderr, "sizeof(iptr) [%ld] != sizeof(ptr) [%ld]\n",
               (long)sizeof(iptr), (long)sizeof(ptr));
@@ -194,12 +195,12 @@ static void idiot_checks() {
   }
 #endif
 #endif
+#ifndef PORTABLE_BYTECODE
   if (sizeof(wchar_t) * 8 != wchar_bits) {
     fprintf(stderr, "sizeof(wchar_t) * 8 [%ld] != wchar_bits [%d]\n",
               (long)sizeof(wchar_t), wchar_bits);
     oops = 1;
   }
-#ifndef PORTABLE_BYTECODE
   if (sizeof(size_t) * 8 != size_t_bits) {
     fprintf(stderr, "sizeof(size_t) * 8 [%ld] != size_t_bits [%d]\n",
               (long)sizeof(size_t), size_t_bits);
@@ -217,9 +218,9 @@ static void idiot_checks() {
               (long)sizeof(ptrdiff_t), ptrdiff_t_bits);
     oops = 1;
   }
-  if (sizeof(time_t) * 8 != time_t_bits) {
-    fprintf(stderr, "sizeof(time_t) * 8 [%ld] != time_t_bits [%d]\n",
-              (long)sizeof(time_t), time_t_bits);
+  if (sizeof(time_t) * 8 > 64) {
+    fprintf(stderr, "sizeof(time_t) [%ld] * 8 > 64\n",
+              (long)sizeof(time_t));
     oops = 1;
   }
 #endif
@@ -346,7 +347,13 @@ static void idiot_checks() {
     fprintf(stderr, "reference displacement does not match bytevector or flvector displacement\n");
     oops = 1;
   }
-  
+
+  if ((size_rp_header - (uptr)TO_PTR(&RPHEADERTOPLINK((ptr)0)))
+      != (size_rp_compact_header - (uptr)TO_PTR(&RPCOMPACTHEADERTOPLINK((ptr)0)))) {
+    fprintf(stderr, "compact and non-compact top-link displacements from end do not match\n");
+    oops = 1;
+  }
+
   if (reference_disp >= (allocation_segment_tail_padding
                          /* to determine the minimum distince from the start of an
                             alocated object to the end of its alloted space, take the
@@ -365,11 +372,11 @@ static void idiot_checks() {
 /* SUPPORT FOR CALLING INTO SCHEME */
 
 /* locally defined functions */
-static ptr boot_call PROTO((ptr tc, ptr p, INT n));
-static void check_ap PROTO((ptr tc));
+static ptr boot_call(ptr tc, ptr p, INT n);
+static void check_ap(ptr tc);
 
 /* arguments and ac0 set up */
-static ptr boot_call(tc, p, n) ptr tc; ptr p; INT n; {
+static ptr boot_call(ptr tc, ptr p, INT n) {
     AC1(tc) = p;
     CP(tc) = Svoid; /* don't have calling code object */
 
@@ -393,7 +400,7 @@ static ptr boot_call(tc, p, n) ptr tc; ptr p; INT n; {
     return p;
 }
 
-static void check_ap(tc) ptr tc; {
+static void check_ap(ptr tc) {
     if ((uptr)AP(tc) & (byte_alignment - 1)) {
         (void) fprintf(stderr, "ap is not double word aligned\n");
         S_abnormal_exit();
@@ -404,7 +411,7 @@ static void check_ap(tc) ptr tc; {
     }
 }
 
-void S_generic_invoke(tc, code) ptr tc; ptr code; {
+void S_generic_invoke(ptr tc, ptr code) {
 #if defined(PORTABLE_BYTECODE)
   S_pb_interp(tc, (void *)&CODEIT(code,0));
 #elif defined(PPCAIX)
@@ -412,7 +419,7 @@ void S_generic_invoke(tc, code) ptr tc; ptr code; {
     hdr.entry = (caddr_t)&CODEIT(code,0);
     hdr.toc = (caddr_t)0;
     hdr.static_link = (caddr_t)0;
-    (*((void (*) PROTO((ptr)))(void *)&hdr))(tc);
+    (*((void (*)(ptr))(void *)&hdr))(tc);
 #elif defined(PPCNT)
   /* under NT, function headers contain no static link */
     struct {I32 entry, toc;} hdr;
@@ -433,7 +440,7 @@ void S_generic_invoke(tc, code) ptr tc; ptr code; {
     p(tc);
 #elif defined(WIN32) && !defined(__MINGW32__)
     __try {
-      (*((void (*) PROTO((ptr)))(void *)&CODEIT(code,0)))(tc);
+      (*((void (*)(ptr))(void *)&CODEIT(code,0)))(tc);
     }
     __except(GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ?
              EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
@@ -444,7 +451,7 @@ void S_generic_invoke(tc, code) ptr tc; ptr code; {
             S_error_reset("invalid memory reference");
     }
 #else
-    (*((void (*) PROTO((ptr)))(void *)&CODEIT(code,0)))(tc);
+    (*((void (*)(ptr))(void *)&CODEIT(code,0)))(tc);
 #endif
 }
 
@@ -452,11 +459,18 @@ void S_generic_invoke(tc, code) ptr tc; ptr code; {
 /* MISCELLANEOUS HELPERS */
 
 /* locally defined functions */
-static IBOOL next_path PROTO((char *path, const char *name, const char *ext, const char **sp, const char **dsp));
-static const char *path_last PROTO((const char *path));
-static char *get_defaultheapdirs PROTO((void));
+static IBOOL next_path(const char *execpath, char *path, const char *name,
+                       const char *ext, const char **sp, const char **dsp);
+static const char *path_last(const char *path);
+static char *get_defaultheapdirs(void);
 
-static const char *path_last(p) const char *p; {
+#ifdef PATH_MAX
+# define BOOT_PATH_MAX PATH_MAX
+#else /* hack for Hurd: better to remove the restriction */
+# define BOOT_PATH_MAX 4096
+#endif
+
+static const char *path_last(const char *p) {
   const char *s;
 #ifdef WIN32
   char c;
@@ -481,7 +495,7 @@ static const char *path_last(p) const char *p; {
 
 static char *get_defaultheapdirs() {
   char *result;
-  wchar_t buf[PATH_MAX];
+  wchar_t buf[BOOT_PATH_MAX];
   DWORD len = sizeof(buf);
   if (ERROR_SUCCESS != RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Chez Scheme\\csv" VERSION, L"HeapSearchPath", RRF_RT_REG_SZ, NULL, buf, &len))
     return DEFAULT_HEAP_PATH;
@@ -493,12 +507,17 @@ static char *get_defaultheapdirs() {
 #else /* not WIN32: */
 #define SEARCHPATHSEP ':'
 #define PATHSEP '/'
+/* `DEFAULT_HEAP_PATH` is normally defined in the generated "config.h" */
 #ifndef DEFAULT_HEAP_PATH
 #define DEFAULT_HEAP_PATH "/usr/lib/csv%v/%m:/usr/local/lib/csv%v/%m"
 #endif
 
 static char *get_defaultheapdirs() {
+#if defined(__EMSCRIPTEN__)
+  return ".";
+#else
   return DEFAULT_HEAP_PATH;
+#endif
 }
 #endif /* WIN32 */
 
@@ -506,13 +525,15 @@ static char *get_defaultheapdirs() {
  * leaving the full path with name affixed in path and *sp / *dsp pointing
  * past the current entry.  it returns 1 on success and 0 if at the end of
  * the search path.  path should be a pointer to an unoccupied buffer
- * PATH_MAX characters long.  either or both of sp/dsp may be empty,
+ * BOOT_PATH_MAX characters long.  either or both of sp/dsp may be empty,
  * but neither may be null, i.e., (char *)0. */
-static IBOOL next_path(path, name, ext, sp, dsp) char *path; const char *name, *ext, **sp, **dsp; {
+static IBOOL next_path(const char *execpath, char *path,
+                       const char *name, const char *ext,
+                       const char **sp, const char **dsp) {
   char *p;
   const char *s, *t;
 
-#define setp(c) if (p >= path + PATH_MAX) { fprintf(stderr, "search path entry too long\n"); S_abnormal_exit(); } else *p++ = (c)
+#define setp(c) if (p >= path + BOOT_PATH_MAX) { fprintf(stderr, "search path entry too long\n"); S_abnormal_exit(); } else *p++ = (c)
   for (;;) {
     s = *sp;
     p = path;
@@ -523,26 +544,23 @@ static IBOOL next_path(path, name, ext, sp, dsp) char *path; const char *name, *
         case '%':
           s += 1;
           switch (*s) {
-#ifdef WIN32
             case 'x': {
-              wchar_t exepath[PATH_MAX]; DWORD n;
               s += 1;
-              n = GetModuleFileNameW(NULL, exepath, PATH_MAX);
-              if (n == 0 || (n == PATH_MAX && GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
-                fprintf(stderr, "warning: executable path is too long; ignoring %%x\n");
-              } else {
-                char *tstart;
-                const char *tend;
-                tstart = Swide_to_utf8(exepath);
-                t = tstart;
-                tend = path_last(t);
-                if (tend != t) tend -= 1; /* back up to directory separator */
-                while (t != tend) setp(*t++);
-                free(tstart);
+              char *tstart = S_get_process_executable_path(execpath);
+              if (tstart == NULL) {
+#ifdef WIN32
+                fprintf(stderr, "warning: failed to get executable path (%s); ignoring %%x\n", "Path is too long");
+#else
+                fprintf(stderr, "warning: failed to get executable path (%s); ignoring %%x\n", strerror(errno));
+#endif
               }
+              const char *tend = path_last(tstart);
+              t = tstart;
+              if (tend != t) tend -= 1; /* back up to directory separator */
+              while (t != tend) setp(*t++);
+              free(tstart);
               break;
             }
-#endif
             case 'm':
               s += 1;
               t = MACHINE_TYPE;
@@ -596,106 +614,123 @@ static IBOOL next_path(path, name, ext, sp, dsp) char *path; const char *name, *
 /***************************************************************************/
 /* BOOT FILES */
 
-typedef struct {
-  INT fd;
+typedef struct boot_desc {
+  struct fileFaslFileObj ffo;
   iptr len; /* 0 => unknown */
   iptr offset;
-  IBOOL need_check, close_after;
-  char path[PATH_MAX];
+  IBOOL is_fd, need_check, close_after;
+  char path[BOOT_PATH_MAX];
+  struct boot_desc *next;
 } boot_desc;
 
-#define MAX_BOOT_FILES 10
-static boot_desc bd[MAX_BOOT_FILES];
+static boot_desc *boots = NULL, *last_boot = NULL;
 
 /* locally defined functions */
-static octet get_u8 PROTO((INT fd));
-static uptr get_uptr PROTO((INT fd, uptr *pn));
-static INT get_string PROTO((INT fd, char *s, iptr max, INT *c));
-static void load PROTO((ptr tc, iptr n, IBOOL base));
-static void check_boot_file_state PROTO((const char *who));
+static INT get_string(faslFile fd, char *s, iptr max, INT *c);
+static void load(ptr tc, struct boot_desc *boot, IBOOL base);
+static void check_boot_file_state(const char *who);
 
-static IBOOL check_boot(int fd, IBOOL verbose, const char *path) {
+static void add_boot(boot_desc *boot, const char *path) {
+  boot->next = NULL;
+  if (boots == NULL)
+    boots = boot;
+  else
+    last_boot->next = boot;
+  last_boot = boot;
+
+  if (strlen(path) >= BOOT_PATH_MAX) {
+    fprintf(stderr, "boot-file path is too long %s\n", path);
+    S_abnormal_exit();
+  }
+  strcpy(boot->path, path);
+}
+
+static IBOOL check_boot(faslFile f, IBOOL verbose, const char *path) {
   uptr n = 0;
+  int got;
 
   /* check for magic number */
-  if (get_u8(fd) != fasl_type_header ||
-      get_u8(fd) != 0 ||
-      get_u8(fd) != 0 ||
-      get_u8(fd) != 0 ||
-      get_u8(fd) != 'c' ||
-      get_u8(fd) != 'h' ||
-      get_u8(fd) != 'e' ||
-      get_u8(fd) != 'z') {
+  if (S_fasl_bytein(f) != fasl_type_header ||
+      S_fasl_bytein(f) != 0 ||
+      S_fasl_bytein(f) != 0 ||
+      S_fasl_bytein(f) != 0 ||
+      S_fasl_bytein(f) != 'c' ||
+      S_fasl_bytein(f) != 'h' ||
+      S_fasl_bytein(f) != 'e' ||
+      S_fasl_bytein(f) != 'z') {
     if (verbose) fprintf(stderr, "malformed fasl-object header in %s\n", path);
-    CLOSE(fd);
+    CLOSE(f->uf.fd);
     return 0;
   }
 
   /* check version */
-  if (get_uptr(fd, &n) != 0) {
+  n = S_fasl_uptrin(f, &got);
+  if (got < 0) {
     if (verbose) fprintf(stderr, "unexpected end of file on %s\n", path);
-    CLOSE(fd);
+    CLOSE(f->uf.fd);
     return 0;
   }
-
   if (n != scheme_version) {
     if (verbose) {
       fprintf(stderr, "%s is for Version %s; ", path, S_format_scheme_version(n));
       /* use separate fprintf since S_format_scheme_version returns static string */
       fprintf(stderr, "need Version %s\n", S_format_scheme_version(scheme_version));
     }
-    CLOSE(fd);
+    CLOSE(f->uf.fd);
     return 0;
   }
 
   /* check machine type */
-  if (get_uptr(fd, &n) != 0) {
+  n = S_fasl_uptrin(f, &got);
+  if (got < 0) {
     if (verbose) fprintf(stderr, "unexpected end of file on %s\n", path);
-    CLOSE(fd);
+    CLOSE(f->uf.fd);
     return 0;
   }
-
   if (n != machine_type) {
     if (verbose)
       fprintf(stderr, "%s is for machine-type %s; need machine-type %s\n", path,
               S_lookup_machine_type(n), S_lookup_machine_type(machine_type));
-    CLOSE(fd);
+    CLOSE(f->uf.fd);
     return 0;
   }
 
   return 1;
 }
 
-static void check_dependencies_header(int fd, const char *path) {
-  if (get_u8(fd) != '(') {  /* ) */
+static void check_dependencies_header(faslFile f, const char *path) {
+  if (S_fasl_bytein(f) != '(') {  /* ) */
     fprintf(stderr, "malformed boot file %s\n", path);
-    CLOSE(fd);
+    CLOSE(f->uf.fd);
     S_abnormal_exit();
   }
 }
 
-static void finish_dependencies_header(int fd, const char *path, int c) {
+static void finish_dependencies_header(faslFile f, int c, const char *path) {
   while (c != ')') {
     if (c < 0) {
       fprintf(stderr, "malformed boot file %s\n", path);
-      CLOSE(fd);
+      CLOSE(f->uf.fd);
       S_abnormal_exit();
     }
-    c = get_u8(fd);
+    c = S_fasl_bytein(f);
   }
 }
 
-static IBOOL find_boot(const char *name, const char *ext, IBOOL direct_pathp,
+static IBOOL find_boot(const char *execpath, const char *name, const char *ext, IBOOL direct_pathp,
                        int fd,
                        IBOOL errorp) {
-  char pathbuf[PATH_MAX], buf[PATH_MAX];
-  uptr n = 0;
+  char pathbuf[BOOT_PATH_MAX], buf[BOOT_PATH_MAX];
   INT c;
   const char *path;
   char *expandedpath;
+  faslFile f;
+  struct boot_desc *boot;
+
+  boot = malloc(sizeof(boot_desc));
 
   if ((fd != -1) || direct_pathp || S_fixedpathp(name)) {
-    if (strlen(name) >= PATH_MAX) {
+    if (strlen(name) >= BOOT_PATH_MAX) {
       fprintf(stderr, "boot-file path is too long %s\n", name);
       S_abnormal_exit();
     }
@@ -719,7 +754,9 @@ static IBOOL find_boot(const char *name, const char *ext, IBOOL direct_pathp,
     }
     if (verbose) fprintf(stderr, "trying %s...opened\n", path);
 
-    if (!check_boot(fd, 1, path))
+    S_fasl_init_fd(&boot->ffo, (ptr)0, fd, FASL_BUFFER_READ_ALL, 0);
+
+    if (!check_boot(&boot->ffo.f, 1, path))
       S_abnormal_exit();
   } else {
     const char *sp = Sschemeheapdirs;
@@ -727,7 +764,7 @@ static IBOOL find_boot(const char *name, const char *ext, IBOOL direct_pathp,
 
     path = pathbuf;
     while (1) {
-      if (!next_path(pathbuf, name, ext, &sp, &dsp)) {
+      if (!next_path(execpath, pathbuf, name, ext, &sp, &dsp)) {
         if (errorp) {
           fprintf(stderr, "cannot find compatible boot file %s%s in search path:\n  \"%s%s\"\n",
                   name, ext,
@@ -749,32 +786,36 @@ static IBOOL find_boot(const char *name, const char *ext, IBOOL direct_pathp,
 
       if (verbose) fprintf(stderr, "trying %s...opened\n", path);
 
-      if (check_boot(fd, verbose, path))
+      S_fasl_init_fd(&boot->ffo, (ptr)0, fd, FASL_BUFFER_READ_ALL, 0);
+
+      if (check_boot(&boot->ffo.f, verbose, path))
         break;
     }
   }
 
   if (verbose) fprintf(stderr, "version and machine type check\n");
 
-  check_dependencies_header(fd, path);
+  f = &boot->ffo.f;
+
+  check_dependencies_header(f, path);
 
   /* ( */
-  if ((c = get_u8(fd)) == ')') {
-    if (boot_count != 0) {
+  if ((c = S_fasl_bytein(f)) == ')') {
+    if (boots != NULL) {
       fprintf(stderr, "base boot file %s must come before other boot files\n", path);
       CLOSE(fd);
       S_abnormal_exit();
     }
   } else {
-    if (boot_count == 0) {
+    if (boots == NULL) {
       for (;;) {
        /* try to load heap or boot file this boot file requires */
-        if (get_string(fd, buf, PATH_MAX, &c) != 0) {
+        if (get_string(f, buf, BOOT_PATH_MAX, &c) != 0) {
           fprintf(stderr, "unexpected end of file on %s\n", path);
           CLOSE(fd);
           S_abnormal_exit();
         }
-        if (find_boot(buf, ".boot", 0, -1, 0)) break;
+        if (find_boot(execpath, buf, ".boot", 0, -1, 0)) break;
         if (c == ')') {
           char *sep; char *wastebuf[8];
           fprintf(stderr, "cannot find subordinate boot file");
@@ -783,13 +824,14 @@ static IBOOL find_boot(const char *name, const char *ext, IBOOL direct_pathp,
             CLOSE(fd);
             S_abnormal_exit();
           }
-          (void) get_uptr(fd, &n); /* version */
-          (void) get_uptr(fd, &n); /* machine type */
-          (void) get_u8(fd);        /* open paren */
-          c = get_u8(fd);
+          S_fasl_init_fd(&boot->ffo, (ptr)0, fd, FASL_BUFFER_READ_ALL, 0);
+          (void) S_fasl_uptrin(f, NULL); /* version */
+          (void) S_fasl_uptrin(f, NULL); /* machine type */
+          (void) S_fasl_bytein(f); /* open paren */
+          c = S_fasl_bytein(f);
           for (sep = " "; ; sep = "or ") {
             if (c == ')') break;
-            (void) get_string(fd, buf, PATH_MAX, &c);
+            (void) get_string(f, buf, BOOT_PATH_MAX, &c);
             fprintf(stderr, "%s%s.boot ", sep, buf);
           }
           fprintf(stderr, "required by %s\n", path);
@@ -800,58 +842,29 @@ static IBOOL find_boot(const char *name, const char *ext, IBOOL direct_pathp,
     }
 
    /* skip to end of header */
-    finish_dependencies_header(fd, path, c);
+    finish_dependencies_header(f, c, path);
   }
 
-  if (boot_count >= MAX_BOOT_FILES) {
-    fprintf(stderr, "exceeded maximum number of boot files (%d)\n", MAX_BOOT_FILES);
-    S_abnormal_exit();
-  }
-
-  bd[boot_count].fd = fd;
-  bd[boot_count].offset = 0;
-  bd[boot_count].len = 0;
-  bd[boot_count].need_check = 0;
-  bd[boot_count].close_after = 1;
-  strcpy(bd[boot_count].path, path);
-  boot_count += 1;
+  boot->offset = 0;
+  boot->len = 0;
+  boot->is_fd = 1;
+  boot->need_check = 0;
+  boot->close_after = 1;
+  add_boot(boot, path);
 
   return 1;
 }
 
-static octet get_u8(INT fd) {
-  octet buf[1];
-  if (READ(fd, &buf, 1) != 1) return -1;
-  return buf[0];
-}
-
-static uptr get_uptr(INT fd, uptr *pn) {
-  uptr n, m; int c; octet k;
-
-  if ((c = get_u8(fd)) < 0) return -1;
-  k = (octet)c;
-  n = k & 0x7F;
-  while (k & 128) {
-    if ((c = get_u8(fd)) < 0) return -1;
-    k = (octet)c;
-    m = n << 7;
-    if (m >> 7 != n) return -1;
-    n = m | (k  & 0x7F);
-  }
-  *pn = n;
-  return 0;
-}
-
-static INT get_string(fd, s, max, c) INT fd; char *s; iptr max; INT *c; {
+static INT get_string(faslFile f, char *s, iptr max, INT *c) {
   while (max-- > 0) {
     if (*c < 0) return -1;
     if (*c == ' ' || *c == ')') {
-      if (*c == ' ') *c = get_u8(fd);
+      if (*c == ' ') *c = S_fasl_bytein(f);
       *s = 0;
       return 0;
     }
     *s++ = *c;
-    *c = get_u8(fd);
+    *c = S_fasl_bytein(f);
   }
   return -1;
 }
@@ -859,21 +872,21 @@ static INT get_string(fd, s, max, c) INT fd; char *s; iptr max; INT *c; {
 static IBOOL loadecho = 0;
 #define LOADSKIP 0
 
-static int set_load_binary(iptr n) {
+static int set_load_binary(boot_desc *boot) {
   if (!Ssymbolp(SYMVAL(S_G.scheme_version_id))) return 0; // set by back.ss
   ptr make_load_binary = SYMVAL(S_G.make_load_binary_id);
   if (Sprocedurep(make_load_binary)) {
-    S_G.load_binary = Scall1(make_load_binary, Sstring_utf8(bd[n].path, -1));
+    S_G.load_binary = Scall1(make_load_binary, Sstring_utf8(boot->path, -1));
     return 1;
   }
   return 0;
 }
 
-static void boot_element(ptr tc, ptr x, iptr n) {
+static void boot_element(ptr tc, ptr x, struct boot_desc *boot) {
   if (Sprocedurep(x)) {
     S_initframe(tc, 0);
     x = boot_call(tc, x, 0);
-  } else if (Sprocedurep(S_G.load_binary) || set_load_binary(n)) {
+  } else if (Sprocedurep(S_G.load_binary) || set_load_binary(boot)) {
     S_initframe(tc, 1);
     S_put_arg(tc, 1, x);
     x = boot_call(tc, S_G.load_binary, 1);
@@ -881,50 +894,55 @@ static void boot_element(ptr tc, ptr x, iptr n) {
     /* sequence combination by vfasl, where vectors are not nested */
     iptr i;
     for (i = 0; i < Svector_length(x); i++)
-      boot_element(tc, Svector_ref(x, i), n);
+      boot_element(tc, Svector_ref(x, i), boot);
   }
 }
 
-static void load(tc, n, base) ptr tc; iptr n; IBOOL base; {
+static void load(ptr tc, struct boot_desc *boot, IBOOL base) {
   ptr x; iptr i;
 
-  if (bd[n].need_check) {
-    if (LSEEK(bd[n].fd, bd[n].offset, SEEK_SET) != bd[n].offset) {
-      fprintf(stderr, "seek in boot file %s failed\n", bd[n].path);
-      S_abnormal_exit();
+  if (boot->need_check) {
+    if (boot->is_fd) {
+      if (LSEEK(boot->ffo.f.uf.fd, boot->offset, SEEK_SET) != boot->offset) {
+        fprintf(stderr, "seek in boot file %s failed\n", boot->path);
+        S_abnormal_exit();
+      }
+      S_fasl_init_fd(&boot->ffo, (ptr)0, boot->ffo.f.uf.fd,
+                     (boot->len > 0) ? FASL_BUFFER_READ_REMAINING : FASL_BUFFER_READ_ALL,
+                     boot->len);
     }
-    check_boot(bd[n].fd, 1, bd[n].path);
-    check_dependencies_header(bd[n].fd, bd[n].path);
-    finish_dependencies_header(bd[n].fd, bd[n].path, 0);
+    check_boot(&boot->ffo.f, 1, boot->path);
+    check_dependencies_header(&boot->ffo.f, boot->path);
+    finish_dependencies_header(&boot->ffo.f, 0, boot->path);
   }
 
   if (base) {
-    S_G.error_invoke_code_object = S_boot_read(bd[n].fd, bd[n].path);
+    S_G.error_invoke_code_object = S_boot_read(&boot->ffo.f, boot->path);
     if (!Scodep(S_G.error_invoke_code_object)) {
       (void) fprintf(stderr, "first object on boot file not code object\n");
       S_abnormal_exit();
     }
 
-    S_G.invoke_code_object = S_boot_read(bd[n].fd, bd[n].path);
+    S_G.invoke_code_object = S_boot_read(&boot->ffo.f, boot->path);
     if (!Scodep(S_G.invoke_code_object)) {
       (void) fprintf(stderr, "second object on boot file not code object\n");
       S_abnormal_exit();
     }
-    S_G.base_rtd = S_boot_read(bd[n].fd, bd[n].path);
+    S_G.base_rtd = S_boot_read(&boot->ffo.f, boot->path);
     if (!Srecordp(S_G.base_rtd)) {
       S_abnormal_exit();
     }
   }
 
   i = 0;
-  while (i++ < LOADSKIP && S_boot_read(bd[n].fd, bd[n].path) != Seof_object);
+  while (i++ < LOADSKIP && S_boot_read(&boot->ffo.f, boot->path) != Seof_object);
 
-  while ((x = S_boot_read(bd[n].fd, bd[n].path)) != Seof_object) {
+  while ((x = S_boot_read(&boot->ffo.f, boot->path)) != Seof_object) {
     if (loadecho) {
       printf("%ld: ", (long)i);
       fflush(stdout);
     }
-    boot_element(tc, x, n);
+    boot_element(tc, x, boot);
     if (loadecho) {
       S_prin1(x);
       putchar('\n');
@@ -934,8 +952,8 @@ static void load(tc, n, base) ptr tc; iptr n; IBOOL base; {
   }
 
   S_G.load_binary = Sfalse;
-  if (bd[n].close_after)
-    CLOSE(bd[n].fd);
+  if (boot->close_after)
+    CLOSE(boot->ffo.f.uf.fd);
 }
 
 /***************************************************************************/
@@ -971,7 +989,7 @@ const char *Skernel_version(void) {
   return VERSION;
 }
 
-extern void Sset_verbose(v) INT v; {
+extern void Sset_verbose(INT v) {
   verbose = v;
 }
 
@@ -987,7 +1005,7 @@ static void default_abnormal_exit(void) {
   abort();
 }
 
-extern void Sscheme_init(abnormal_exit) void (*abnormal_exit) PROTO((void)); {
+extern void Sscheme_init(void (*abnormal_exit)(void)) {
   S_abnormal_exit_proc = abnormal_exit ? abnormal_exit : default_abnormal_exit;
   S_errors_to_console = 1;
 
@@ -995,14 +1013,16 @@ extern void Sscheme_init(abnormal_exit) void (*abnormal_exit) PROTO((void)); {
   S_pagesize = GETPAGESIZE();
 
   idiot_checks();
-  
+
   switch (current_state) {
     case RUNNING:
       fprintf(stderr, "error (Sscheme_init): call Sscheme_deinit first to terminate\n");
       S_abnormal_exit();
+      break;	/* Pacify compilers treating fallthrough warnings as errors */
     case BOOTING:
       fprintf(stderr, "error (Sscheme_init): already initialized\n");
       S_abnormal_exit();
+      break;	/* Pacify compilers treating fallthrough warnings as errors */
     case UNINITIALIZED:
     case DEINITIALIZED:
       break;
@@ -1013,7 +1033,7 @@ extern void Sscheme_init(abnormal_exit) void (*abnormal_exit) PROTO((void)); {
   S_G.enable_object_counts = 0;
   S_G.enable_object_backreferences = 0;
 
-  boot_count = 0;
+  boots = last_boot = NULL;
 
 #ifdef WIN32
   Sschemeheapdirs = Sgetenv("SCHEMEHEAPDIRS");
@@ -1061,19 +1081,24 @@ static void check_boot_file_state(const char *who) {
   }
 }
 
-extern void Sregister_boot_file(name) const char *name; {
+extern void Sregister_boot_file(const char *name) {
   check_boot_file_state("Sregister_boot_file");
-  find_boot(name, "", 0, -1, 1);
+  find_boot("scheme", name, "", 0, -1, 1);
 }
 
-extern void Sregister_boot_direct_file(name) const char *name; {
-  check_boot_file_state("Sregister_boot_direct_file");
-  find_boot(name, "", 1, -1, 1);
+extern void Sregister_boot_executable_relative_file(const char* execpath, const char *name) {
+  check_boot_file_state("Sregister_executable_relative_boot_file");
+  find_boot(execpath, name, "", 0, -1, 1);
 }
 
-extern void Sregister_boot_file_fd(name, fd) const char *name; int fd; {
+extern void Sregister_boot_relative_file(const char *name) {
+  check_boot_file_state("Sregister_boot_relative_file");
+  find_boot(NULL, name, "", 1, -1, 1);
+}
+
+extern void Sregister_boot_file_fd(const char *name, int fd) {
   check_boot_file_state("Sregister_boot_file_fd");
-  find_boot(name, "", 1, fd, 1);
+  find_boot(NULL, name, "", 1, fd, 1);
 }
 
 extern void Sregister_boot_file_fd_region(const char *name,
@@ -1081,20 +1106,37 @@ extern void Sregister_boot_file_fd_region(const char *name,
                                           iptr offset,
                                           iptr len,
                                           int close_after) {
-  check_boot_file_state("Sregister_boot_file_fd");
+  struct boot_desc *boot;
 
-  if (strlen(name) >= PATH_MAX) {
-    fprintf(stderr, "boot-file path is too long %s\n", name);
-    S_abnormal_exit();
-  }
+  check_boot_file_state("Sregister_boot_file_fd_region");
 
-  bd[boot_count].fd = fd;
-  bd[boot_count].offset = offset;
-  bd[boot_count].len = len;
-  bd[boot_count].need_check = 1;
-  bd[boot_count].close_after = close_after;
-  strcpy(bd[boot_count].path, name);
-  boot_count += 1;
+  boot = malloc(sizeof(boot_desc));
+
+  S_fasl_init_fd(&boot->ffo, (ptr)0, fd, FASL_BUFFER_READ_REMAINING, len);
+  boot->offset = offset;
+  boot->len = len;
+  boot->is_fd = 1;
+  boot->need_check = 1;
+  boot->close_after = close_after;
+  add_boot(boot, name);
+}
+
+extern void Sregister_boot_file_bytes(const char *name,
+                                      void *data,
+                                      iptr len) {
+  struct boot_desc *boot;
+
+  check_boot_file_state("Sregister_boot_file_bytes");
+
+  boot = malloc(sizeof(boot_desc));
+
+  S_fasl_init_bytes(&boot->ffo.f, (ptr)0, data, len);
+  boot->offset = 0;
+  boot->len = len;
+  boot->is_fd = 0;
+  boot->need_check = 1;
+  boot->close_after = 0;
+  add_boot(boot, name);
 }
 
 extern void Sregister_heap_file(UNUSED const char *path) {
@@ -1102,7 +1144,7 @@ extern void Sregister_heap_file(UNUSED const char *path) {
   S_abnormal_exit();
 }
 
-extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_init) PROTO((void)); {
+extern void Sbuild_heap(const char *execpath, void (*custom_init)(void)) {
   ptr tc = Svoid; /* initialize to make gcc happy */
   ptr p;
 
@@ -1111,9 +1153,11 @@ extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_i
     case DEINITIALIZED:
       fprintf(stderr, "error (Sbuild_heap): uninitialized; call Sscheme_init first\n");
       if (current_state == UNINITIALIZED) exit(1); else S_abnormal_exit();
+      break;	/* Pacify compilers treating fallthrough warnings as errors */
     case RUNNING:
       fprintf(stderr, "error (Sbuild_heap): already running\n");
       S_abnormal_exit();
+      break;	/* Pacify compilers treating fallthrough warnings as errors */
     case BOOTING:
       break;
   }
@@ -1121,23 +1165,23 @@ extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_i
 
   S_boot_time = 1;
 
-  if (boot_count == 0) {
-    const char *name;
-
-    if (!kernel) {
+  if (boots == NULL) {
+    const char *name = path_last(execpath);
+#if defined(ALWAYS_USE_BOOT_FILE)
+    name = ALWAYS_USE_BOOT_FILE;
+#endif
+    if (!name) {
       fprintf(stderr, "no boot file or executable name specified\n");
       S_abnormal_exit();
     }
-
-    name = path_last(kernel);
-    if (strlen(name) >= PATH_MAX) {
+    if (strlen(name) >= BOOT_PATH_MAX) {
       fprintf(stderr, "executable name too long: %s\n", name);
       S_abnormal_exit();
     }
 
 #ifdef WIN32
     { /* strip off trailing .exe, if any */
-      static char buf[PATH_MAX];
+      static char buf[BOOT_PATH_MAX];
       iptr n;
 
       n = strlen(name) - 4;
@@ -1149,7 +1193,7 @@ extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_i
     }
 #endif
 
-    if (!find_boot(name, ".boot", 0, -1, 0)) {
+    if (!find_boot(execpath, name, ".boot", 0, -1, 0)) {
       fprintf(stderr, "cannot find compatible %s.boot in search path\n  \"%s%s\"\n",
               name,
               Sschemeheapdirs, Sdefaultheapdirs);
@@ -1157,10 +1201,10 @@ extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_i
     }
   }
 
-  S_vfasl_boot_mode = 1; /* to static generation after compacting */
+  if (boots != NULL) {
+    struct boot_desc *boot, *next_boot;
 
-  if (boot_count != 0) {
-    INT i = 0;
+    S_vfasl_boot_mode = 1; /* to static generation after compacting */
 
     main_init();
     if (custom_init) custom_init();
@@ -1181,15 +1225,24 @@ extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_i
     COMPRESSFORMAT(tc) = FIX(COMPRESS_LZ4);
     COMPRESSLEVEL(tc) = FIX(COMPRESS_MEDIUM);
 
-    load(tc, i++, 1);
+    load(tc, boots, 1);
     S_boot_time = 0;
 
-    while (i < boot_count) load(tc, i++, 0);
+    next_boot = boots->next;
+    free(boots);
+
+    for (boot = next_boot; boot != NULL; boot = next_boot) {
+      next_boot = boot->next;
+      load(tc, boot, 0);
+      free(boot);
+    }
+
+    Scompact_heap();
+
+    S_vfasl_boot_mode = 0;
+
+    boots = last_boot = NULL;
   }
-
-  S_vfasl_boot_mode = 0;
-
-  if (boot_count != 0) Scompact_heap();
 
  /* complete the initialization on the Scheme side */
   p = S_symbol_value(S_intern((const unsigned char *)"$scheme-init"));
@@ -1205,14 +1258,14 @@ extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_i
   S_errors_to_console = 0;
 }
 
-extern void Senable_expeditor(history_file) const char *history_file; {
+extern void Senable_expeditor(const char *history_file) {
   Scall1(S_symbol_value(Sstring_to_symbol("$enable-expeditor")), Strue);
   if (history_file != (const char *)0)
     Scall1(S_symbol_value(Sstring_to_symbol("$expeditor-history-file")),
            Sstring_utf8(history_file, -1));
 }
 
-extern INT Sscheme_start(argc, argv) INT argc; const char *argv[]; {
+extern INT Sscheme_start(INT argc, const char *argv[]) {
   ptr tc = get_thread_context();
   ptr arglist, p; INT i;
 
@@ -1221,9 +1274,11 @@ extern INT Sscheme_start(argc, argv) INT argc; const char *argv[]; {
     case DEINITIALIZED:
       fprintf(stderr, "error (Sscheme_start): uninitialized; call Sscheme_init and Sbuild_heap first\n");
       if (current_state == UNINITIALIZED) exit(1); else S_abnormal_exit();
+      break;	/* Pacify compilers treating fallthrough warnings as errors */
     case BOOTING:
       fprintf(stderr, "error (Sscheme_start): no heap built yet; call Sbuild_heap first\n");
       S_abnormal_exit();
+      break;	/* Pacify compilers treating fallthrough warnings as errors */
     case RUNNING:
       break;
   }
@@ -1242,7 +1297,8 @@ extern INT Sscheme_start(argc, argv) INT argc; const char *argv[]; {
   S_put_arg(tc, 1, arglist);
   p = boot_call(tc, p, 1);
 
-  if (S_integer_valuep(p)) return (INT)Sinteger_value(p);
+  iptr result;
+  if (Stry_integer_value(p, &result, NULL)) return (INT)result;
   return p == Svoid ? 0 : 1;
 }
 
@@ -1255,9 +1311,11 @@ static INT run_script(const char *who, const char *scriptfile, INT argc, const c
     case DEINITIALIZED:
       fprintf(stderr, "error (%s): uninitialized; call Sscheme_init and Sbuild_heap first\n", who);
       if (current_state == UNINITIALIZED) exit(1); else S_abnormal_exit();
+      break;	/* Pacify compilers treating fallthrough warnings as errors */
     case BOOTING:
       fprintf(stderr, "error (%s): no heap built yet; call Sbuild_heap first\n", who);
       S_abnormal_exit();
+      break;	/* Pacify compilers treating fallthrough warnings as errors */
     case RUNNING:
       break;
   }
@@ -1278,15 +1336,16 @@ static INT run_script(const char *who, const char *scriptfile, INT argc, const c
   S_put_arg(tc, 3, arglist);
   p = boot_call(tc, p, 3);
 
-  if (S_integer_valuep(p)) return (INT)Sinteger_value(p);
+  iptr result;
+  if (Stry_integer_value(p, &result, NULL)) return (INT)result;
   return p == Svoid ? 0 : 1;
 }
 
-extern INT Sscheme_script(scriptfile, argc, argv) const char *scriptfile; INT argc; const char *argv[]; {
+extern INT Sscheme_script(const char *scriptfile, INT argc, const char *argv[]) {
   return run_script("Sscheme_script", scriptfile, argc, argv, 0);
 }
 
-extern INT Sscheme_program(programfile, argc, argv) const char *programfile; INT argc; const char *argv[]; {
+extern INT Sscheme_program(const char *programfile, INT argc, const char *argv[]) {
   return run_script("Sscheme_program", programfile, argc, argv, 1);
 }
 
@@ -1295,7 +1354,7 @@ extern void Ssave_heap(UNUSED const char *path, UNUSED INT level) {
   S_abnormal_exit();
 }
 
-extern void Sscheme_deinit() {
+extern void Sscheme_deinit(void) {
   ptr p, tc = get_thread_context();
 
   switch (current_state) {
@@ -1303,9 +1362,11 @@ extern void Sscheme_deinit() {
     case DEINITIALIZED:
       fprintf(stderr, "error (Sscheme_deinit): not yet initialized or running\n");
       if (current_state == UNINITIALIZED) exit(1); else S_abnormal_exit();
+      break;   /* Pacify compilers treating fallthrough warnings as errors */
     case BOOTING:
       fprintf(stderr, "error (Sscheme_deinit): not yet running\n");
       S_abnormal_exit();
+      break;	/* Pacify compilers treating fallthrough warnings as errors */
     case RUNNING:
       break;
   }

@@ -1,7 +1,7 @@
 #lang racket/base
 (require (for-syntax racket/base
                      racket/stxparam
-                     syntax/parse)
+                     syntax/parse/pre)
          racket/stxparam
          racket/undefined
          "class-wrapped.rkt"
@@ -164,7 +164,7 @@
 
 (define (class/c-late-neg-proj ctc)
   (define ep (class/c-external-late-neg-proj ctc))
-  (define ip (internal-class/c-late-neg-proj (class/c-internal ctc)))
+  (define ip (internal-class/c-late-neg-proj ctc (class/c-internal ctc)))
   (λ (blame)
     (define eb (ep blame))
     (define ib (ip blame))
@@ -437,7 +437,7 @@
         
         (copy-seals cls c)))))
 
-(define (internal-class/c-late-neg-proj internal-ctc)
+(define (internal-class/c-late-neg-proj ctc-for-property internal-ctc)
   (define dynamic-features
     (append (internal-class/c-overrides internal-ctc)
             (internal-class/c-augments internal-ctc)
@@ -650,7 +650,8 @@
                                         0 ;; No new fields in this class replacement
                                         undefined
                                         ;; Map object property to class:
-                                        (list (cons prop:object c))
+                                        (list (cons prop:object c)
+                                              (cons prop:contracted (instanceof/c ctc-for-property)))
                                         (class-obj-inspector cls))])
           (set-class-struct:object! c struct:object)
           (set-class-object?! c object?)
@@ -778,7 +779,10 @@
                (super-go the-obj si_c si_inited? init-args null null)
                (init the-obj super-go si_c si_inited? init-args init-args))))
 
-        (copy-seals cls c)))))
+        (impersonate-struct (copy-seals cls c)
+                            class-object? #f
+                            set-class-object?! #f
+                            impersonator-prop:contracted ctc-for-property)))))
 
 (define (blame-add-init-context blame name)
   (blame-add-context blame
@@ -1393,20 +1397,29 @@
                       [next-ctcs (cdr all-new-ctcs)]
                       [this-proj (car all-new-projs)]
                       [next-projs (cdr all-new-projs)]
-                      [dropped-something? #f])
+                      [dropped-something? #f]
+                      [n 0])
              (cond
-               [(null? next-ctcs) (values (cons this-ctc prior-ctcs)
-                                          (cons this-proj prior-projs)
-                                          dropped-something?)]
+               [(null? next-ctcs)
+                (when (n . > . 10)
+                  (log-racket/contract-info
+                   "class-c-old.rkt: wrappers seem to be accumulating; found ~a; here is one of them:\n  ~.s"
+                   n
+                   this-ctc))
+                (values (cons this-ctc prior-ctcs)
+                        (cons this-proj prior-projs)
+                        dropped-something?)]
                [else
                 (if (and (ormap (λ (x) (stronger? x this-ctc)) prior-ctcs)
                          (ormap (λ (x) (stronger? this-ctc x)) next-ctcs))
                     (loop prior-ctcs prior-projs
                           (car next-ctcs) (cdr next-ctcs) (car next-projs) (cdr next-projs)
-                          #t)
+                          #t
+                          (+ n 1))
                     (loop (cons this-ctc prior-ctcs) (cons this-proj prior-projs)
                           (car next-ctcs) (cdr next-ctcs) (car next-projs) (cdr next-projs)
-                          dropped-something?))])))
+                          dropped-something?
+                          (+ n 1)))])))
 
          (define unwrapped-class
            (if (has-impersonator-prop:instanceof/c-unwrapped-class? val)
@@ -1434,6 +1447,8 @@
           impersonator-prop:instanceof/c-unwrapped-class unwrapped-class
           impersonator-prop:contracted ctc
           impersonator-prop:original-object original-obj)]))))
+
+(define-logger racket/contract)
 
 (define-values (impersonator-prop:instanceof/c-ctcs
                 has-impersonator-prop:instanceof/c-ctcs?

@@ -117,9 +117,7 @@
 ;; NOTE: the #:construct expression is only run if there
 ;; is no interned copy, so we should avoid unnecessary
 ;; allocation w/ this approach
-(define-simple-macro (intern-single-ref! table-exp:expr
-                                         key-exp:expr
-                                         #:construct val-exp:expr)
+(define-syntax-parse-rule (intern-single-ref! table-exp:expr key-exp:expr #:construct val-exp:expr)
   (let ([table table-exp])
     (define key key-exp)
     (define intern-box (hash-ref table key #f))
@@ -132,13 +130,11 @@
 
 ;; fetches an interned Rep based on the given _two_ keys
 ;; see 'intern-single-ref!'
-(define-simple-macro (intern-double-ref! table:id
-                                         key-exp1:expr
-                                         key-exp2:expr
-                                         #:construct val-exp:expr)
-  (intern-single-ref! (hash-ref! table key-exp1 make-hash)
-                      key-exp2
-                      #:construct val-exp))
+(define-syntax-parse-rule (intern-double-ref! table:id
+                                              key-exp1:expr
+                                              key-exp2:expr
+                                              #:construct val-exp:expr)
+  (intern-single-ref! (hash-ref! table key-exp1 make-hash) key-exp2 #:construct val-exp))
 
 
 
@@ -298,6 +294,14 @@
   ;; variant name parsing
   (define-syntax-class var-name
     #:attributes (name constructor raw-constructor match-expander predicate updator)
+    (pattern (name:id #:constructor-name constructor)
+             #:with raw-constructor (format-id #'name "raw-make-~a" (syntax-e #'name))
+             #:with match-expander
+             (format-id #'name "~a:" (syntax-e #'name))
+             #:with predicate
+             (format-id #'name "~a?" (syntax-e #'name))
+             #:with updator
+             (format-id #'name "~a-update" (syntax-e #'name)))
     (pattern name:id
              #:with constructor (format-id #'name "make-~a" (syntax-e #'name))
              ;; hidden constructor for use inside custom constructor defs
@@ -387,12 +391,10 @@
      ;; Error checking
      ;; - - - - - - - - - - - - - - -
 
-     ;; build convenient boolean flags
-     (define is-a-type? (and (attribute parent) (eq? 'Type (syntax-e #'parent))))
      ;; singletons cannot have fields or #:no-provide
      (when (and (attribute singleton)
                 (or (attribute no-provide?-kw)
-                    (> (length (syntax->list #'flds)) 0)))
+                    (positive? (length (syntax->list #'flds)))))
        (raise-syntax-error 'def-rep "singletons cannot have fields or the #:no-provide option"
                            #'var))
      (when (and (attribute base?)
@@ -609,7 +611,8 @@
                   #'(begin)
                   #`(provide #,@non-constr-li)))
             #'(constr-provide nonconstr-provide)])]
-        [struct-def #'(struct var.name parent ... (flds.ids ...)
+        [struct-def (syntax/loc #'var.name
+		      (struct var.name parent ... (flds.ids ...)
                         maybe-transparent ...
                         #:constructor-name constructor-name
                         #:property prop:uid uid-id
@@ -623,7 +626,7 @@
                          Rep-free-idxs-def
                          Rep-for-each-def
                          Rep-fmap-def]
-                        extra-defs ...)])
+                        extra-defs ...))])
        ;; - - - - - - - - - - - - - - -
        ;; macro output
        ;; - - - - - - - - - - - - - - -

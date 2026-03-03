@@ -2,7 +2,11 @@
 
 @(require scribble/eval
           racket/sandbox
-          (for-label racket/base racket/vector racket/match racket/unsafe/ops racket/string
+          (for-label racket/base
+                     racket/match
+                     racket/vector
+                     racket/string
+                     racket/unsafe/ops
                      (except-in racket/list permutations) ; FIXME
                      math plot
                      (only-in typed/racket/base
@@ -250,10 +254,10 @@ The length of @racket[xs] must be positive.
 
 @define[block-diagonal-url]{http://en.wikipedia.org/wiki/Block_matrix#Block_diagonal_matrices}
 
-@defproc[(block-diagonal-matrix [Xs (Listof (Matrix A))] [zero A 0]) (Matrix A)]{
+@defproc[(block-diagonal-matrix [Xs (Listof (Array A))] [zero A 0]) (Array A)]{
 @margin-note*{@hyperlink[block-diagonal-url]{Wikipedia: Block-diagonal matrices}}
-Returns a matrix with matrices @racket[Xs] along the diagonal and @racket[zero] everywhere else.
-The length of @racket[Xs] must be positive.
+Returns an array with two-dimensional arrays @racket[Xs] along the diagonal and
+@racket[zero] everywhere else.
 @examples[#:eval typed-eval
                  (block-diagonal-matrix (list (matrix [[6 7] [8 9]])
                                               (diagonal-matrix '(7 5 7))
@@ -262,6 +266,33 @@ The length of @racket[Xs] must be positive.
                  (block-diagonal-matrix (list (make-matrix 2 2 2.0+3.0i)
                                               (make-matrix 2 2 5.0+7.0i))
                                         0.0+0.0i)]
+
+Empty two-dimensional arrays are valid inputs. They contribute to the resulting
+array's @tech{shape}.
+@examples[#:eval typed-eval
+                 (block-diagonal-matrix (list (make-array #(2 0) 1)
+                                              (matrix [[6 7] [8 9]])))
+                 (block-diagonal-matrix (list (matrix [[6 7] [8 9]])
+                                              (make-array #(2 0) 1)))
+                 (block-diagonal-matrix (list (make-array #(0 2) 1)
+                                              (matrix [[6 7] [8 9]])))
+                 (block-diagonal-matrix (list (matrix [[6 7] [8 9]])
+                                              (make-array #(0 2) 1)))
+                 (block-diagonal-matrix (list (matrix [[6 7] [8 9]])
+                                              (make-array #(2 0) 1)
+                                              (diagonal-matrix '(7 5 7))
+                                              (make-array #(0 2) 1)
+                                              (col-matrix [1 2 3])
+                                              (row-matrix [4 5 6])))
+                 (block-diagonal-matrix (list (make-array #(2 0) 1)
+                                              (make-array #(0 3) 1)))
+                 (block-diagonal-matrix (list (make-array #(0 3) 1)
+                                              (make-array #(2 0) 1)))]
+
+If @racket[Xs] is @racket[null], the result is an empty array with @tech{shape}
+@racket[#(0 0)].
+@examples[#:eval typed-eval
+                 (block-diagonal-matrix '())]
 }
 
 @define[vandermonde-url]{http://en.wikipedia.org/wiki/Vandermonde_matrix}
@@ -364,7 +395,7 @@ Like @racket[list*->matrix] and @racket[matrix*->list], but for vectors.
 As in the first example, Typed Racket often needs help inferring the type @racket[A].
 }
 
-                                                                                  
+
 @;{==================================================================================================}
 
 
@@ -377,13 +408,13 @@ Matrix addition, subtraction and products respectively.
 
 For matrix addition and subtraction all matrices must have the same shape.
 
-For matrix product the number of columns of one matrix must equal the 
+For matrix product the number of columns of one matrix must equal the
 number of rows in the following matrix.
 
 @examples[#:eval untyped-eval
-                 (define A (matrix ([1 2] 
+                 (define A (matrix ([1 2]
                                     [3 4])))
-                 (define B (matrix ([5 6] 
+                 (define B (matrix ([5 6]
                                     [7 8])))
                  (define C (matrix ([ 9 10 11]
                                     [12 13 14])))
@@ -403,7 +434,7 @@ Computes @racket[(matrix* M ...)] with @racket[n] arguments, but more efficientl
 }
 
 @defproc[(matrix-scale [M (Matrix Number)] [z Number]) (Matrix Number)]{
-Computes the matrix @racket[zM], a matrix of the same shape as @racket[M] 
+Computes the matrix @racket[zM], a matrix of the same shape as @racket[M]
 where each entry in @racket[M] is multiplied with @racket[z].
 @examples[#:eval untyped-eval
                  (matrix-scale (matrix [[1 2] [3 4]]) 2)]
@@ -487,7 +518,7 @@ Returns array of the entries on the diagonal of @racket[M].
               @defproc[(matrix-lower-triangle [M (Matrix A)] [zero A 0]) (Matrix A)])]{
 The function @racket[matrix-upper-triangle] returns an upper
 triangular matrix (entries below the diagonal have the value @racket[zero]) with
-entries from the given matrix. Likewise the function 
+entries from the given matrix. Likewise the function
 @racket[matrix-lower-triangle] returns a lower triangular
 matrix.
 @examples[#:eval typed-eval
@@ -511,11 +542,11 @@ of the matrix.
 @deftogether[(@defproc[(matrix-augment [Ms (Listof (Matrix A))]) (Matrix A)]
               @defproc[(matrix-stack [Ms (Listof (Matrix A))]) (Matrix A)])]{
 The function @racket[matrix-augment] returns a matrix whose columns are
-the columns of the matrices in @racket[Ms]. The matrices 
+the columns of the matrices in @racket[Ms]. The matrices
 in list must have the same number of rows.
 
 The function @racket[matrix-stack] returns a matrix whose rows are
-the rows of the matrices in @racket[Ms]. The matrices 
+the rows of the matrices in @racket[Ms]. The matrices
 in list must have the same number of columns.
 @examples[#:eval untyped-eval
                  (define M0 (matrix ([1 1] [1 1])))
@@ -525,8 +556,26 @@ in list must have the same number of columns.
                  (matrix-stack (list M0 M1 M2))]
 }
 
+@deftogether[(@defproc[(matrix-set-col [M (Matrix A)] [idx Integer] [new-col (Matrix A)]) (Matrix A)]
+              @defproc[(matrix-set-row [M (Matrix A)] [idx Integer] [new-row (Matrix A)]) (Matrix A)])]{
+
+The function @racket[matrix-set-col] returns a matrix whose @racket[idx]th column is @racket[new-col].
+The function @racket[matrix-set-row] returns a matrix whose @racket[idx]th row is @racket[new-row].
+
+@examples[#:eval untyped-eval
+		 (define mat (matrix [[1 2 3]
+				      [4 5 6]
+				      [7 8 9]]))
+
+		 (define new-col (col-matrix [-1 -2 -3]))
+		 (define new-row (row-matrix [-1 -2 -3]))
+
+		 (matrix-set-col mat 0 new-col)
+		 (matrix-set-row mat 0 new-row)]
+}
+
 @deftogether[
-(@defproc*[([(matrix-map-rows 
+(@defproc*[([(matrix-map-rows
               [f ((Matrix A) -> (Matrix B))] [M (Matrix A)]) (Matrix B)]
             [(matrix-map-rows
               [f ((Matrix A) -> (U #f (Matrix B)))] [M (Matrix A)] [fail (-> F)])
@@ -552,7 +601,7 @@ returned:
 }
 
 @deftogether[
-(@defproc*[([(matrix-map-cols 
+(@defproc*[([(matrix-map-cols
               [f ((Matrix A) -> (Matrix B))] [M (Matrix A)]) (Matrix B)]
             [(matrix-map-cols
               [f ((Matrix A) -> (U #f (Matrix B)))] [M (Matrix A)] [fail (-> F)])
@@ -577,7 +626,7 @@ Returns a matrix where each entry of the given matrix is conjugated.
               @defproc[(matrix-hermitian [M (Matrix Number)]) (Matrix Number)])]{
 @margin-note*{Wikipedia: @hyperlink["http://en.wikipedia.org/wiki/Transpose"]{Transpose},
                          @hyperlink["http://en.wikipedia.org/wiki/Hermitian_matrix"]{Hermitian}}
-Returns the transpose or the hermitian of the matrix. 
+Returns the transpose or the hermitian of the matrix.
 The hermitian of a matrix is the conjugate of the transposed matrix.
 For a real matrix these operations return the the same result.
 @examples[#:eval untyped-eval
@@ -587,8 +636,8 @@ For a real matrix these operations return the the same result.
 
 @defproc[(matrix-trace [M (Matrix Number)]) Number]{
 @margin-note*{@hyperlink["http://en.wikipedia.org/wiki/Trace_(linear_algebra)"]{Wikipedia: Trace}}
-Returns the trace of the square matrix. The trace of matrix is the 
-the sum of the diagonal entries. 
+Returns the trace of the square matrix. The trace of matrix is the
+the sum of the diagonal entries.
 @examples[#:eval untyped-eval
                  (matrix-trace (matrix ([1 2] [3 4])))]
 }
@@ -622,13 +671,13 @@ The L@subscript{1} norm is also known under the names Manhattan or taxicab norm.
 The L@subscript{1} norm of a matrix is the sum of magnitudes of the entries in the matrix.
 
 The L@subscript{2} norm is also known under the names Euclidean or Frobenius norm.
-The L@subscript{2} norm of a matrix is the square root of the sum of squares of 
+The L@subscript{2} norm of a matrix is the square root of the sum of squares of
 magnitudes of the entries in the matrix.
 
 The L@subscript{∞} norm is also known as the maximum or infinity norm.
 The L@subscript{∞} norm computes the maximum magnitude of the entries in the matrix.
 
-For @racket[p >= 1], @racket[matrix-norm] computes the L@subscript{@racket[p]} norm: 
+For @racket[p >= 1], @racket[matrix-norm] computes the L@subscript{@racket[p]} norm:
 the @racket[p]th root of the sum of all entry magnitudes to the @racket[p]th power.
 @;{MathJax would be nice to have in Scribble...}
 @examples[#:eval untyped-eval
@@ -642,9 +691,9 @@ the @racket[p]th root of the sum of all entry magnitudes to the @racket[p]th pow
 @defproc*[([(matrix-dot [M (Matrix Number)]) Nonnegative-Real]
            [(matrix-dot [M (Matrix Number)] [N (Matrix Number)]) Number])]{
 
-The call @racket[(matrix-dot M N)] computes the Frobenius inner product of the 
+The call @racket[(matrix-dot M N)] computes the Frobenius inner product of the
 two matrices with the same shape.
-In other words the sum of @racket[(* a (conjugate b))] is computed where 
+In other words the sum of @racket[(* a (conjugate b))] is computed where
 @racket[a] runs over the entries in @racket[M] and @racket[b] runs over
 the corresponding entries in @racket[N].
 
@@ -656,7 +705,7 @@ The call @racket[(matrix-dot M)] computes @racket[(matrix-dot M M)] efficiently.
 
 @defproc[(matrix-cos-angle [M (Matrix Number)] [N (Matrix Number)]) Number]{
 Returns the cosine of the angle between two matrices w.r.t. the inner produce space induced by
-the Frobenius inner product. That is it returns 
+the Frobenius inner product. That is it returns
 
 @racket[(/ (matrix-dot M N) (* (matrix-2norm M) (matrix-2norm N)))]
 
@@ -709,8 +758,8 @@ or column in @racket[M] is zero.
               @defproc[(matrix-cols-orthogonal? [M (Matrix Number)]
                                                 [eps Real (* 10 epsilon.0)])
                        Boolean])]{
-Returns @racket[#t] if the rows or columns of @racket[M] 
-are very close of being orthogonal (by default a few epsilons). 
+Returns @racket[#t] if the rows or columns of @racket[M]
+are very close of being orthogonal (by default a few epsilons).
 @examples[#:eval untyped-eval
                  (matrix-rows-orthogonal? (matrix [[1 1] [-1 1]]))
                  (matrix-cols-orthogonal? (matrix [[1 1] [-1 1]]))]
@@ -779,7 +828,7 @@ Returns the determinant of @racket[M], which must be a @racket[square-matrix?].
                  (matrix-determinant (col-matrix [1 2]))]
 }
 
-                                                                                  
+
 @;{==================================================================================================}
 
 
@@ -867,7 +916,7 @@ If @racket[M] does not have an LU decomposition, the first result is the result 
                     (matrix-lu (matrix [[0 1] [1 1]]) (λ () #f))]
 }
 
-                                                                                  
+
 @;{==================================================================================================}
 
 
@@ -884,7 +933,7 @@ The number of columns in the result is the rank of @racket[M].
 If @racket[normalize?] is true, the columns are also normalized.
 
 @examples[#:eval typed-eval
-                 (define M 
+                 (define M
                    (matrix [[12 -51   4]
                             [ 6 167 -68]
                             [-4  24 -41]]))
@@ -935,9 +984,9 @@ the matrices @racket[Q] and @racket[R]. If @racket[full?] is @racket[#f], then
 a reduced decomposition is returned, otherwise a full decomposition is returned.
 
 @margin-note*{An @italic{orthonormal} matrix has columns which are orthoginal, unit vectors.}
-The (full) decomposition of a square matrix consists of two matrices: 
-a orthogonal matrix @racket[Q] and an upper triangular matrix @racket[R], 
-such that @racket[QR = M]. 
+The (full) decomposition of a square matrix consists of two matrices:
+a orthogonal matrix @racket[Q] and an upper triangular matrix @racket[R],
+such that @racket[QR = M].
 
 For tall non-square matrices @racket[R], the triangular part of the full decomposition,
 contains zeros below the diagonal. The reduced decomposition leaves the zeros out.
@@ -966,8 +1015,8 @@ The difference between full and reduced decompositions:
                     (matrix= M (matrix* Q1 R1))
                     (matrix= M (matrix* Q2 R2))]
 
-The decomposition @racket[M = QR] is useful for solving the equation @racket[Mx=v]. 
-Since the inverse of Q is simply the transpose of Q, 
+The decomposition @racket[M = QR] is useful for solving the equation @racket[Mx=v].
+Since the inverse of Q is simply the transpose of Q,
   @racket[Mx=v  <=>  QRx=v  <=>  Rx = Q^T v].
 And since @racket[R] is upper triangular, the system can be solved by back substitution.
 
@@ -1001,7 +1050,7 @@ When M is a column matrix, @racket[(matrix-op-1norm M)] is equivalent to @racket
 
 @defproc[(matrix-op-2norm [M (Matrix Number)]) Nonnegative-Real]{
 The @tech{operator norm} induced by the vector norm @racket[matrix-2norm].
-                                             
+
 This function is currently undefined because a required algorithm (singular value decomposition or
 eigendecomposition) is not yet implemented in @racketmodname[math/matrix].
 
@@ -1024,7 +1073,7 @@ eigendecomposition) is not yet implemented in @racketmodname[math/matrix].
 When @racket[M0] and @racket[M1] are column matrices, @racket[(matrix-basis-cos-angle M0 M1)] is
 equivalent to @racket[(matrix-cos-angle M0 M1)].
 }
-         
+
 @defproc[(matrix-basis-angle [M0 (Matrix Number)] [M1 (Matrix Number)]) Number]{
 Equivalent to @racket[(acos (matrix-basis-cos-angle M0 M1))].
 
@@ -1071,7 +1120,7 @@ epsilons). Equivalent to
 @racketblock[(<= (matrix-absolute-error M (make-matrix m n 0)) eps)]
 where @racket[m n] is the shape of @racket[M].
 }
-                         
+
 @defproc[(matrix-identity? [M (Matrix Number)] [eps Real (* 10 epsilon.0)]) Boolean]{
 Returns @racket[#t] when @racket[M] is very close to the identity matrix (by default, within a few
 epsilons).

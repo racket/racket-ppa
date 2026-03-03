@@ -1,6 +1,6 @@
 (module member '#%kernel
   (#%require "cond.rkt" "qq-and-or.rkt")
-  (#%provide member)
+  (#%provide member memw)
 
   ;; helper for member error cases
   (define-values (bad-list)
@@ -35,5 +35,9 @@
              (raise-argument-error
               'member
               "(procedure-arity-includes/c 2)"
-              eq?))
-         (member v ls eql?)]))))
+              eql?))
+         (member v ls eql?)])))
+         
+  (define-values (memw)
+    (lambda (v ls)
+      (member v ls equal-always?))))

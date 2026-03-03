@@ -101,6 +101,15 @@ The contract for @(racket #:style) arguments when they refer to lines, and param
 For the meaning of integer pen styles, see @(racket ->pen-style).
 }
 
+@defthing[plot-pen-cap/c contract? #:value (one-of/c 'round 'projecting 'butt)]{
+
+  The contract for caps, or line endings, for lines drawn on the plot.  Used
+  by the @racket[plot-line-cap] and @racket[line-cap] parameters.
+
+  @history[#:added "8.10"]
+
+}
+
 @defthing[plot-brush-style/c contract? #:value (or/c exact-integer?
                                                      (one-of/c 'transparent      'solid
                                                                'bdiagonal-hatch  'fdiagonal-hatch 'crossdiag-hatch
@@ -124,7 +133,16 @@ from @racketmodname[racket/draw].
 }
 
 @defthing[point-sym/c contract? #:value (or/c char? string? integer? (apply one-of/c known-point-symbols))]{
-The contract for the @(racket #:sym) arguments in @(racket points) and @(racket points3d), and the parameter @(racket point-sym).
+
+The contract for the @(racket #:sym) arguments in @(racket points) and
+@(racket points3d), and the parameter @(racket point-sym).
+
+Characters and strings will render that character or string for each point on
+the plot, one of the symbols in @racket[known-point-symbols] will render the
+corresponding symbol, while an integer value represents an index into the
+@racket[known-point-symbols] list, this can be used to automatically generate
+distinct symbols for different point renderers by incrementing a number.
+
 }
 
 @defthing[known-point-symbols (listof symbol?)
@@ -149,7 +167,12 @@ The contract for the @(racket #:sym) arguments in @(racket points) and @(racket 
         'fullcircle1       'fullcircle2      'fullcircle3
         'fullcircle4       'fullcircle5      'fullcircle6
         'fullcircle7       'fullcircle8      'none)]{
-A list containing the symbols that are valid @(racket points) symbols.
+
+A list containing the symbols that are valid @(racket points) symbols, the
+rendering of each symbol is shown below.
+
+@centered{@(pretty-print-known-point-symbols)}
+
 }
 
 @defthing[plot-file-format/c contract? #:value (or/c 'auto 'png 'jpeg 'xmb 'xpm 'bmp 'ps 'pdf 'svg)]{

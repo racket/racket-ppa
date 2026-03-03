@@ -14,14 +14,14 @@ characters whose values range from @racketvalfont{#x0} to
 @racketvalfont{#xDFFF}. The scalar values are a subset of the Unicode
 @index['("code point")]{code points}.
 
-Two characters are @racket[eqv?] if they correspond to the same scalar
-value. For each scalar value less than 256, character values that are
-@racket[eqv?] are also @racket[eq?]. Characters produced by the default
-reader are @tech{interned} in @racket[read-syntax] mode.
+Two characters are @racket[equal?], @racket[eqv?], and @racket[eq?] if
+they correspond to the same scalar value.
 
 @see-read-print["character"]{characters}
 
-@history[#:changed "6.1.1.8" @elem{Updated from Unicode 5.0.1 to Unicode 7.0.0.}]
+@history[#:changed "9.0.0.10" @elem{Guarantee that
+                                    @racket[equal?] characters are
+                                    also @racket[eq?].}]
 
 @; ----------------------------------------
 @section{Characters and Scalar Values}
@@ -227,6 +227,13 @@ Return @racket[#t] if @racket[char] is between @racket[#\u0000] and
 @racket[#\u001F] inclusive or @racket[#\u007F] and @racket[#\u009F]
 inclusive.}
 
+@defproc[(char-extended-pictographic? [char char?]) boolean?]{
+
+Returns @racket[#t] if @racket[char] has the Unicode ``Extended_Pictographic''
+property.
+
+@history[#:added "8.6.0.1"]}
+
 @defproc[(char-general-category [char char?]) symbol?]{
 
 Returns a symbol representing the character's Unicode general
@@ -241,6 +248,18 @@ category, which is @indexed-racket['lu], @indexed-racket['ll],
 @indexed-racket['zp], @indexed-racket['zl], @indexed-racket['cc],
 @indexed-racket['cf], @indexed-racket['cs], @indexed-racket['co], or
 @indexed-racket['cn].}
+
+@defproc[(char-grapheme-break-property [char char?]) ?]{
+
+Returns the Unicode graheme-break property for @racket[char], which is
+@indexed-racket['Other], @indexed-racket['CR], @indexed-racket['LF],
+@indexed-racket['Control], @indexed-racket['Extend],
+@indexed-racket['ZWJ], @indexed-racket['Regional_Indicator],
+@indexed-racket['Prepend], @indexed-racket['SpacingMark],
+@indexed-racket['L], @indexed-racket['V], @indexed-racket['T],
+@indexed-racket['LV], or @indexed-racket['LVT].
+
+@history[#:added "8.6.0.1"]}
 
 @defproc[(make-known-char-range-list) 
          (listof (list/c exact-nonnegative-integer?
@@ -317,3 +336,57 @@ Like @racket[char-upcase], but for the Unicode case-folding mapping.
 (char-foldcase #\u03c2)
 (char-foldcase #\space)
 ]}
+
+@; ----------------------------------------
+@section{Character Grapheme-Cluster Streaming}
+
+@defproc[(char-grapheme-step [char char?]
+                             [state fixnum?])
+         (values boolean? fixnum?)]{
+
+Encodes a state machine for Unicode's grapheme-cluster specification
+on a sequence of code points. It accepts a character for the next code
+point in a sequence, and it returns two values: whether a (single)
+grapheme cluster has terminated since the most recently reported
+termination (or the start of the stream), and a new state to be used
+with @racket[char-grapheme-step] and the next character.
+
+A value of @racket[0] for @racket[state] represents the initial state
+or a state where no characters are pending toward a new boundary.
+Thus, if a sequence of characters is exhausted and accumulated
+@racket[state] is not @racket[0], then the end of the stream creates
+one last grapheme-cluster boundary. When
+@racket[char-grapheme-step] produces a true value as its first
+result and a non-@racket[0] value as its second result, then the given
+@racket[char] must be the only character pending toward the next
+grapheme cluster (by the rules of Unicode grapheme clustering).
+
+The @racket[char-grapheme-step] procedure will produce a
+result for any fixnum @scheme[state], but the meaning of a
+non-@racket[0] @scheme[state] is specified only in that providing such
+a state produced by @racket[char-grapheme-step] in another
+call to @racket[char-grapheme-step] continues detecting
+grapheme-cluster boundaries in the sequence.
+
+See also @racket[string-grapheme-span] and
+@racket[string-grapheme-count].
+
+@mz-examples[
+(char-grapheme-step #\a 0)
+(let*-values ([(consumed? state) (char-grapheme-step #\a 0)]
+              [(consumed? state) (char-grapheme-step #\b state)])
+  (values consumed? state))
+(let*-values ([(consumed? state) (char-grapheme-step #\return 0)]
+              [(consumed? state) (char-grapheme-step #\newline state)])
+  (values consumed? state))
+(eval:alts
+ (let*-values ([(consumed? state) (char-grapheme-step #\a 0)]
+               [(consumed? state) (char-grapheme-step @#,racketvalfont{#\u300} state)])
+   (values consumed? state))
+ (let*-values ([(consumed? state) (char-grapheme-step #\a 0)]
+               [(consumed? state) (char-grapheme-step #\u300 state)])
+   (values consumed? state)))
+]
+
+@history[#:added "8.6.0.2"]}
+

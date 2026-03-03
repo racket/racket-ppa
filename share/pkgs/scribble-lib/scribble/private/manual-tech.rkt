@@ -2,28 +2,38 @@
 (require racket/contract/base
          "../decode.rkt"
          "../struct.rkt"
+         (only-in "../core.rkt" style)
+         (only-in "../manual-struct.rkt"
+                  index-desc
+                  desc-extras/c)
          "manual-utils.rkt"
          "manual-style.rkt")
 
-(provide/contract
- [deftech (() (#:normalize? any/c
-               #:style? any/c
-               #:key (or/c string? #f))
-           #:rest (listof pre-content?) . ->* . element?)]
- [tech (() 
-        (#:doc (or/c module-path? #f) 
-         #:tag-prefixes (or/c (listof string?) #f) 
-         #:key (or/c string? #f)
-         #:normalize? any/c)
-        #:rest (listof pre-content?) 
-        . ->* . element?)]
- [techlink (() 
-            (#:doc (or/c module-path? #f) 
-             #:tag-prefixes (or/c (listof string?) #f) 
-             #:key (or/c string? #f)
-             #:normalize? any/c)
-            #:rest (listof pre-content?) 
-            . ->* . element?)])
+(provide (contract-out
+          [deftech
+           (()
+            (#:normalize? any/c #:style? any/c #:key (or/c string? #f) #:index-extras desc-extras/c)
+            #:rest (listof pre-content?)
+            . ->* .
+            element?)]
+          [tech
+           (() (#:doc (or/c module-path? #f)
+                      #:tag-prefixes (or/c (listof string?) #f)
+                      #:key (or/c string? #f)
+                      #:normalize? any/c
+                      #:indirect? any/c)
+               #:rest (listof pre-content?)
+               . ->* .
+               element?)]
+          [techlink
+           (() (#:doc (or/c module-path? #f)
+                      #:tag-prefixes (or/c (listof string?) #f)
+                      #:key (or/c string? #f)
+                      #:normalize? any/c
+                      #:indirect? any/c)
+               #:rest (listof pre-content?)
+               . ->* .
+               element?)]))
 
 (define (*tech make-elem style doc prefix s key normalize?)
   (let* ([c (decode-content s)]
@@ -41,27 +51,34 @@
 (define (deftech #:style? [style? #t] 
           #:normalize? [normalize? #t] 
           #:key [key #f]
+          #:index-extras [extras #hash()]
           . s)
-  (let* ([e (if style?
-                (apply defterm s)
-                (make-element #f (decode-content s)))]
-         [t (*tech make-target-element #f #f #f (list e) key normalize?)])
-    (make-index-element #f
-                        (list t)
-                        (target-element-tag t)
-                        (list (datum-intern-literal
-                               (clean-up-index-string (element->string e))))
-                        (list e)
-                        'tech)))
+  (define e
+    (if style?
+        (apply defterm s)
+        (make-element #f (decode-content s))))
+  (define t (*tech make-target-element #f #f #f (list e) key normalize?))
+  (make-index-element #f
+                      (list t)
+                      (target-element-tag t)
+                      (list (datum-intern-literal
+                             (clean-up-index-string (element->string e))))
+                      (list e)
+                      (index-desc
+                       (hash-set extras
+                                 'kind "terminology"))))
 
-(define (tech #:doc [doc #f] 
-              #:tag-prefixes [prefix #f] 
-              #:key [key #f] 
-              #:normalize? [normalize? #t] 
+(define (tech #:doc [doc #f]
+              #:tag-prefixes [prefix #f]
+              #:key [key #f]
+              #:normalize? [normalize? #t]
+              #:indirect? [indirect? #f]
               . s)
-  (*tech (lambda (style c tag)
+  (*tech (lambda (sty c tag)
            (make-link-element
-            style
+            (if indirect?
+                (style sty '(indirect-link))
+                sty)
             (list (make-element "techinside" c))
             tag))
          "techoutside"
@@ -71,6 +88,16 @@
 (define (techlink #:doc [doc #f] 
                   #:tag-prefixes [prefix #f] 
                   #:key [key #f] 
-                  #:normalize? [normalize? #t] 
+                  #:normalize? [normalize? #t]
+                  #:indirect? [indirect? #f]
                   . s)
-  (*tech make-link-element #f doc prefix s key normalize?))
+  (*tech (lambda (sty c tag)
+           (make-link-element
+            (if indirect?
+                (style sty '(indirect-link))
+                sty)
+            c
+            tag))
+         #f
+         doc prefix s key
+         normalize?))

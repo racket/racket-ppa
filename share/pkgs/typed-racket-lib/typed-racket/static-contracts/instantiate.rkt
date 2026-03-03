@@ -2,35 +2,35 @@
 
 ;; Provides functionality to take a static contract and turn it into a regular contract.
 
-(require
-  "../utils/utils.rkt"
-  racket/match
-  racket/list
-  racket/contract
-  racket/syntax
-  syntax/private/id-table
-  (for-template racket/base racket/contract)
-  "combinators.rkt"
-  "combinators/name.rkt"
-  "combinators/case-lambda.rkt"
-  "combinators/parametric.rkt"
-  "kinds.rkt"
-  "optimize.rkt"
-  "parametric-check.rkt"
-  "structures.rkt"
-  "constraints.rkt"
-  "equations.rkt")
+(require (for-template racket/base
+                       racket/contract)
+         racket/contract
+         racket/list
+         racket/match
+         racket/syntax
+         syntax/private/id-table
+         "../utils/utils.rkt"
+         "combinators.rkt"
+         "combinators/case-lambda.rkt"
+         "combinators/name.rkt"
+         "combinators/parametric.rkt"
+         "constraints.rkt"
+         "equations.rkt"
+         "kinds.rkt"
+         "optimize.rkt"
+         "parametric-check.rkt"
+         "structures.rkt")
 
 (provide static-contract-may-contain-free-ids?)
 
 (provide/cond-contract
  [instantiate/optimize
      (parametric->/c (a) ((static-contract? (-> #:reason (or/c #f string?) a))
-                          (contract-kind? #:cache hash? #:trusted-positive boolean? #:trusted-negative boolean?)
+                          (contract-kind? #:cache (or/c #f hash?) #:trusted-positive boolean? #:trusted-negative boolean?)
                           . ->* . (or/c a (list/c (listof syntax?) syntax?))))]
  [instantiate
      (parametric->/c (a) ((static-contract? (-> #:reason (or/c #f string?) a))
-                          (contract-kind? #:cache hash? #:recursive-kinds (or/c hash? #f))
+                          (contract-kind? #:cache (or/c #f hash?) #:recursive-kinds (or/c hash? #f))
                           . ->* . (or/c a (list/c (listof syntax?) syntax?))))]
  [should-inline-contract? (-> syntax? boolean?)])
 
@@ -39,6 +39,8 @@
   (provide compute-constraints
            compute-recursive-kinds
            instantiate/inner))
+
+(define no-optimize-sc? (and (getenv "PLT_TR_NO_CONTRACT_OPTIMIZE") #t))
 
 (define (instantiate/optimize sc fail [kind 'impersonator] #:cache [cache #f] #:trusted-positive [trusted-positive #f] #:trusted-negative [trusted-negative #f])
   (define recursive-kinds
@@ -53,7 +55,7 @@
                       #f))]
       (compute-recursive-kinds
         (contract-restrict-recursive-values (compute-constraints sc kind)))))
-  (define sc/opt (optimize sc #:trusted-positive trusted-positive #:trusted-negative trusted-negative #:recursive-kinds recursive-kinds))
+  (define sc/opt (if no-optimize-sc? sc (optimize sc #:trusted-positive trusted-positive #:trusted-negative trusted-negative #:recursive-kinds recursive-kinds)))
   (instantiate sc/opt fail kind #:cache cache #:recursive-kinds recursive-kinds))
 
 ;; kind is the greatest kind of contract that is supported, if a greater kind would be produced the
@@ -143,12 +145,14 @@
     (variable-ref (hash-ref vars id)))
 
   (for ([(name v) (in-free-id-table recursives)])
-    (match v
-      [(kind-max others max)
-       (add-equation! eqs
-          (hash-ref vars name)
-          (λ () (apply combine-kinds max (for/list ([(id _) (in-free-id-table others)])
-                                           (lookup id)))))]))
+    (match-define (kind-max others max) v)
+    (add-equation! eqs
+                   (hash-ref vars name)
+                   (λ ()
+                     (apply combine-kinds
+                            max
+                            (for/list ([(id _) (in-free-id-table others)])
+                              (lookup id))))))
   (define var-values (resolve-equations eqs))
   (for/hash ([(name var) (in-hash vars)])
     (values name (hash-ref var-values var))))

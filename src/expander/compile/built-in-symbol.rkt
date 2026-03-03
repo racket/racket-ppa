@@ -75,9 +75,22 @@
                #%call-with-values
                #%app/no-return
                #%app/value
+               apply-string-append
+               apply-string-append-immutable
+               apply-bytes-append
                call-with-module-prompt
                make-pthread-parameter
                engine-block
+               make-mutex
+               make-condition
+               mutex-acquire
+               mutex-release
+               condition-wait
+               condition-signal
+               assert-push-lock-level!
+               assert-pop-lock-level!
+               get-thread-id
+               threaded?
                make-record-type-descriptor
                make-record-type-descriptor*
                make-record-constructor-descriptor
@@ -91,6 +104,8 @@
                #%struct-field-accessor
                #%struct-field-mutator
                #%nongenerative-uid
+               #%struct-ref-error
+               #%struct-set!-error
                unsafe-struct?
                unsafe-sealed-struct?
                unsafe-struct
@@ -110,4 +125,5 @@
                ptr-ref/int64 ptr-set!/int64
                ptr-ref/uint64 ptr-set!/uint64
                ptr-ref/double ptr-set!/double
-               ptr-ref/float ptr-set!/float))))
+               ptr-ref/float ptr-set!/float
+               ffi-static-call-and-callback-core))))

@@ -32,39 +32,69 @@ Fields in @cppdef{racket_boot_arguments_t}:
        containing a Chez Scheme image file with base functionality.
        Normally, the file is called @filepath{petite.boot}. The path
        should contain a directory separator, otherwise Chez Scheme
-       will consult its own search path.}
+       will consult its own search path. The
+       @cpp{racket_get_self_exe_path} and/or
+       @cpp{racket_path_replace_filename} functions may be helpful to
+       construct the path.}
+
+ @item{@cpp{void *} @cppdef{boot1_data} --- an alternative to
+       @cpp{boot1_path}, a pointer to the boot file's content in
+       memory. When using this field, the @cpp{boot1_len} field
+       must be supplied as non-zero. Only one of @cpp{boot1_path} and
+       @cpp{boot1_data} can be non-@cpp{NULL}.
+
+       @history[#:added "8.13.0.4"]}
 
  @item{@cpp{long} @cppdef{boot1_offset} --- an offset into
-       @cpp{boot1_path} to read for the first boot image, which allows
-       boot images to be combined with other data in a single file.
-       The image as distributed is self-terminating, so no size or
-       ending offset is needed.}
+       @cpp{boot1_path} or @cpp{boot1_data} to read for the first boot
+       image, which allows boot images to be combined with other data
+       in a single file. The image as distributed is self-terminating,
+       so no size or ending offset is needed (except that
+       @cpp{boot1_len} must be at least as large as the image when
+       supplied via @cpp{boot1_data}).}
 
- @item{@cpp{long} @cppdef{boot1_len} --- an optional length in bytes
-       for the first boot image, which is used as a hint for loading
-       the boot file if non-zero. If this hint is provided, it must be
-       at least as large as the boot image bytes, and it must be no
-       longer than the file size after the boot image offset.}
+ @item{@cpp{long} @cppdef{boot1_len} --- an length in bytes for the
+       first boot image, which is optional and used as a hint if
+       non-zero when the boot image is supplied via @cpp{boot1_path}.
+       If this length is provided, it must be at least as large as the
+       boot image in bytes, and it must be no larger than the file
+       size or readable memory after the boot image offset.}
 
  @item{@cpp{const char *} @cppdef{boot2_path} --- like
        @cpp{boot1_path}, but for the image that contains compiler
        functionality, normally called @filepath{scheme.boot}.}
 
- @item{@cpp{long} @cppdef{boot2_offset} --- an offset into
-       @cpp{boot2_path} to read for the second boot image.}
+ @item{@cpp{void *} @cppdef{boot2_data} --- like @cpp{boot1_data}, but
+       an alternative to @cpp{boot2_path}. When using this field, the
+       @cpp{boot2_len} field must be supplied as non-zero.
 
- @item{@cpp{long} @cppdef{boot2_len} --- @cpp{boot1_len}, an optional
-       length in bytes for the second boot image.}
+       @history[#:added "8.13.0.4"]}
+
+ @item{@cpp{long} @cppdef{boot2_offset} --- like @cpp{boot1_offset},
+       an offset into @cpp{boot2_path} or @cpp{boot2_data} to read for
+       the second boot image.}
+
+ @item{@cpp{long} @cppdef{boot2_len} --- like @cpp{boot1_len}, a
+       length in bytes for the second boot image, optional when
+       the boot image is supplied via @cpp{boot2_path}.}
 
  @item{@cpp{const char *} @cppdef{boot3_path} --- like
        @cpp{boot1_path}, but for the image that contains Racket
        functionality, normally called @filepath{racket.boot}.}
 
- @item{@cpp{long} @cppdef{boot3_offset} --- @cpp{boot1_len}, an offset
-       into @cpp{boot2_path} to read for the third boot image.}
+ @item{@cpp{void *} @cppdef{boot3_data} --- like @cpp{boot1_data}, but
+       an alternative to @cpp{boot3_path}. When using this field, the
+       @cpp{boot3_len} field must be supplied as non-zero.
 
- @item{@cpp{long} @cppdef{boot3_len} --- an optional length in bytes
-       for the third boot image.}
+       @history[#:added "8.13.0.4"]}
+
+ @item{@cpp{long} @cppdef{boot3_offset} --- like @cpp{boot1_offset},
+       an offset into @cpp{boot2_path} or @cpp{boot3_path} to read for
+       the third boot image.}
+
+ @item{@cpp{long} @cppdef{boot3_len} --- like @cpp{boot1_len}, a
+       length in bytes for the third boot image, optional when
+       the boot image is supplied via @cpp{boot3_path}.}
 
  @item{@cpp{int} @cpp{argc} and @cpp{char **} @cpp{argv} ---
        command-line arguments to be processed the same as for a
@@ -130,3 +160,32 @@ place, too.
 These functions are not meant to be called in C code that was called
 from Racket. See also @secref["cs-procs"] for a discussion of
 @emph{entry} points versus @emph{re-entry} points.}
+
+@; ----------------------------------------------------------------------
+
+@section[#:tag "cs-self-exe"]{Startup Path Helpers}
+
+@function[(char* racket_get_self_exe_path [const-char* argv0])]{
+
+Returns a path to the current process's executable. The @var{arg0}
+argument should be the executable name delivered to @cpp{main}, which
+may or may not be used depending on the operating system and
+environment. The result is a string that is freshly allocated with
+@cpp{malloc}, and it will be an absolute path unless all attempts to
+find an absolute path fail.
+
+On Windows, the @var{argv0} argument is always ignored, and the result
+path is UTF-8 encoded.
+
+@history[#:added "8.7.0.11"]}
+
+
+@function[(char* racket_path_replace_filename [const-char* path] [const-char* new_filename])]{
+
+Returns a path like @var{path}, but with the filename path replaced by
+@var{new_filename}. The @var{new_filename} argument does not have to
+be an immediate filename; it can be relative path that ends in a
+filename. The result is a string that is freshly allocated with
+@cpp{malloc}.
+
+@history[#:added "8.7.0.11"]}

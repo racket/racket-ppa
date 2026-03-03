@@ -1,6 +1,8 @@
 #lang racket/base
 (require racket/promise
          racket/private/config
+         (only-in '#%utils
+                  [get-installation-name utils:get-installation-name])
          (for-syntax racket/base))
 
 ;; ----------------------------------------
@@ -80,6 +82,7 @@
 (define-config config:links-search-files 'links-search-files to-path)
 (define-config config:pkgs-dir 'pkgs-dir to-path)
 (define-config config:pkgs-search-dirs 'pkgs-search-dirs to-path)
+(define-config config:info-domain-root 'info-domain-root to-path)
 (define-config config:cgc-suffix 'cgc-suffix values)
 (define-config config:3m-suffix '3m-suffix values)
 (define-config config:cs-suffix 'cs-suffix values)
@@ -88,6 +91,9 @@
 (define-config config:doc-open-url 'doc-open-url values)
 (define-config config:installation-name 'installation-name values)
 (define-config config:build-stamp 'build-stamp values)
+(define-config config:base-documentation-packages 'base-documentation-packages values)
+(define-config config:distribution-documentation-packages 'distribution-documentation-packages values)
+(define-config config:main-language-family 'main-language-family values)
 
 (provide get-absolute-installation?
          get-cgc-suffix
@@ -96,7 +102,10 @@
          get-doc-search-url
          get-doc-open-url
          get-installation-name
-         get-build-stamp)
+         get-build-stamp
+         get-base-documentation-packages
+         get-distribution-documentation-packages
+         get-main-language-family)
 
 (define (get-absolute-installation?) (force config:absolute-installation?))
 (define (get-cgc-suffix) (force config:cgc-suffix))
@@ -105,9 +114,23 @@
 (define (get-doc-search-url) (or (force config:doc-search-url)
                                  "http://docs.racket-lang.org/local-redirect/index.html"))
 (define (get-doc-open-url) (force config:doc-open-url))
-(define (get-installation-name) (or (force config:installation-name)
-                                    (version)))
+(define installation-name (delay/sync (utils:get-installation-name (force config-table))))
+(define get-installation-name
+  (case-lambda
+    [() (force installation-name)]
+    [(config) (utils:get-installation-name config)]))
 (define (get-build-stamp) (force config:build-stamp))
+
+(define (get-base-documentation-packages)
+  (or (force config:base-documentation-packages)
+      (list "racket-doc")))
+(define (get-distribution-documentation-packages)
+  (or (force config:distribution-documentation-packages)
+      (list "main-distribution")))
+
+(define (get-main-language-family)
+  (or (force config:main-language-family)
+      "Racket"))
 
 ;; ----------------------------------------
 ;;  "collects"
@@ -293,6 +316,11 @@
          config:config-tethered-apps-dir
          config:bin-search-dirs
          config:gui-bin-search-dirs)
+
+;; ----------------------------------------
+;; info-domain root
+
+(provide config:info-domain-root)
 
 ;; ----------------------------------------
 ;; DLLs

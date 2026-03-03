@@ -13,11 +13,12 @@
 (define expanded-stx (make-parameter #f))
 (define maybe-undefined (make-parameter #hasheq()))
 
-(provide stacktrace@ stacktrace^ stacktrace-imports^
+(provide stacktrace@ stacktrace^ stacktrace-imports^ key-module-name^
          stacktrace/annotator-imports^ stacktrace/annotator@
          stacktrace-filter^ stacktrace/annotator/filter@ stacktrace/filter@
          stacktrace/errortrace-annotate^ stacktrace/errortrace-annotate@
          stacktrace/filter/errortrace-annotate@
+         stacktrace/errortrace-annotate/key-module-name@
          original-stx expanded-stx)
 
 (define-signature stacktrace-imports^
@@ -73,6 +74,14 @@
 (define-signature stacktrace/errortrace-annotate^
   ((open stacktrace^)
    (open errortrace-annotate^)))
+
+(define-signature key-module-name^
+  (key-module-name))
+
+(define-unit default-key-module-name@
+  (import)
+  (export key-module-name^)
+  (define key-module-name 'errortrace/errortrace-key))
 
 (define base-phase
   (variable-reference->module-base-phase (#%variable-reference)))
@@ -684,7 +693,7 @@
       (no-cache-annotate-named name expr phase))))
 
 (define-unit stacktrace/annotator/filter/errortrace-annotate@
-  (import stacktrace^)
+  (import key-module-name^ stacktrace^)
   (export errortrace-annotate^)
 
   (define (errortrace-annotate top-e [in-compile-handler? #t])
@@ -703,7 +712,7 @@
             (free-identifier=? #'mod
                                (namespace-module-identifier)
                                (namespace-base-phase)))
-       (if (eq? (syntax-e #'name) 'errortrace-key)
+       (if (is-key-module? top-e)
            top-e
            (let ([expanded-e (do-expand top-e)])
              (cond
@@ -725,7 +734,7 @@
                             #`(#,mod-id name init-import
                                         #,(syntax-rearm
                                            #`(#%plain-module-begin
-                                              #,(generate-key-imports meta-depth)
+                                              #,(generate-key-imports-at-phase meta-depth 0 key-module-name)
                                               body ...)
                                            #'mb))))])])))])))]
       [_else
@@ -737,10 +746,17 @@
            ;; It doesn't work to reply on `begin` unrolling for a top-level `eval`,
            ;; because we're in a compile handler and already committed to a single form.
            (for ([i (in-range meta-depth)])
-             (namespace-require `(for-meta ,(add1 i) errortrace/errortrace-key))))
+             (namespace-require `(for-meta ,(add1 i) ,key-module-name))))
          #`(begin
-             #,(generate-key-imports-at-phase meta-depth (namespace-base-phase))
+             #,(generate-key-imports-at-phase meta-depth (namespace-base-phase) key-module-name)
              #,e))]))
+
+  (define (is-key-module? stx)
+    (syntax-case stx ()
+      [(_module _name _lang (_void (_quote #:errortrace-dont-annotate)) . _more) #t]
+      [(_module _name . _more)
+       (eq? (syntax-e #'name) 'errortrace-key)]
+      [_ #f]))
 
   (define (has-cross-phase-declare? e)
     (for/or ([a (in-list (or (syntax->list e) '()))])
@@ -790,16 +806,9 @@
                    k
                    (add-annotate-property (cdr (vector->list (struct->vector s))))))]
       [(and (hash? s) (immutable? s))
-       (cond
-         [(hash-eq? s)
-          (for/hasheq ([(k v) (in-hash s)])
-            (values k (add-annotate-property v)))]
-         [(hash-eqv? s)
-          (for/hasheqv ([(k v) (in-hash s)])
-            (values k (add-annotate-property v)))]
-         [else
-          (for/hash ([(k v) (in-hash s)])
-            (values k (add-annotate-property v)))])]
+       (hash-map/copy s
+                      (lambda (k v)
+                        (values k (add-annotate-property v))))]
       [else s]))
 
   (define (transform-all-modules stx proc [in-mod-id (namespace-module-identifier)])
@@ -922,14 +931,24 @@
 (define-compound-unit stacktrace/filter/errortrace-annotate@
   (import (in : stacktrace-imports^)
           (filter : stacktrace-filter^))
-  (export out1 out2)
+  (export out2 out3)
   (link [((coverage-point : stacktrace/annotator-imports^)) test-coverage-point@ in filter]
-        [((out1 : stacktrace^)) stacktrace/annotator/filter@ coverage-point filter]
-        [((out2 : errortrace-annotate^)) stacktrace/annotator/filter/errortrace-annotate@ out1]))
+        [((out1 : key-module-name^)) default-key-module-name@]
+        [((out2 : stacktrace^)) stacktrace/annotator/filter@ coverage-point filter]
+        [((out3 : errortrace-annotate^)) stacktrace/annotator/filter/errortrace-annotate@ out1 out2]))
 
 (define-compound-unit stacktrace/errortrace-annotate@
   (import (in : stacktrace/annotator-imports^))
+  (export out2 out3)
+  (link [((annotate-if-source : stacktrace-filter^)) annotate-if-source@]
+        [((out1 : key-module-name^)) default-key-module-name@]
+        [((out2 : stacktrace^)) stacktrace/annotator/filter@ in annotate-if-source]
+        [((out3 : errortrace-annotate^)) stacktrace/annotator/filter/errortrace-annotate@ out1 out2]))
+
+(define-compound-unit stacktrace/errortrace-annotate/key-module-name@
+  (import (in1 : stacktrace/annotator-imports^)
+          (in2 : key-module-name^))
   (export out1 out2)
   (link [((annotate-if-source : stacktrace-filter^)) annotate-if-source@]
-        [((out1 : stacktrace^)) stacktrace/annotator/filter@ in annotate-if-source]
-        [((out2 : errortrace-annotate^)) stacktrace/annotator/filter/errortrace-annotate@ out1]))
+        [((out1 : stacktrace^)) stacktrace/annotator/filter@ in1 annotate-if-source]
+        [((out2 : errortrace-annotate^)) stacktrace/annotator/filter/errortrace-annotate@ in2 out1]))

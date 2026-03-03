@@ -2,6 +2,7 @@
 @(require scribble/manual "utils.rkt"
           (for-syntax racket/base)
           (for-label scribble/manual-struct
+                     racket/list
                      version/utils
                      syntax/quote))
 
@@ -300,9 +301,18 @@ A few other escapes are recognized symbolically:
        @RACKET[(unsyntax (foo "..."))].)
        }
 
+ @item{@racket[(#,(indexed-racket code:comment2) _content)] is like
+      code:@racket[comment], but uses two semi-colons to prefix the comment.}
+
+ @item{@racket[(#,(indexed-racket code:comment#) _content)] is like
+      code:@racket[comment], but uses #; to prefix the comment.}
+
  @item{@racket[(#,(indexed-racket code:contract) _datum ...)] typesets like
-       the sequence of @racket[_datum]s (including its coloring), but prefixed with a
-       semi-colon.}
+      the sequence of @racket[_datum]s (including its coloring), but prefixed with a
+      semi-colon.}
+
+ @item{@racket[(#,(indexed-racket code:contract#) _datum)] is like
+       @racket[code:contract], but uses #; to prefix the contract.}
 
  @item{@as-index[@racketidfont{code:blank}] typesets as a blank space.}
 
@@ -509,10 +519,14 @@ hyperlink's resolution in HTML potentially delayed; see
 @history[#:changed "1.21" @elem{Disabled @racket[racket]-style special
                                 treatment of identifiers.}]}
 
-@defform[(racketmodlink datum pre-content-expr ...)]{
+@defform[(racketmodlink datum maybe-indirect pre-content-expr ...)
+         #:grammar ([maybe-indirect code:blank
+                                   #:indirect])]{
 Like @racket[racketmodname], but separating the module path to link
 from the content to be linked. The @racket[datum] module path is always
-linked, even if it is not an identifier.}
+linked, even if it is not an identifier.
+
+@history[#:changed "1.59" @elem{Added support for @racket[#:indirect].}]}
 
 @defproc[(litchar [str string?] ...) element?]{Typesets @racket[str]s as a
 representation of literal text. Use this when you have to talk about
@@ -628,7 +642,8 @@ corresponding @racketidfont{racket...} binding.}
                        #:indirect
                        #:lang
                        #:reader
-                       (code:line #:packages (pkg-expr ...))])]{
+                       (code:line #:packages (pkg-expr ...))
+                       (code:line #:language-family (family-string ...))])]{
 
 Produces a sequence of flow elements (in a @racket[splice])
 to start the documentation for a module---or for multiple modules, if
@@ -697,13 +712,19 @@ suppress any package name in the output. Each @racket[pkg-expr]
 expression is duplicated for a  @racket[declare-exporting] form,
 unless @racket[#:no-declare] is specified.
 
+If @racket[#:language-family] is provided, then it specifies
+language-family names for this module, which affects the way that the
+module name is searched and shown in the documentation index. See also
+@racket[index-desc].
+
 Each @racket[option] form can appear at most once, and @racket[#:lang]
 and @racket[#:reader] are mutually exclusive.
 
 The @tech{decode}d @racket[pre-flow]s introduce the module, but need
 not include all of the module content.
 
-@history[#:changed "1.43" @elem{Support a procedure value for @racket[#:require-form].}]}
+@history[#:changed "1.43" @elem{Supported a procedure value for @racket[#:require-form].}
+         #:changed "1.54" @elem{Added the @racket[#:language-family] option.}]}
 
 
 @defform[#:literals (unquote)
@@ -762,13 +783,13 @@ Use @racket[#:use-sources] sparingly, but it is needed when
 ]
 
 For example, the @racket[parameterize] binding of
-@racketmodname[mzscheme] is documented as re-exported from
+@racketmodname[mzscheme #:indirect] is documented as re-exported from
 @racketmodname[racket/base], but @racket[parameterize] happens to be
 implemented in a private module and re-exported by both
-@racketmodname[racket/base] and @racketmodname[mzscheme].  Importing
-@racket[parameterize] from @racketmodname[mzscheme] does not go
+@racketmodname[racket/base] and @racketmodname[mzscheme #:indirect].  Importing
+@racket[parameterize] from @racketmodname[mzscheme #:indirect] does not go
 through @racketmodname[racket/base], so a search for documentation on
-@racket[parameterize] in @racketmodname[mzscheme] would not
+@racket[parameterize] in @racketmodname[mzscheme #:indirect] would not
 automatically connect to the documentation of
 @racketmodname[racket/base]. To make the connection, the documentation
 of @racketmodname[racket/base] declares the private module to be a
@@ -1202,6 +1223,13 @@ Like @racket[defform] and @racket[defform*], but with
 indenting on the left for both the specification and the
 @racket[pre-flow]s.}
 
+@defform[(defsubidform id pre-flow ...)]{
+
+Like @racket[defidform], but with indenting on the left for both the
+specification and the @racket[pre-flow]s.
+
+@history[#:added "1.48"]}
+
 
 @defform[(specform maybe-literals datum maybe-grammar maybe-contracts
            pre-flow ...)]{
@@ -1292,7 +1320,7 @@ Examples:
 
 @defform[(defparam maybe-link id arg-id
            contract-expr-datum
-           maybe-value
+           maybe-auto-value
            pre-flow ...)]{
 
 Like @racket[defproc], but for a parameter. The
@@ -1308,37 +1336,56 @@ Examples:
   A parameter that defines the current sandwich for operations that
   involve eating a sandwich. Default value is the empty sandwich.
 }
+
+@(require (for-label racket/base))
+
+@defparam[current-readtable v any/c #:auto-value]{
+  A parameter to hold a readtable.
+}
 }|
 @doc-render-examples[
   @defparam[#:link-target? #f
             current-sandwich sandwich sandwich? #:value empty-sandwich]{
     A parameter that defines the current sandwich for operations that
     involve eating a sandwich. Default value is the empty sandwich.
-  }]
+  }
+  @defparam[#:link-target? #f
+            current-readtable v any/c #:auto-value]{
+    A parameter to hold a readtable.
+  }
+]
+
+@history[#:changed "1.51" @elem{Added support for @racket[#:auto-value].}]
 }
 
 
 @defform[(defparam* maybe-link id arg-id 
            in-contract-expr-datum out-contract-expr-datum
-           maybe-value
+           maybe-auto-value
            pre-flow ...)]{
 
 Like @racket[defparam], but with separate contracts for when the parameter is being
 set versus when it is being retrieved (for the case that a parameter guard
 coerces values matching a more flexible contract to a more restrictive one;
-@racket[current-directory] is an example).}
+@racket[current-directory] is an example).
+
+@history[#:changed "1.51" @elem{Added support for @racket[#:auto-value].}]
+}
 
 
 @defform[(defboolparam maybe-link id arg-id
-           maybe-value
+           maybe-auto-value
            pre-flow ...)]{
 
 Like @racket[defparam], but the contract on a parameter argument is
 @racket[any/c], and the contract on the parameter result is
-@racket[boolean?].}
+@racket[boolean?].
+
+@history[#:changed "1.51" @elem{Added support for @racket[#:auto-value].}]
+}
 
 
-@defform/subs[(defthing options id contract-expr-datum maybe-value
+@defform/subs[(defthing options id contract-expr-datum maybe-auto-value
                 pre-flow ...)
               ([options (code:line maybe-kind maybe-link maybe-id)]
                [maybe-kind code:blank
@@ -1347,8 +1394,9 @@ Like @racket[defparam], but the contract on a parameter argument is
                            (code:line #:link-target? link-target?-expr)]
                [maybe-id code:blank
                          (code:line #:id id-expr)]
-               [maybe-value code:blank
-                            (code:line #:value value-expr-datum)])]{
+               [maybe-auto-value code:blank
+                            (code:line #:value value-expr-datum)
+                            #:auto-value])]{
 
 Like @racket[defproc], but for a non-procedure binding.
 
@@ -1363,6 +1411,11 @@ If @racket[#:value value-expr-datum] is given, @racket[value-expr-datum]
 is typeset using @racket[racketblock0] and included in the documentation.
 Wide values are put on a separate line.
 
+The option @racket[#:auto-value] is the same as @racket[#:value value-expr-datum]
+where @racket[value-expr-datum] is automatically queried from the for-label binding.
+@racket[#:auto-value] can only be used when the value is marshalable
+(e.g., if the value is a struct, it must be a prefab struct of marshalable values).
+
 Examples:
 @codeblock[#:keep-lang-line? #f]|{
 #lang scribble/manual
@@ -1373,6 +1426,12 @@ Examples:
 @defthing[empty-sandwich sandwich? #:value (make-sandwich empty)]{
   The empty sandwich.
 }
+
+@(require (for-label racket/list))
+
+@defthing[empty any/c #:auto-value]{
+  The empty list.
+}
 }|
 @doc-render-examples[
   @defthing[#:link-target? #f
@@ -1382,10 +1441,17 @@ Examples:
   @defthing[#:link-target? #f
             empty-sandwich sandwich? #:value (make-sandwich empty)]{
     The empty sandwich.
-  }]
+  }
+  @defthing[#:link-target? #f
+            empty any/c #:auto-value]{
+    The empty list.
+  }
+]
+
+@history[#:changed "1.51" @elem{Added support for @racket[#:auto-value].}]
 }
 
-@defform[(defthing* options ([id contract-expr-datum maybe-value] ...+)
+@defform[(defthing* options ([id contract-expr-datum maybe-auto-value] ...+)
            pre-flow ...)]{
 
 Like @racket[defthing], but for multiple non-procedure bindings.
@@ -1406,20 +1472,26 @@ Examples:
   Predefined sandwiches.
 }
 ]
+
+@history[#:changed "1.51" @elem{Added support for @racket[#:auto-value].}]
 }
 
 
 @deftogether[(
-@defform[       (defstruct* maybe-link struct-name ([field-name contract-expr-datum] ...)
+@defform[       (defstruct* maybe-link struct-name ([field contract-expr-datum] ...)
                   maybe-mutable maybe-non-opaque maybe-constructor
                   pre-flow ...)]
-@defform/subs[  (defstruct maybe-link struct-name ([field-name contract-expr-datum] ...)
+@defform/subs[  (defstruct maybe-link struct-name ([field contract-expr-datum] ...)
                   maybe-mutable maybe-non-opaque maybe-constructor
                   pre-flow ...)
                ([maybe-link code:blank
                             (code:line #:link-target? link-target?-expr)]
                 [struct-name id
                              (id super-id)]
+                [field field-id
+                       (field-id field-option ...)]
+                [field-option #:mutable
+                              #:auto]
                 [maybe-mutable code:blank
                                #:mutable]
                 [maybe-non-opaque code:blank
@@ -1441,18 +1513,18 @@ Examples:
 An example using @racket[defstruct]:
 @codeblock[#:keep-lang-line? #f]|{
 #lang scribble/manual
-@defstruct[sandwich ([protein ingredient?] [sauce ingredient?])]{
+@defstruct[sandwich ([(protein #:mutable) ingredient?] [sauce ingredient?])]{
   A structure type for sandwiches. Sandwiches are a pan-human foodstuff
   composed of a partially-enclosing bread material and various
-  ingredients.
+  ingredients. The @racketid[protein] field is mutable.
 }
 }|
 @doc-render-examples[
   @defstruct[#:link-target? #f
-             sandwich ([protein ingredient?] [sauce ingredient?])]{
+             sandwich ([(protein #:mutable) ingredient?] [sauce ingredient?])]{
     A structure type for sandwiches. Sandwiches are a pan-human foodstuff
     composed of a partially-enclosing bread material and various
-    ingredients.
+    ingredients. The @racketid[protein] field is mutable.
   }]
 
 Additionally, an example using @racket[defstruct*]:
@@ -1776,7 +1848,8 @@ typewriter font and in quotes).}
 
 @defproc[(envvar [pre-content pre-content?] ...) element?]{Typesets the given
 @tech{decode}d @racket[pre-content] as an environment variable (e.g.,
-in typewriter font).}
+in typewriter font).
+See also @racket[indexed-envvar].}
 
 @defproc[(Flag [pre-content pre-content?] ...) element?]{Typesets the given
 @tech{decode}d @racket[pre-content] as a flag (e.g., in typewriter
@@ -1811,9 +1884,9 @@ of @racket[id].}
 
 Compatibility alias for @racket[racketlink].}
 
-@defproc[(link [url string?] [pre-content any/c] ...
-                [#:underline? underline? any/c #t]
-                [#:style style (or/c style? string? symbol? #f) (if underline? #f "plainlink")]) 
+@defproc[(link [url string?] [pre-content pre-content?] ...
+               [#:underline? underline? any/c #t]
+               [#:style style (or/c style? string? symbol? #f) (if underline? #f "plainlink")])
          element?]{
 
 Alias of @racket[hyperlink] for backward compatibility.}
@@ -1827,7 +1900,9 @@ Alias of @racket[other-doc] for backward compatibility.}
 @defproc[(deftech [pre-content pre-content?] ...
                   [#:key key (or/c string? #f) #f]
                   [#:normalize? normalize? any/c #t]
-                  [#:style? style? any/c #t]) element?]{
+                  [#:style style? any/c #t]
+                  [#:index-extras index-extras desc-extras/c (hash)])
+         element?]{
 
 Produces an element for the @tech{decode}d @racket[pre-content], and
 also defines a term that can be referenced elsewhere using
@@ -1856,13 +1931,19 @@ that differ slightly from a defined form. For example, a definition of
 ``bananas'' can be referenced with a use of ``banana''.
 
 If @racket[style?] is true, then @racket[defterm] is used on
-@racket[pre-content].}
+@racket[pre-content].
+
+The @racket[index-extras] argument is propoagated to the generated
+index entry for the defined term via @racket[index-desc].
+
+@history[#:changed "1.54" @elem{Added the @racket[index-extras] argument.}]}
 
 @defproc[(tech [pre-content pre-content?] ...
                [#:key key (or/c string? #f) #f]
                [#:normalize? normalize? any/c #t]
                [#:doc module-path (or/c module-path? #f) #f]
-               [#:tag-prefixes prefixes (or/c (listof string?) #f) #f])
+               [#:tag-prefixes prefixes (or/c (listof string?) #f) #f]
+               [#:indirect? indirect? any/c #f])
          element?]{
 
 Produces an element for the @tech{decode}d @racket[pre-content], and
@@ -1878,6 +1959,8 @@ For example:
 
 creates a link to @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{blame object} in
 @other-doc['(lib "scribblings/reference/reference.scrbl")].
+If @racket[indirect?] is not @racket[#f], the link’s resolution in HTML
+is potentially delayed; see @racket['indirect-link] for @racket[link-element].
 
 With the default style files, the hyperlink created by @racket[tech]
 is somewhat quieter than most hyperlinks: the underline in HTML output
@@ -1888,18 +1971,27 @@ In some cases, combining both natural-language uses of a term and
 proper linking can require some creativity, even with the
 normalization performed on the term. For example, if ``bind'' is
 defined, but a sentence uses the term ``binding,'' the latter can be
-linked to the former using @racketfont["@tech{bind}ing"].}
+linked to the former using @racketfont["@tech{bind}ing"].
+
+ @history[
+ #:changed "1.46" @elem{Added @racket[#:indirect?] argument.}
+ ]}
 
 @defproc[(techlink [pre-content pre-content?] ...
                    [#:key key (or/c string? #f) #f]
                    [#:normalize? normalize? any/c #t]
                    [#:doc module-path (or/c module-path? #f) #f]
-                   [#:tag-prefixes prefixes (or/c (listof string?) #f) #f]) 
+                   [#:tag-prefixes prefixes (or/c (listof string?) #f) #f]
+                   [#:indirect? indirect? any/c #f])
          element?]{
 
 Like @racket[tech], but the link is not quiet. For example, in HTML
 output, a hyperlink underline appears even when the mouse is not over
-the link.}
+the link.
+
+ @history[
+ #:changed "1.46" @elem{Added @racket[#:indirect?] argument.}
+ ]}
 
 @; ------------------------------------------------------------------------
 @section[#:tag "manual-indexing"]{Indexing}
@@ -2109,11 +2201,11 @@ An alias for @racket[centered] for backward compatibility.}
         strings are left as-is, but any other immediate string is
         italicized.}
 
-  @item{When @litchar{_} appears before a non-empty sequence of numbers
-        and letters, the sequence is typeset as a subscript.}
+  @item{When @litchar{_} appears before a non-empty sequence of numbers,
+        letters, and @litchar{-}, the sequence is typeset as a subscript.}
 
-  @item{When @litchar{^} appears before a non-empty sequence of numbers
-        and letters, the sequence is typeset as a superscript.}
+  @item{When @litchar{^} appears before a non-empty sequence of numbers,
+        letters, and @litchar{-},  the sequence is typeset as a superscript.}
 
  ]}
 
@@ -2152,7 +2244,81 @@ functions. These structure types are provided separate from
 cross-reference information that was generated by a previously
 rendered document.}
 
+@deftogether[(
+@defstruct[index-desc ([extras desc-extras/c])]
+@defthing[desc-extras/c contract?]
+)]{
+
+Provides optional information about an index entry through an
+@racket[extras] hash table. All values in the hash table should be
+@racket[write]able in the sense that @racket[read] will reconstruct
+the value. Any symbol is allowed as a key in @racket[extras], but some
+are well-known:
+
+@itemlist[
+
+ @item{@racket['language-family]: A list strings describing language
+       families for which this entry is relevant. If this key is missing,
+       the default language-family list is @racket['("Racket")].}
+
+ @item{@racket['sort-order]: A real number that is used to order this
+       entry with respect to others that have the same key. Smaller
+       values of @racket['sort-order] are shown before later values,
+       and the default is @racket[0].}
+
+ @item{@racket['kind]: A string describing the binding's category,
+       such as @racket["procedure"] or @racket["class"]. Like most
+       other values in @racket[extras], this string is not
+       added to the index entry's main text as shown to a user, but it
+       may be rendered by some interfaces, such as to the side or in hover
+       text.}
+
+ @item{@racket['module-kind]: A symbol indicating an entry for a
+       module as documented with @racket[defmodule], where the symbol
+       is @racket['lang] for a module documented with @racket[#:lang],
+       @racket['reader] for a module documented with @racket[#:reader],
+       and @racket['lib] otherwise.}
+
+ @item{@racket['part?]: A boolean indicating whether the index entry
+       describes a section within a document.}
+
+ @item{@racket['hidden?]: A boolean indicating that the index entry
+       describes a binding that is covered from a user's perspective
+       by a different index entry. These are considered redundant and
+       filtered from index rendering.}
+
+]
+
+When index entries are recorded, the entry's @racket[extras] table can
+receive additional key--value mappings via @tech{part context} using
+the @racket['index-extras] key. See @racket[index-element] for more
+information.
+
+The @racket[desc-extras/c] contract is equivalent to
+
+@racketblock[
+  (hash/dc [k symbol?]
+           [v (k)
+              (case k
+                [(language-family) (listof string?)]
+                [(sort-order) real?]
+                [(kind) string?]
+                [(module-kind) (or/c 'lib 'lang 'reader)]
+                [(part?) boolean?]
+                [(hidden?) boolean?]
+                [else any/c])]
+           #:immutable #t)
+]
+
+The @racket[index-desc] struct is preferable over other index entry
+descriptions below, except for @racket[exported-index-desc] and
+@racket[exported-index-desc*].
+
+@history[#:added "1.54"]}
+
 @defstruct[module-path-index-desc ()]{
+
+@deprecated[#:what "struct" @racket[index-desc]]
 
 Indicates that the index entry corresponds to a module definition via
 @racket[defmodule] and company.}
@@ -2161,6 +2327,9 @@ Indicates that the index entry corresponds to a module definition via
 @defstruct[(language-index-desc module-path-index-desc) ()]{}
 @defstruct[(reader-index-desc module-path-index-desc) ()]{}
 )]{
+
+@deprecated[#:what "struct" @racket[index-desc]]
+
 Indicates that the index entry corresponds to a module definition via
 @racket[defmodule] with the @racket[#:lang] or @racket[#:reader] option.
 For example, a module definition via @racket[defmodulelang] has a
@@ -2168,7 +2337,7 @@ For example, a module definition via @racket[defmodulelang] has a
 @racket[defmodulereader] has a @racket[reader-index-desc] index entry.}
 
 @defstruct[exported-index-desc ([name symbol?]
-                               [from-libs (listof module-path?)])]{
+                                [from-libs (listof module-path?)])]{
 
 Indicates that the index entry corresponds to the definition of an
 exported binding. The @racket[name] field and @racket[from-libs] list
@@ -2176,43 +2345,107 @@ correspond to the documented name of the binding and the primary
 modules that export the documented name (but this list is not
 exhaustive, because new modules can re-export the binding).}
 
+@defstruct[(exported-index-desc* exported-index-desc) ([extras (and/c desc-extras/c
+                                                                      (hash/dc [k symbol?]
+                                                                               [v (k)
+                                                                                  (case k
+                                                                                    [(display-from-libs) (listof content?)]
+                                                                                    [(method-name) symbol?]
+                                                                                    [(constructor?) boolean?]
+                                                                                    [(class-tag) tag?]
+                                                                                    [(long-key) string?]
+                                                                                    [else any/c])]
+                                                                               #:immutable #t))])]{
+
+Like @racket[exported-index-desc], but with additional optional
+information in an @racket[extras] hash table like @racket[index-desc].
+Some additional keys are well-known:
+
+@itemlist[
+
+ @item{@racket['display-from-libs]: A list of content in parallel to
+       the @racket[from-libs] field that renders the exporting library
+       in the module's language's native form.}
+
+ @item{@racket['method-name]: A symbol indicating that the index entry
+       describes a method for the class that is in the @racket[name]
+       field, and the symbol is the method's name.}
+
+ @item{@racket['constructor?]: A boolean indicating that the index
+       entry describes a class's constructor, separate from an index
+       entry for the class. A constructor normally also has
+       @racket['hidden?] as true.}
+
+ @item{@racket['class-tag]: A tag that links to the class's main entry
+       in the case of a method or constructor index entry, where the
+       @racket[name] field has the class name in both cases.}
+
+ @item{@racket['long-key]: An alternative string for searches to match.
+       This string is useful when the name that is normally used to refer to
+       a binding has an extra prefix that is added on import, for example.}
+
+]
+
+The @racket[exported-index-desc*] struct is preferable over
+other index entry descriptions below.
+
+@history[#:added "1.53"
+         #:changed "1.59" @elem{Added @racket['long-key].}]}
+
 @defstruct[(form-index-desc exported-index-desc) ()]{
+
+@deprecated[#:what "struct" @racket[exported-index-desc*]]
 
 Indicates that the index entry corresponds to the definition of a
 syntactic form via @racket[defform] and company.}
 
+
 @defstruct[(procedure-index-desc exported-index-desc) ()]{
+
+@deprecated[#:what "struct" @racket[exported-index-desc*]]
 
 Indicates that the index entry corresponds to the definition of a
 procedure binding via @racket[defproc] and company.}
 
 @defstruct[(thing-index-desc exported-index-desc) ()]{
 
+@deprecated[#:what "struct" @racket[exported-index-desc*]]
+
 Indicates that the index entry corresponds to the definition of a
 binding via @racket[defthing] and company.}
 
 @defstruct[(struct-index-desc exported-index-desc) ()]{
+
+@deprecated[#:what "struct" @racket[exported-index-desc*]]
 
 Indicates that the index entry corresponds to the definition of a
 structure type via @racket[defstruct] and company.}
 
 @defstruct[(class-index-desc exported-index-desc) ()]{
 
+@deprecated[#:what "struct" @racket[exported-index-desc*]]
+
 Indicates that the index entry corresponds to the definition of a
 class via @racket[defclass] and company.}
 
 @defstruct[(interface-index-desc exported-index-desc) ()]{
+
+@deprecated[#:what "struct" @racket[exported-index-desc*]]
 
 Indicates that the index entry corresponds to the definition of an
 interface via @racket[definterface] and company.}
 
 @defstruct[(mixin-index-desc exported-index-desc) ()]{
 
+@deprecated[#:what "struct" @racket[exported-index-desc*]]
+
 Indicates that the index entry corresponds to the definition of a
 mixin via @racket[defmixin] and company.}
 
 @defstruct[(method-index-desc exported-index-desc) ([method-name symbol?]
                                                     [class-tag tag?])]{
+
+@deprecated[#:what "struct" @racket[exported-index-desc*]]
 
 Indicates that the index entry corresponds to the definition of an
 method via @racket[defmethod] and company. The @racket[_name] field
@@ -2222,6 +2455,8 @@ The @racket[class-tag] field provides a pointer to the start of the
 documentation for the method's class or interface.}
 
 @defstruct[(constructor-index-desc exported-index-desc) ([class-tag tag?])]{
+
+@deprecated[#:what "struct" @racket[exported-index-desc*]]
 
 Indicates that the index entry corresponds to a constructor
 via @racket[defconstructor] and company. The @racket[_name] field
@@ -2242,7 +2477,7 @@ rendering.
 A @racket[html-defaults] @tech{style property} is added to
 @racket[doc], unless @racket[doc]'s style already has a
 @racket[html-defaults] @tech{style property} (e.g., supplied to
-@racket[title]). Similarly, a @racket[latex-default] @tech{style
+@racket[title]). Similarly, a @racket[latex-defaults] @tech{style
 property} is added if one is not already present. Finally, an
 @racket[css-style-addition] property is always added.
 

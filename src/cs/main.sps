@@ -13,11 +13,15 @@
                find-library-collection-paths
                use-collection-link-paths
                current-compiled-file-roots
+               current-load/use-compiled
                find-compiled-file-roots
                find-main-config
+               read-installation-configuration-table
+               get-installation-name
                executable-yield-handler
                load-on-demand-enabled
                use-user-specific-search-paths
+               use-compiled-file-check
                eval
                read
                load
@@ -80,12 +84,15 @@
    (define (getenv-bytes str)
      (environment-variables-ref (current-environment-variables) (string->utf8 str)))
 
-   (define (startup-error fmt . args)
+   (define (startup-warning fmt . args)
      (#%fprintf (#%current-error-port) "~a: " (path->string (find-system-path 'exec-file)))
      (if (null? args)
          (#%display fmt (#%current-error-port))
          (#%apply #%fprintf (#%current-error-port) fmt args))
-     (#%newline (#%current-error-port))
+     (#%newline (#%current-error-port)))
+
+   (define (startup-error fmt . args)
+     (apply startup-warning fmt args)
      (exit 1))
 
    (define builtin-argc 11)
@@ -153,6 +160,7 @@
                              [platform-independent-zo-mode? "cs"]
                              [else (symbol->string (machine-type))])))]
              [else "compiled"])))
+   (define make? #f)
    (define user-specific-search-paths? #t)
    (define load-on-demand? #t)
    (define compile-target-machine (if (getenv "PLT_COMPILE_ANY")
@@ -160,6 +168,19 @@
                                       (machine-type)))
    (define compiled-roots-path-list-string (getenv "PLTCOMPILEDROOTS"))
    (define embedded-load-in-places '())
+
+   (define init-compiled-file-check (let ([s (getenv "PLT_COMPILED_FILE_CHECK")])
+                                      (cond
+                                        [(not s) (use-compiled-file-check)]
+                                        [(string=? s "modify-seconds") 'modify-seconds]
+                                        [(string=? s "exists") 'exists]
+                                        [else
+                                         (startup-warning
+                                          (string-append "unrecognized value for PLT_COMPILED_FILE_CHECK;\n"
+                                                         " recognized values are \"modify-seconds\" and \"exists\"\n"
+                                                         "  unrecognized value: ~s")
+                                          s)
+                                         (use-compiled-file-check)])))
 
    (define (see saw . args)
      (let loop ([saw saw] [args args])
@@ -171,9 +192,9 @@
    (define (saw-something? saw)
      (positive? (hash-count saw)))
 
-   (define rx:logging-spec (pregexp "^[\\s]*(none|fatal|error|warning|info|debug)(?:@([^\\s @]+))?(.*)$"))
+   (define rx:logging-spec (pregexp "^[\\s]*(none|fatal|error|warning|info|debug)(?:@([^\\s @]+))?()"))
    (define rx:all-whitespace (pregexp "^[\\s]*$"))
-   (define (parse-logging-spec which str where exit-on-fail?)
+   (define (parse-logging-spec which str where exit-on-fail? default)
      (define (fail)
        (let ([msg (string-append
                    which " <levels> " where " must be one of the following\n"
@@ -186,19 +207,21 @@
           [exit-on-fail?
            (startup-error msg)]
           [else
-           (eprintf "~a\n" msg)])))
-     (let loop ([str str] [default #f])
-       (let ([m (regexp-match rx:logging-spec str)])
+           (eprintf "~a\n" msg)
+           default])))
+     (let loop ([start-pos 0] [default #f])
+       (let ([m (regexp-match-positions rx:logging-spec str start-pos)])
+         (define (extract p) (and p (substring str (car p) (cdr p))))
          (cond
           [m
-           (let ([level (string->symbol (cadr m))]
-                 [topic (caddr m)])
+           (let ([level (string->symbol (extract (cadr m)))]
+                 [topic (extract (caddr m))])
              (cond
               [topic
-               (cons level (cons (string->symbol topic) (loop (cadddr m) default)))]
+               (cons level (cons (string->symbol topic) (loop (cdr (cadddr m)) default)))]
               [default (fail)]
-              [else (loop (cadddr m) level)]))]
-          [(regexp-match? rx:all-whitespace str)
+              [else (loop (cdr (cadddr m)) level)]))]
+          [(regexp-match? rx:all-whitespace str start-pos)
            (if default (list default) null)]
           [else (fail)]))))
 
@@ -232,22 +255,16 @@
          (when (module-declared? main-m #t)
            (dynamic-require main-m #f)))))
 
-   (define (get-repl-init-filename)
-     (call-with-continuation-prompt
-      (lambda ()
-        (or (let ([p (build-path (find-system-path 'addon-dir)
-                                 (if gracket?
-                                     "gui-interactive.rkt"
-                                     "interactive.rkt"))])
-              (and (file-exists? p) p))
-            (let ([config-fn (build-path (find-main-config) "config.rktd")])
-              (and (file-exists? config-fn)
-                   (hash-ref (call-with-input-file config-fn read)
-                             (if gracket? 'gui-interactive-file 'interactive-file)
-                             #f)))
-            (if gracket? 'racket/gui/interactive 'racket/interactive)))
-      (default-continuation-prompt-tag)
-      (lambda args #f)))
+   (define (get-repl-init-filename config)
+     (or (let ([p (build-path (find-system-path 'addon-dir)
+                              (if gracket?
+                                  "gui-interactive.rkt"
+                                  "interactive.rkt"))])
+           (and (file-exists? p) p))
+         (hash-ref config
+                   (if gracket? 'gui-interactive-file 'interactive-file)
+                   #f)
+         (if gracket? 'racket/gui/interactive 'racket/interactive)))
 
    (define init-library (if gracket?
                             '(lib "racket/gui/init")
@@ -263,9 +280,10 @@
    (define syslog-logging-arg #f)
    (define runtime-for-init? #t)
    (define exit-value 0)
+   (define addon-dir #f)
    (define host-collects-dir #f)
    (define host-config-dir #f)
-   (define addon-dir #f)
+   (define host-addon-dir 'inherit)
    (define rev-collects-post-extra '())
 
    (define (no-init! saw)
@@ -306,6 +324,7 @@
                  loads)))
 
    (include "main/help.ss")
+   (include "main/eval-all.ss")
 
    (define-syntax string-case
      ;; Assumes that `arg` is a variable
@@ -373,7 +392,10 @@
                 (flags-loop (cons "--" rest-args) (see saw 'non-config 'lib)))]
              [("-f" "--load")
               (let-values ([(file-name rest-args) (next-arg "file name" arg within-arg args)])
-                (set! loads (cons (lambda () (load file-name))
+                (set! loads (cons (lambda ()
+                                    (if (equal? file-name "-")
+                                        (eval-all (current-input-port))
+                                        (load file-name)))
                                   loads))
                 (flags-loop rest-args (see saw 'non-config 'top)))]
              [("-r" "--script")
@@ -382,30 +404,14 @@
                                   loads))
                 (check-path-arg file-name "file name" arg within-arg)
                 (set-run-file! (string->path file-name))
-                (flags-loop (cons "--" rest-args) (see saw 'non-config)))]
+                (flags-loop (cons "--" rest-args) (see saw 'non-config 'top)))]
              [("-e" "--eval")
               (let-values ([(expr rest-args) (next-arg "expression" arg within-arg args)])
                 (set! loads
                       (cons
                        (lambda ()
                          (define i (open-input-string expr))
-                         (let loop ()
-                           (define expr (read i))
-                           (unless (eof-object? expr)
-                             (call-with-values (lambda ()
-                                                 (call-with-continuation-prompt
-                                                  (lambda ()
-                                                    (eval `(|#%top-interaction| . ,expr)))
-                                                  (default-continuation-prompt-tag)
-                                                  (lambda (proc)
-                                                    ;; continue escape to set error status:
-                                                    (abort-current-continuation (default-continuation-prompt-tag) proc))))
-                               (lambda vals
-                                 (for-each (lambda (v)
-                                             (|#%app| (current-print) v)
-                                             (flush-output))
-                                           vals)))
-                             (loop))))
+                         (eval-all i))
                        loads))
                 (flags-loop rest-args (see saw 'non-config 'top)))]
              [("-k" "-Y")
@@ -452,6 +458,9 @@
              [("-v" "--version") 
               (set! version? #t)
               (flags-loop (cdr args) (see saw 'non-config))]
+             [("-y" "--make")
+              (set! make? #t)
+              (loop (cdr args))]
              [("-c" "--no-compiled")
               (set! compiled-file-paths '())
               (loop (cdr args))]
@@ -485,10 +494,12 @@
                 (set! init-config-dir (path->complete-path (->path (find-original-bytes config-path))))
                 (loop rest-args))]
              [("-C" "--cross")
-              (set! host-config-dir init-config-dir)
-              (set! host-collects-dir init-collects-dir)
-              (set-cross-mode! 'force)
-              (loop (cdr args))]
+              (unless (saw? saw 'cross)
+                (set! host-config-dir init-config-dir)
+                (set! host-collects-dir init-collects-dir)
+                (set! host-addon-dir addon-dir)
+                (set-cross-mode! 'force))
+              (flags-loop (cdr args) (see saw 'cross))]
              [("-U" "--no-user-path")
               (set! user-specific-search-paths? #f)
               (loop (cdr args))]
@@ -506,15 +517,15 @@
               (loop (cdr args))]
              [("-W" "--stderr")
               (let-values ([(spec rest-args) (next-arg "stderr level" arg within-arg args)])
-                (set! stderr-logging-arg (parse-logging-spec "stderr" spec (format "after ~a switch" (or within-arg arg)) #t))
+                (set! stderr-logging-arg (parse-logging-spec "stderr" spec (format "after ~a switch" (or within-arg arg)) #t #f))
                 (loop rest-args))]
              [("-O" "--stdout")
               (let-values ([(spec rest-args) (next-arg "stdout level" arg within-arg args)])
-                (set! stdout-logging-arg (parse-logging-spec "stdout" spec (format "after ~a switch" (or within-arg arg)) #t))
+                (set! stdout-logging-arg (parse-logging-spec "stdout" spec (format "after ~a switch" (or within-arg arg)) #t #f))
                 (loop rest-args))]
              [("-L" "--syslog")
               (let-values ([(spec rest-args) (next-arg "syslog level" arg within-arg args)])
-                (set! syslog-logging-arg (parse-logging-spec "syslog" spec (format "after ~a switch" (or within-arg arg)) #t))
+                (set! syslog-logging-arg (parse-logging-spec "syslog" spec (format "after ~a switch" (or within-arg arg)) #t #f))
                 (loop rest-args))]
              [("-N" "--name")
               (let-values ([(name rest-args) (next-arg "name" arg within-arg args)])
@@ -624,7 +635,7 @@
    (define-values (struct:gc-info make-gc-info gc-info? gc-info-ref gc-info-set!)
      (make-struct-type 'gc-info #f 10 0 #f null 'prefab #f '(0 1 2 3 4 5 6 7 8 9)))
    (define (K plus n)
-     (let* ([s (number->string (quotient (abs n) 1000))]
+     (let* ([s (number->string (quotient (abs n) 1024))]
             [len (string-length s)]
             [len2 (+ len
                      (quotient (sub1 len) 3)
@@ -656,7 +667,6 @@
    (define minor-gcs 0)
    (define major-gcs 0)
    (define auto-gcs 0)
-   (define peak-mem 0)
    (seq
     (set-garbage-collect-notify!
      (let ([root-logger (current-logger)])
@@ -668,7 +678,6 @@
            (if minor?
                (set! minor-gcs (add1 minor-gcs))
                (set! major-gcs (add1 major-gcs)))
-           (set! peak-mem (max peak-mem pre-allocated))
            (let ([debug-GC? (log-level?* root-logger 'debug 'GC)]
                  [debug-GC:major? (and (not minor?)
                                        (log-level?* root-logger 'debug 'GC:major))])
@@ -707,21 +716,22 @@
           (when gcs-on-exit?
             (collect-garbage)
             (collect-garbage))
-          (let ([debug-GC? (log-level?* root-logger 'debug 'GC)]
-                [debug-GC:major? (log-level?* root-logger 'debug 'GC:major)])
-            (when (or debug-GC? debug-GC:major?)
-              (let ([msg (chez:format "GC: 0:atexit peak ~a(~a); alloc ~a; major ~a; minor ~a; ~ams"
-                                      (K "" peak-mem)
-                                      (K "+" (- (maximum-memory-bytes) peak-mem))
-                                      (K "" (- (+ (bytes-deallocated) (bytes-allocated)) (initial-bytes-allocated)))
-                                      major-gcs
-                                      minor-gcs
-                                      (let ([t (sstats-gc-cpu (statistics))])
-                                        (+ (* (time-second t) 1000)
-                                           (quotient (time-nanosecond t) 1000000))))])
-                (when debug-GC?
+          (let ([info-GC? (log-level?* root-logger 'info 'GC)]
+                [info-GC:major? (log-level?* root-logger 'info 'GC:major)])
+            (when (or info-GC? info-GC:major?)
+              (let* ([peak-mem (current-memory-use 'peak)]
+                     [msg (chez:format "GC: 0:atexit peak ~a(~a); alloc ~a; major ~a; minor ~a; ~ams"
+                                       (K "" peak-mem)
+                                       (K "+" (- (maximum-memory-bytes) peak-mem))
+                                       (K "" (- (+ (bytes-deallocated) (bytes-allocated)) (initial-bytes-allocated)))
+                                       major-gcs
+                                       minor-gcs
+                                       (let ([t (sstats-gc-cpu (statistics))])
+                                         (+ (* (time-second t) 1000)
+                                            (quotient (time-nanosecond t) 1000000))))])
+                (when info-GC?
                   (log-message root-logger 'info 'GC msg #f #f))
-                (when debug-GC:major?
+                (when info-GC:major?
                   (log-message root-logger 'info 'GC:major msg #f #f)))))
           (linklet-performance-report!)
           (custodian-shutdown-root-at-exit)
@@ -731,24 +741,40 @@
      (or stderr-logging-arg
          (let ([spec (getenv "PLTSTDERR")])
            (if spec
-               (parse-logging-spec "stderr" spec "in PLTSTDERR environment variable" #f)
+               (parse-logging-spec "stderr" spec "in PLTSTDERR environment variable" #f '(error))
                '(error)))))
 
    (define stdout-logging
      (or stdout-logging-arg
          (let ([spec (getenv "PLTSTDOUT")])
            (if spec
-               (parse-logging-spec "stdout" spec "in PLTSTDOUT environment variable" #f)
+               (parse-logging-spec "stdout" spec "in PLTSTDOUT environment variable" #f '())
                '()))))
 
    (define syslog-logging
      (or syslog-logging-arg
          (let ([spec (getenv "PLTSYSLOG")])
            (if spec
-               (parse-logging-spec "syslog" spec "in PLTSYSLOG environment variable" #f)
+               (parse-logging-spec "syslog" spec "in PLTSYSLOG environment variable" #f '())
                '()))))
 
    (define gcs-on-exit? (and (getenv "PLT_GCS_ON_EXIT") #t))
+
+   (define config
+     (let ()
+       (when host-collects-dir
+         (set-host-collects-dir! host-collects-dir))
+       (when host-config-dir
+         (set-host-config-dir! host-config-dir))
+       (cond
+         [(eq? init-collects-dir 'disable)
+          (set-collects-dir! (build-path 'same))]
+         [else
+          (set-collects-dir! init-collects-dir)])
+       (set-config-dir! init-config-dir)
+       ;; Beware: using Racket I/O outside of the initial thread, but
+       ;; enough is in place on startup to read a configuration file
+       (read-installation-configuration-table)))
 
    (define (initialize-place!)
      (current-command-line-arguments remaining-command-line-arguments)
@@ -757,6 +783,7 @@
      (load-on-demand-enabled load-on-demand?)
      (unless (eq? compile-target-machine (machine-type))
        (current-compile-target-machine compile-target-machine))
+     (use-compiled-file-check init-compiled-file-check)
      (boot)
      (when (and stderr-logging
                 (not (null? stderr-logging)))
@@ -767,30 +794,22 @@
      (when (and syslog-logging
                 (not (null? syslog-logging)))
        (apply add-syslog-log-receiver! (current-logger) syslog-logging))
-     (when host-collects-dir
-       (set-host-collects-dir! host-collects-dir))
-     (when host-config-dir
-       (set-host-config-dir! host-config-dir))
-     (cond
-      [(eq? init-collects-dir 'disable)
-       (use-collection-link-paths #f)
-       (set-collects-dir! (build-path 'same))]
-      [else
-       (set-collects-dir! init-collects-dir)])
-     (set-config-dir! init-config-dir)
-     (unless (eq? init-collects-dir 'disable)
-       (current-library-collection-links
-        (find-library-collection-links))
-       (current-library-collection-paths
-        (find-library-collection-paths collects-pre-extra (reverse rev-collects-post-extra))))
-     (let ([roots (find-compiled-file-roots)])
-       (if compiled-roots-path-list-string
-           (current-compiled-file-roots
-            (let ([s (regexp-replace* "@[(]version[)]"
-                                      compiled-roots-path-list-string
-                                      (version))])
-              (path-list-string->path-list s roots)))
-           (current-compiled-file-roots roots))))
+     (when (eq? init-collects-dir 'disable)
+       (use-collection-link-paths #f))
+     (let ([name (get-installation-name config)])
+       (unless (eq? init-collects-dir 'disable)
+         (current-library-collection-links
+          (find-library-collection-links config name))
+         (current-library-collection-paths
+          (find-library-collection-paths collects-pre-extra (reverse rev-collects-post-extra) config name)))
+       (let ([roots (find-compiled-file-roots config)])
+         (if compiled-roots-path-list-string
+             (current-compiled-file-roots
+              (let ([s (regexp-replace* "@[(]version[)]"
+                                        compiled-roots-path-list-string
+                                        (version))])
+                (path-list-string->path-list s roots)))
+             (current-compiled-file-roots roots)))))
 
    ;; Called when Racket is embedded in a larger application:
    (define (register-embedded-entry-info! escape)
@@ -875,7 +894,7 @@
           (loop (cdr l))))
       (lambda ()
         (let ([f (dynamic-require mod sym)])
-          (f pch)))))
+          (|#%app| f pch)))))
    (set-destroy-place!
     (lambda ()
       (io-place-destroy!)))
@@ -884,6 +903,10 @@
                 (getenv-bytes "PLTADDONDIR"))])
      (when a
        (set-addon-dir! (path->complete-path (->path a)))))
+   (unless (eq? host-addon-dir 'inherit)
+     (let ([a (or host-addon-dir
+                  (getenv-bytes "PLTADDONDIR"))])
+       (set-host-addon-dir! (and a (path->complete-path (->path a))))))
 
    (when (getenv "PLT_STATS_ON_BREAK")
      (keyboard-interrupt-handler
@@ -913,14 +936,25 @@
          (when (and n (exact-nonnegative-integer? n))
            (set-schedule-quantum! n)))))
 
+   (let ([build-stamp (or (hash-ref config 'build-stamp #f) "")])
+     (unless (equal? build-stamp "")
+       (set-build-stamp! build-stamp)))
+
    (when version?
-     (display (banner)))
+     (#%display (banner)))
+
    (call/cc ; Chez Scheme's `call/cc`, used here to escape from the Racket-thread engine loop
     (lambda (entry-point-k)
       (call-in-main-thread
        (lambda ()
          (initialize-exit-handler!)
          (initialize-place!)
+
+         (when (and make? (not (null? compiled-file-paths)))
+           (|#%app|
+            current-load/use-compiled
+            (|#%app| (dynamic-require 'compiler/private/cm-minimal
+                                      'make-compilation-manager-load/use-compiled-handler))))
 
          (when init-library
            (namespace-require+ init-library))
@@ -941,7 +975,7 @@
          (when repl?
            (set! exit-value 0)
            (when repl-init?
-             (let ([m (get-repl-init-filename)])
+             (let ([m (get-repl-init-filename config)])
                (when m
                  (call-with-continuation-prompt
                   (lambda () (dynamic-require m 0))

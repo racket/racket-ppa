@@ -43,6 +43,15 @@ static void check_object(ptr p, uptr seg, ISPC s_in, IBOOL aftergc)
                 }
               }
             }
+            else if (num == Strue)
+            {
+              uptr offset = (uptr)(*((pp + 1)));
+              {
+                ptr obj = TO_PTR((((uptr)(*(pp))) - offset));
+                check_pointer(&(obj), 0, 0, p, seg, s_in, aftergc);
+                *(pp) = TO_PTR((((uptr)obj) + offset));
+              }
+            }
             else
             {
               check_pointer(&(num), 0, 0, p, seg, s_in, aftergc);
@@ -90,7 +99,7 @@ static void check_object(ptr p, uptr seg, ISPC s_in, IBOOL aftergc)
         }
       }
     }
-    else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+    else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
     {
       uptr len = Sstencil_vector_length(p);
       {
@@ -237,6 +246,7 @@ static void check_object(ptr p, uptr seg, ISPC s_in, IBOOL aftergc)
           check_pointer(&(STACKLINK(tc)), 1, 0, p, seg, s_in, aftergc);
           check_pointer(&(WINDERS(tc)), 1, 0, p, seg, s_in, aftergc);
           check_pointer(&(ATTACHMENTS(tc)), 1, 0, p, seg, s_in, aftergc);
+          check_pointer(&(HANDLERSTACK(tc)), 1, 0, p, seg, s_in, aftergc);
           {
             ptr xcp = FRAME(tc, 0);
             {
@@ -258,8 +268,9 @@ static void check_object(ptr p, uptr seg, ISPC s_in, IBOOL aftergc)
                         }
                         fp = fp - (ENTRYFRAMESIZE(ret));
                         {
-                          ptr* pp = (ptr*)(TO_VOIDP(fp));
                           iptr oldret = ret;
+                          ptr num = ENTRYLIVEMASK(oldret);
+                          ptr* pp = (ptr*)(TO_VOIDP(fp));
                           ret = (iptr)(*(pp));
                           {
                             ptr xcp = *(pp);
@@ -268,45 +279,42 @@ static void check_object(ptr p, uptr seg, ISPC s_in, IBOOL aftergc)
                               {
                                 ptr c_p = (ptr)(((uptr)xcp) - co);
                                 check_pointer(&(c_p), 0, 0, p, seg, s_in, aftergc);
+                                if (Sfixnump(num))
                                 {
-                                  ptr num = ENTRYLIVEMASK(oldret);
-                                  if (Sfixnump(num))
                                   {
+                                    uptr mask = UNFIX(num);
+                                    while (mask != 0)
                                     {
-                                      uptr mask = UNFIX(num);
-                                      while (mask != 0)
+                                      pp += 1;
+                                      if (mask & 1)
                                       {
-                                        pp += 1;
-                                        if (mask & 1)
-                                        {
-                                          check_pointer(&(*(pp)), 1, 0, p, seg, s_in, aftergc);
-                                        }
-                                        mask >>= 1;
+                                        check_pointer(&(*(pp)), 1, 0, p, seg, s_in, aftergc);
                                       }
+                                      mask >>= 1;
                                     }
                                   }
-                                  else
+                                }
+                                else
+                                {
+                                  check_pointer(&(num), 0, 0, p, seg, s_in, aftergc);
+                                  check_bignum(num);
                                   {
-                                    check_pointer(&(num), 0, 0, p, seg, s_in, aftergc);
-                                    check_bignum(num);
+                                    iptr index = BIGLEN(num);
+                                    while (index != 0)
                                     {
-                                      iptr index = BIGLEN(num);
-                                      while (index != 0)
+                                      index -= 1;
                                       {
-                                        index -= 1;
+                                        INT bits = bigit_bits;
+                                        bigit mask = BIGIT(num, index);
+                                        while (bits > 0)
                                         {
-                                          INT bits = bigit_bits;
-                                          bigit mask = BIGIT(num, index);
-                                          while (bits > 0)
+                                          bits -= 1;
+                                          pp += 1;
+                                          if (mask & 1)
                                           {
-                                            bits -= 1;
-                                            pp += 1;
-                                            if (mask & 1)
-                                            {
-                                              check_pointer(&(*(pp)), 1, 0, p, seg, s_in, aftergc);
-                                            }
-                                            mask >>= 1;
+                                            check_pointer(&(*(pp)), 1, 0, p, seg, s_in, aftergc);
                                           }
+                                          mask >>= 1;
                                         }
                                       }
                                     }
@@ -423,8 +431,9 @@ static void check_object(ptr p, uptr seg, ISPC s_in, IBOOL aftergc)
                         }
                         fp = fp - (ENTRYFRAMESIZE(ret));
                         {
-                          ptr* pp = (ptr*)(TO_VOIDP(fp));
                           iptr oldret = ret;
+                          ptr num = ENTRYLIVEMASK(oldret);
+                          ptr* pp = (ptr*)(TO_VOIDP(fp));
                           ret = (iptr)(*(pp));
                           {
                             ptr xcp = *(pp);
@@ -433,45 +442,42 @@ static void check_object(ptr p, uptr seg, ISPC s_in, IBOOL aftergc)
                               {
                                 ptr c_p = (ptr)(((uptr)xcp) - co);
                                 check_pointer(&(c_p), 0, 0, p, seg, s_in, aftergc);
+                                if (Sfixnump(num))
                                 {
-                                  ptr num = ENTRYLIVEMASK(oldret);
-                                  if (Sfixnump(num))
                                   {
+                                    uptr mask = UNFIX(num);
+                                    while (mask != 0)
                                     {
-                                      uptr mask = UNFIX(num);
-                                      while (mask != 0)
+                                      pp += 1;
+                                      if (mask & 1)
                                       {
-                                        pp += 1;
-                                        if (mask & 1)
-                                        {
-                                          check_pointer(&(*(pp)), 1, 0, p, seg, s_in, aftergc);
-                                        }
-                                        mask >>= 1;
+                                        check_pointer(&(*(pp)), 1, 0, p, seg, s_in, aftergc);
                                       }
+                                      mask >>= 1;
                                     }
                                   }
-                                  else
+                                }
+                                else
+                                {
+                                  check_pointer(&(num), 0, 0, p, seg, s_in, aftergc);
+                                  check_bignum(num);
                                   {
-                                    check_pointer(&(num), 0, 0, p, seg, s_in, aftergc);
-                                    check_bignum(num);
+                                    iptr index = BIGLEN(num);
+                                    while (index != 0)
                                     {
-                                      iptr index = BIGLEN(num);
-                                      while (index != 0)
+                                      index -= 1;
                                       {
-                                        index -= 1;
+                                        INT bits = bigit_bits;
+                                        bigit mask = BIGIT(num, index);
+                                        while (bits > 0)
                                         {
-                                          INT bits = bigit_bits;
-                                          bigit mask = BIGIT(num, index);
-                                          while (bits > 0)
+                                          bits -= 1;
+                                          pp += 1;
+                                          if (mask & 1)
                                           {
-                                            bits -= 1;
-                                            pp += 1;
-                                            if (mask & 1)
-                                            {
-                                              check_pointer(&(*(pp)), 1, 0, p, seg, s_in, aftergc);
-                                            }
-                                            mask >>= 1;
+                                            check_pointer(&(*(pp)), 1, 0, p, seg, s_in, aftergc);
                                           }
+                                          mask >>= 1;
                                         }
                                       }
                                     }
@@ -547,7 +553,7 @@ static uptr size_object(ptr p)
         return p_sz;
       }
     }
-    else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+    else if (TYPEP(tf, mask_any_stencil_vector, type_any_stencil_vector))
     {
       uptr len = Sstencil_vector_length(p);
       {

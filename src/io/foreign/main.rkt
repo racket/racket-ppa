@@ -7,7 +7,8 @@
          "../file/host.rkt"
          "../file/error.rkt"
          "../string/convert.rkt"
-         "../locale/string.rkt")
+         "../locale/string.rkt"
+         "../error/message.rkt")
 
 (provide ffi-get-lib
          ffi-unload-lib
@@ -22,10 +23,10 @@
   (check who path-string? #:or-false path)
   (check who (procedure-arity-includes/c 1) success-k)
   (define bstr (and path (->host/as-is path #f #f)))
-  (start-atomic)
+  (start-rktio)
   (define dll (rktio_dll_open rktio bstr as-global?))
   (define err-str (dll-get-error dll))
-  (end-atomic)
+  (end-rktio)
   (cond
     [(rktio-error? dll)
      (cond
@@ -37,24 +38,24 @@
     [else (success-k dll)]))
 
 (define/who (ffi-unload-lib dll)
-  (start-atomic)
+  (start-rktio)
   (define r (rktio_dll_close rktio dll))
   (cond
     [(rktio-error? r)
      (define err-str (dll-get-error r))
-     (end-atomic)
+     (end-rktio)
      (raise-dll-error who "could not unload foreign library" err-str r)]
     [else
-     (end-atomic)]))
+     (end-rktio)]))
 
 (define (ffi-get-obj who dll dll-name name success-k)
   (check who path-string? #:or-false dll-name)
   (check who bytes? name)
   (check who (procedure-arity-includes/c 1) success-k)
-  (start-atomic)
+  (start-rktio)
   (define obj (rktio_dll_find_object rktio dll name))
   (define err-str (dll-get-error obj))
-  (end-atomic)
+  (end-rktio)
   (cond
     [(rktio-error? obj)
      (define msg (string-append "could not find export from foreign library"
@@ -64,14 +65,15 @@
        [err-str
         (raise
          (exn:fail:filesystem
-          (string-append (symbol->string who) ": " msg
-                         "\n  system error: " (->string err-str))
+          (error-message->string who
+                                 (string-append msg
+                                                "\n  system error: " (->string err-str)))
           (current-continuation-marks)))]
        [else
         (raise-filesystem-error who dll msg)])]
     [else (success-k obj)]))
 
-;; in atomic mode
+;; in rktio mode
 (define (dll-get-error v)
   (and (rktio-error? v)
        (let ([p (rktio_dll_get_error rktio)])
@@ -88,8 +90,9 @@
     [err-str
      (raise
       (exn:fail:filesystem
-       (string-append (symbol->string who) ": " msg
-                      "\n  system error: " (->string err-str))
+       (error-message->string who
+                              (string-append msg
+                                             "\n  system error: " (->string err-str)))
        (current-continuation-marks)))]
     [else
      (raise-filesystem-error who v msg)]))
@@ -105,7 +108,7 @@
   (check who path-string? path)
   (check who symbol? sym)
   (raise (exn:fail:unsupported
-          "default-load-extension: extensions are not supported"
+          (error-message->string "default-load-extension" "extensions are not supported")
           (current-continuation-marks))))
 
 

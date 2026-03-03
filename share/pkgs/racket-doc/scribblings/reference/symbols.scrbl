@@ -21,7 +21,7 @@ other symbol, although they may print the same as other symbols.
 
 The procedure @racket[string->unreadable-symbol] returns an
 @deftech{unreadable symbol} that is partially interned.  The default
-reader (see @secref["parse-symbol"]) never produces a unreadable
+reader (see @secref["parse-symbol"]) never produces an unreadable
 symbol, but two calls to @racket[string->unreadable-symbol] with
 @racket[equal?] strings produce @racket[eq?] results. An unreadable
 symbol can print the same as an interned or uninterned
@@ -33,7 +33,7 @@ in the result of functions like @racket[identifier-binding].
 Interned and unreadable symbols are only weakly held by the internal
 symbol table. This weakness can never affect the result of an
 @racket[eq?], @racket[eqv?], or @racket[equal?] test, but a symbol may
-disappear when placed into a weak box (see @secref["weakbox"]) used as
+disappear when placed into a weak box (see @secref["weakbox"]), used as
 the key in a weak @tech{hash table} (see @secref["hashtables"]), or
 used as an ephemeron key (see @secref["ephemerons"]).
 
@@ -118,7 +118,7 @@ for each pair of symbols is the same as using
 @; ----------------------------------------
 @section{Additional Symbol Functions}
 
-@note-lib[racket/symbol]
+@note-lib-only[racket/symbol]
 @(define symbol-eval (make-base-eval))
 @examples[#:hidden #:eval symbol-eval (require racket/symbol)]
 

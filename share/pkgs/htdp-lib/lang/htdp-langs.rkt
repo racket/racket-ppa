@@ -129,7 +129,7 @@
                               (andmap (λ (x) (or (string? x) (symbol? x))) x)))
                        l)))
           
-        (inherit get-allow-sharing? get-use-function-output-syntax? 
+        (inherit get-allow-sharing? get-use-function-output-syntax? get-output-function-instead-of-lambda?
                  get-accept-quasiquote? get-read-accept-dot)
         (define/override (config-panel parent)
           (sharing/not-config-panel (get-allow-sharing?) (get-accept-quasiquote?) parent))
@@ -195,7 +195,8 @@
                                                         (htdp-lang-settings-tracing? settings)
                                                         (htdp-lang-settings-true/false/empty-as-ids? settings)
                                                         (get-abbreviate-cons-as-list)
-                                                        (get-use-function-output-syntax?)))))))
+                                                        (get-use-function-output-syntax?)
+                                                        (get-output-function-instead-of-lambda?)))))))
 
         (define/private (teaching-languages-error-value->string settings v len)
           (let ([sp (open-output-string)])
@@ -381,6 +382,7 @@
                     manual
                     reader-module
                     (use-function-output-syntax? #f)
+                    (output-function-instead-of-lambda? #f)
                     (accept-quasiquote? #t)
                     (read-accept-dot #f)
                     (style-delta #f))
@@ -389,6 +391,7 @@
         (define/public (get-allow-sharing?) allow-sharing?)
         (define/public (get-manual) manual)
         (define/public (get-use-function-output-syntax?) use-function-output-syntax?)
+        (define/public (get-output-function-instead-of-lambda?) output-function-instead-of-lambda?)
         (define/public (get-accept-quasiquote?) accept-quasiquote?)
         (define/public (get-read-accept-dot) read-accept-dot)
         ;(define/override (get-one-line-summary) one-line-summary)
@@ -1013,12 +1016,13 @@
          (manual #"advanced")
          (language-position
           (list (string-constant teaching-languages)
-                (string-constant how-to-design-programs)
-                (string-constant advanced-student)))
+                |How to Design Programs|
+                "Advanced Student"))
          (language-id "plt:advanced-student")
          (language-numbers '(-500 -500 5))
          (sharing-printing #t)
          (abbreviate-cons-as-list #t)
+         (use-function-output-syntax? #t)
          (allow-sharing? #t)
          (reader-module '(lib "htdp-advanced-reader.ss" "lang"))
          (debugger:supported #t)
@@ -1033,12 +1037,12 @@
          (manual #"intermediate-lambda")
          (language-position
           (list (string-constant teaching-languages)
-                (string-constant how-to-design-programs)
-                (string-constant intermediate-student/lambda)))
+                |How to Design Programs|
+                "Intermediate Student with lambda"))
          (language-id "plt:intermediate-student/lambda")
          (style-delta (let ([match (regexp-match-positions
                                     "lambda"
-                                    (string-constant intermediate-student/lambda))])
+                                    "Intermediate Student with lambda")])
                         (if match
                             (let ([pos (car match)])
                               (list (list (make-object style-delta% 'change-family 'modern)
@@ -1048,6 +1052,7 @@
          (language-numbers '(-500 -500 4))
          (sharing-printing #f)
          (abbreviate-cons-as-list #t)
+         (use-function-output-syntax? #t)
          (allow-sharing? #f)
          (reader-module '(lib "htdp-intermediate-lambda-reader.ss" "lang"))
          (stepper:supported #t)
@@ -1061,14 +1066,15 @@
          (manual #"intermediate")
          (language-position
           (list (string-constant teaching-languages)
-                (string-constant how-to-design-programs)
-                (string-constant intermediate-student)))
+                |How to Design Programs|
+                "Intermediate Student"))
          (language-id "plt:intermediate-student")
          (language-numbers '(-500 -500 3))
          (sharing-printing #f)
          (abbreviate-cons-as-list #t)
          (allow-sharing? #f)
          (use-function-output-syntax? #t)
+         (output-function-instead-of-lambda? #t)
          (reader-module '(lib "htdp-intermediate-reader.ss" "lang"))
          (stepper:supported #t)
          (stepper:enable-let-lifting #t)
@@ -1081,12 +1087,13 @@
          (manual #"beginning-abbr")
          (language-position
           (list (string-constant teaching-languages)
-                (string-constant how-to-design-programs)
-                (string-constant beginning-student/abbrev)))
+                |How to Design Programs|
+                "Beginning Student with List Abbreviations"))
          (language-id "plt:beginning-student/abbrev")
          (language-numbers '(-500 -500 2))
          (sharing-printing #f)
          (abbreviate-cons-as-list #t)
+         (output-function-instead-of-lambda? #t)
          (allow-sharing? #f)
          (reader-module '(lib "htdp-beginner-abbr-reader.ss" "lang"))
          (stepper:supported #t)
@@ -1100,12 +1107,13 @@
          (manual #"beginning")
          (language-position
           (list (string-constant teaching-languages)
-                (string-constant how-to-design-programs)
-                (string-constant beginning-student)))
+                |How to Design Programs|
+                "Beginning Student"))
          (language-numbers '(-500 -500 1))
          (language-id "plt:beginning-student")
          (sharing-printing #f)
          (abbreviate-cons-as-list #f)
+         (output-function-instead-of-lambda? #t)
          (allow-sharing? #f)
          (accept-quasiquote? #f)
          (reader-module '(lib "htdp-beginner-reader.ss" "lang"))
@@ -1138,4 +1146,5 @@
                                                 test-coverage-off-style-pref
                                                 test-coverage-off-style-name
                                                 (string-constant test-coverage-off)
-                                                #:background? #t)))))
+                                                #:background? #t)
+       (color-prefs:normalize-color-selection-button-widths parent)))))

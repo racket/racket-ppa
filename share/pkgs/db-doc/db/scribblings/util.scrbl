@@ -6,7 +6,7 @@
           racket/runtime-path
           "config.rkt"
           (for-label db db/util/datetime db/util/geometry db/util/postgresql
-                     db/util/testing db/util/cassandra
+                     db/util/testing db/util/cassandra db/util/mysql
                      db/unsafe/sqlite3))
 
 @(define-runtime-path log-file "log-for-util.rktd")
@@ -109,7 +109,7 @@ structures to and from WKB format is supported by the
   Returns @racket[#t] if @racket[x] is a @racket[point],
   @racket[line-string], @racket[polygon], @racket[multi-point],
   @racket[multi-line-string], @racket[multi-polygon], or
-  @racket[geometry-collection]; @racket[#f] othewise.
+  @racket[geometry-collection]; @racket[#f] otherwise.
 }
 
 @defproc[(line? [x any/c]) boolean?]{
@@ -145,7 +145,7 @@ structures to and from WKB format is supported by the
 
 @;{========================================}
 
-@section[#:tag "postgresql-ext"]{PostgreSQL-specific Types}
+@section[#:tag "postgresql-ext"]{PostgreSQL-specific Functionality}
 
 @defmodule[db/util/postgresql]
 
@@ -235,7 +235,9 @@ The digits themselves are case-insensitive, accepting both uppercase
 and lowercase characters. Otherwise, if @racket[v] is not a string
 matching the above pattern, this function returns @racket[#f].
 
-@history[#:added "1.1"]
+@history[#:added "1.1"
+         #:changed "1.8" @elem{Made the check stricter: no characters are allowed
+                         before or after the UUID.}]
 }
 
 @deftogether[[
@@ -258,6 +260,121 @@ types that have no appropriate analogue in the OpenGIS model:
 
 Note: PostgreSQL's built-in geometric types are distinct from those
 provided by the PostGIS extension library (see @secref["geometry"]).
+}
+
+@defproc[(pg-custom-type [typeid exact-nonnegative-integer?]
+                         [typename symbol?]
+                         [basetype (or/c #f symbol? exact-nonnegative-integer?) #f]
+                         [#:recv recv-convert (or/c #f (-> any/c any/c)) values]
+                         [#:send send-convert (or/c #f (-> any/c any/c)) values]
+                         [#:array array-typeid (or/c #f exact-nonnegative-integer?) #f])
+         pg-custom-type?]{
+
+Creates a custom type descriptor that can be used with PostgreSQL connections;
+see @method[postgresql-connection<%> add-custom-types].
+
+The @racket[typeid] refers to the @tt{OID} of a row in the server's @tt{pg_type}
+system table. The @racket[typename] symbol is the name this library uses for the
+type in parameter descriptions, error messages, etc; it is not necessarily the
+same as the server's type name for @racket[typeid]. The server's type name must
+be used in SQL statements.
+
+When the type identified by @racket[typeid] appears in a query result, the
+result value is first received according to @racket[basetype], then the
+resulting Racket value is converted using @racket[recv-convert]. If
+@racket[basetype] is @racket[#f] (the default), it is treated like the
+@tt{bytea} type; that is, @racket[recv-convert] gets the byte string sent by the
+server. If @racket[recv-convert] is @racket[#f], the type is not allowed as a
+result type.
+
+When the type identified by @racket[typeid] is used as a query parameter, the
+argument value is first converted using @racket[send-convert], and the converted
+value is sent according to @racket[basetype]. If @racket[send-convert] is
+@racket[#f], the type is not allowed as a parameter type.
+
+If @racket[array-typeid] is not false, it is the @tt{OID} of the type's
+corresponding array type. It can be found in the @tt{typarray} field of the
+type's row in @tt{pg_type}. If @racket[array-typeid] is false, then sending and
+receiving arrays of the given type is not supported.
+
+@examples[#:eval the-eval
+(define-values (cidr-typeid cidr-array-typeid)
+  (vector->values
+    (query-row pgc "select oid, typarray from pg_type where typname = $1" "cidr")))
+cidr-typeid
+(send pgc add-custom-types
+      (list (pg-custom-type cidr-typeid 'cidr
+                            #:recv bytes->list
+                            #:send list->bytes
+                            #:array cidr-array-typeid)))
+(query-value pgc "select cidr '127.0.0.0/24'")
+(query-value pgc "select cast('{127.0.0.0/24, 10.0.0.0/8}' as cidr[])")
+]
+
+@history[#:added "1.8"
+         #:changed "1.11" @elem{Added @racket[array-typeid] argument.}]}
+
+@defproc[(pg-custom-type? [v any/c]) boolean?]{
+
+Returns @racket[#t] if @racket[v] was created with @racket[pg-custom-type],
+@racket[#f] otherwise.
+
+@history[#:added "1.8"]}
+
+@definterface[postgresql-connection<%> ()]{
+
+Interface for additional operations implemented by connections created with
+@racket[postgresql-connect].
+
+@defmethod[(add-custom-types [types (listof pg-custom-type?)])
+           void?]{
+
+Registers the given @racket[types] with @(this-obj) for use as query parameter
+and result types. See @racket[pg-custom-type] for details.
+
+@history[#:added "1.8"]}
+
+@defmethod[(async-message-evt)
+           evt?]{
+
+Returns a synchronizable event that becomes ready when input is available from
+the backend. When the event is selected, it attempts to handle any asynchronous
+notice and notification messages; its synchronization result is @racket[#t] if
+any messages were handled by the event's synchronization, @racket[#f] otherwise.
+
+Note that the event is highly prone to ``false alarms'', when it becomes ready
+but produces @racket[#f].
+
+@history[#:added "1.8"]}
+
+@defmethod[(cancel) void?]{
+
+Attempts to cancel any queries currently in progress on @(this-obj).
+
+@history[#:added "1.9"]}
+
+}
+
+
+@;{========================================}
+
+@section[#:tag "mysql-ext"]{MySQL-specific Functionality}
+
+@defmodule[db/util/mysql]
+
+@history[#:added "1.11"]
+
+@defproc[(mysql-json? [v any/c]) boolean?]{
+
+Returns @racket[#t] if @racket[v] is a value produced by @racket[mysql-json],
+@racket[#f] otherwise.
+}
+
+@defproc[(mysql-json [v jsexpr?]) mysql-json?]{
+
+Converts @racket[v] to a JSON string and returns an opaque wrapper value. If the
+wrapper value is passed as a query parameter using a MySQL connection, the
+parameter is marked as a @tt{JSON} value. (See @secref["mysql-types"].)
 }
 
 @;{========================================}

@@ -363,7 +363,7 @@
       (eq? (sleep (make-time 'time-duration 0 2)) (void))
       (symbol? (with-input-from-file "testfile.ss" read))
       ; following should be time<?, but access times are not updated on some
-      ; file systems, particulary nfs file systems.  but we wouldn't expect
+      ; file systems, particularly nfs file systems.  but we wouldn't expect
       ; time to run backwards (except for one hour for DST)
       (time<=? $taccess (file-access-time "testfile.ss"))
       (begin
@@ -704,3 +704,32 @@
             (close-port from-stderr))))
     )
 )
+
+(unless (or (windows?)
+            (not (threaded?)))
+  (mat thread-system
+
+    ;; make sure `system` works when interrupts are disabled
+    (with-interrupts-disabled
+      (eqv? 0 (system "echo hi")))
+
+    ;; check that when a thread is deactivated during `system`,
+    ;; the command that it's running isn't GCed
+    (let* ([count 50]
+           [ths
+            (let loop ([i count])
+              (cond
+                [(zero? i) '()]
+                [else
+                 (cons
+                  (fork-thread
+                   (lambda ()
+                     (let loop ([i 10])
+                       (unless (= i 0)
+                         (unless (zero?
+                                  (system (format "echo ~s > /dev/null"
+                                                  (make-string (random 4096) #\x))))
+                           (error 'system "FAILED"))
+                         (loop (sub1 i))))))
+                  (loop (sub1 i)))]))])
+      (= count (length (map thread-join ths))))))

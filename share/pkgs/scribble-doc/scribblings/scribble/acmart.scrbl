@@ -11,7 +11,12 @@
 language is like @racketmodname[scribble/base], but configured with
 LaTeX style defaults to use the @hyperlink[acmart-url]{@tt{acmart}}
 class for typesetting publications for the Association of Computing
-Machinery.}
+Machinery.
+
+ It is based on v2.10 of Boris Veytsman's LaTeX package, which has
+ @link["https://portalparts.acm.org/hippo/latex_templates/acmart.pdf"]{its
+  own documention}.
+}
 
 @bold{Note:} a @racketmodname[scribble/acmart] document must include a
 @racket[title] and @racket[author].
@@ -79,9 +84,8 @@ number of options may be used:
 
 If multiple font size options are used, all but the last are ignored.
 
-The @link["https://www.acm.org/binaries/content/assets/publications/consolidated-tex-template/acmart.pdf"
- ]{ACM documentation} (version 1.54, 2018-07-16, by Boris
-Veytsman) provides these defaults and descriptions:
+The official @tt{acmart} release
+provides these defaults and descriptions:
 
 @tabular[#:style 'boxed
          #:sep @hspace[1]
@@ -92,7 +96,7 @@ Veytsman) provides these defaults and descriptions:
           (list "review" "false"
                 "A review version: lines are numbered and\
  hyperlinks are colored")
-          (list "screen" "see text"
+          (list "screen" @link["https://portalparts.acm.org/hippo/latex_templates/acmart.pdf"]{"see text"}
                 "A screen version: hyperlinks are colored")
           (list "natbib" "true"
                 "Whether to use the natbib package")
@@ -103,8 +107,6 @@ Veytsman) provides these defaults and descriptions:
                 "false"
                 "Whether to generate a special version\
  for the authors’ personal use or posting")
-          ;; these options are documented in ACM docs but don't
-          ;; appear to exist in the scribble acmart format:
           (list "nonacm" "false"
                 "Use the class typesetting options for a non-ACM\
  document, which will not include the conference/journal\
@@ -115,7 +117,16 @@ Veytsman) provides these defaults and descriptions:
           (list "authordraft" "false"
                 "Whether author’s-draft mode is enabled")
           (list "acmthm" "true"
-                "Whether to define theorem-like environments"))]
+                "Whether to define theorem-like environments")
+          (list "balance" "true"
+                "Whether to balance the last page in\
+ two column mode")
+          (list "pbalance" "false"
+                "Whether to balance the last page in\
+ two column mode using pbalance package"
+                )
+          (list "urlbreakonhyphens" "true"
+                "Whether to break urls on hyphens"))]
 
 Further details for some of these are provided by the full
 documentation for the acmart LaTeX class.
@@ -177,6 +188,10 @@ Specifies a subtitle.}
 
   @abstract{abstracting abstract title}
 }|
+}
+
+@defproc[(authornote [text pre-content?] ...) block?]{
+  Attaches a footnote to an author name.
 }
 
 @deftogether[(
@@ -303,13 +318,14 @@ screen version of the image links to the badge authority.
 )]{
 
 Typesets term and keyword information for the paper, which
-is normally placed immediately after an @racket[abstract] form.
+is normally placed immediately after an @racket[abstract] or @racket[include-abstract] form.
 See also @url["http://www.acm.org/about/class/how-to-use"].
 
 For @racket[terms], each general term should be in titlecase. Terms
 are usually drawn from a fixed list, and they are usually optional.
 
-For @racket[keywords], capitalize only the first letter of the first
+The @racket[keywords] procedure generates the ``Additional Key Words and Phrases''
+section. Capitalize only the first letter of the first
 word, separate phrases by commas, and do not include ``and'' before
 the last one. Keywords should be noun phrases, not adjectives.}
 
@@ -318,7 +334,23 @@ Sets the start page for the paper.}
 
 @defproc[(ccsdesc [#:number number? #f] [content pre-content?] ...) content?]{
 
-Declares CCS description with optional numeric code.}
+ Declares CCS description with optional numeric code. This
+ generates the ``CCS Concepts'' section. When using the
+ @link["https://www.acm.org/publications/class-2012"]{ACM
+  Computing Classification System tool}, it will give you
+ some LaTeX code, for example:
+ @verbatim|{
+\ccsdesc[500]{Software and its engineering~Functional languages}
+\ccsdesc[500]{Software and its engineering~Imperative languages}
+           }|
+Those calls translate into:
+@codeblock[#:keep-lang-line? #f]|{
+  #lang scribble/acmart
+  @ccsdesc[#:number 500]{Software and its engineering~Functional languages}
+  @ccsdesc[#:number 500]{Software and its engineering~Imperative languages}
+}|
+
+}
 
 @defproc[(received [#:stage stage string? #f] [date string?]) content?]{
 

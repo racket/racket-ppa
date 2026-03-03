@@ -46,7 +46,7 @@
                  'get-encoded-root-expand-ctx #f))
 (void (instance-describe-variable! empty-syntax-literals-instance
                                    get-syntax-literal!-id
-                                   '(procedure/succeeds 2)))
+                                   '(procedure/pure 2)))
 
 (define empty-module-body-instance
   (make-module-body-instance-instance #:set-transformer! (lambda (name val) (void))))
@@ -61,7 +61,7 @@
 
 (define empty-syntax-literals-data-instance
   (make-instance 'empty-stx-data #f 'constant
-                 deserialized-syntax-vector-id (vector)
+                 deserialized-syntax-vector-id (box (vector))
                  deserialize-syntax-id void))
 
 (define empty-instance-instance

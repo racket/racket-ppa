@@ -68,12 +68,13 @@
 (define-namespace-anchor anchor)
 
 (define (literal-string style s)
-  (let ([m (regexp-match #rx"^(.*)(  +|^ )(.*)$" s)])
-    (if m
-      (make-element #f (list (literal-string style (cadr m))
-                             (hspace (string-length (caddr m)))
-                             (literal-string style (cadddr m))))
-      (make-element style (list s)))))
+  (define m (regexp-match #rx"^(.*)(  +|^ )(.*)$" s))
+  (if m
+      (make-element #f
+                    (list (literal-string style (cadr m))
+                          (hspace (string-length (caddr m)))
+                          (literal-string style (cadddr m))))
+      (make-element style (list s))))
 
 (define list.flow.list (compose1 list make-flow list))
 
@@ -86,10 +87,8 @@
                (make-paragraph (list (literal-string style (car s))))
                (make-table
                 #f
-                (map (lambda (s)
-                       (list.flow.list
-                        (make-paragraph (list (literal-string style s)))))
-                     s))))))))
+                (for/list ([s (in-list s)])
+                  (list.flow.list (make-paragraph (list (literal-string style s))))))))))))
 
 (define (format-output-stream in style)
   (define (add-string string-accum line-accum)
@@ -106,28 +105,19 @@
             flow-accum)
       flow-accum))
   (let loop ([string-accum #f] [line-accum #f] [flow-accum null])
-    (let ([v (read-char-or-special in)])
-      (cond
-        [(eof-object? v)
-         (let* ([line-accum (add-string string-accum line-accum)]
-                [flow-accum (add-line line-accum flow-accum)])
-           (if (null? flow-accum)
-               null
-               (list
-                (list.flow.list
-                 (if (= 1 (length flow-accum))
-                     (car flow-accum)
-                     (make-table
-                      #f
-                      (map list.flow.list (reverse flow-accum))))))))]
-        [(equal? #\newline v)
-         (loop #f #f (add-line (add-string string-accum line-accum)
-                               flow-accum))]
-        [(char? v)
-         (loop (cons v (or string-accum null)) line-accum flow-accum)]
-        [else
-         (loop #f (cons v (or (add-string string-accum line-accum) null))
-               flow-accum)]))))
+    (define v (read-char-or-special in))
+    (cond
+      [(eof-object? v)
+       (let* ([line-accum (add-string string-accum line-accum)]
+              [flow-accum (add-line line-accum flow-accum)])
+         (if (null? flow-accum)
+             null
+             (list (list.flow.list (if (= 1 (length flow-accum))
+                                       (car flow-accum)
+                                       (make-table #f (map list.flow.list (reverse flow-accum))))))))]
+      [(equal? #\newline v) (loop #f #f (add-line (add-string string-accum line-accum) flow-accum))]
+      [(char? v) (loop (cons v (or string-accum null)) line-accum flow-accum)]
+      [else (loop #f (cons v (or (add-string string-accum line-accum) null)) flow-accum)])))
 
 (define (string->wrapped-lines str)
   (apply
@@ -161,50 +151,41 @@
               (cond
                 [(string? (cadar promptless?+val-list+outputs))
                  ;; Error result case:
-                 (map (lambda (s) 
-                        (define p (format-output s error-color))
-                        (if (null? p)
-                            (list null)
-                            (car p)))
-                      (string->wrapped-lines (cadar promptless?+val-list+outputs)))]
+                 (for/list ([s (in-list (string->wrapped-lines
+                                         (cadar promptless?+val-list+outputs)))])
+                   (define p (format-output s error-color))
+                   (if (null? p)
+                       (list null)
+                       (car p)))]
                 [(box? (cadar promptless?+val-list+outputs))
                  ;; Output written to a port
                  (format-output-stream (unbox (cadar promptless?+val-list+outputs))
                                        result-color)]
                 [else
                  ;; Normal result case:
-                 (let ([val-list (cadar promptless?+val-list+outputs)])
-                   (if (equal? val-list (list (void)))
+                 (define val-list (cadar promptless?+val-list+outputs))
+                 (if (equal? val-list (list (void)))
                      null
-                     (map (lambda (v)
-                            (list.flow.list
-                             (make-paragraph
-                              (list (if (formatted-result? v)
-                                        (formatted-result-content v)
-                                        (elem #:style result-color
-                                              (to-element/no-color
-                                               v #:expr? (print-as-expression))))))))
-                          val-list)))])
+                     (for/list ([v (in-list val-list)])
+                       (list.flow.list
+                        (make-paragraph
+                         (list (if (formatted-result? v)
+                                   (formatted-result-content v)
+                                   (elem #:style result-color
+                                         (to-element/no-color v #:expr? (print-as-expression)))))))))])
               (if (and (caar promptless?+val-list+outputs)
                        (pair? (cdr promptless?+val-list+outputs)))
                   (list (list (list blank-line)))
                   null)
               (loop (cdr expr-paras) (cdr promptless?+val-list+outputs) #f (caar promptless?+val-list+outputs)))))])
-    (if inset?
-      (let ([p (code-inset (make-table block-color lines))])
-        (if title
-            (compound-paragraph
-             plain
-             (list
-              title
-              p))
-          p))
-      (if title
-          (compound-paragraph plain
-                              (list
-                               title
-                               (make-table block-color lines)))
-          (make-table block-color lines)))))
+    (cond
+      [inset?
+       (let ([p (code-inset (make-table block-color lines))])
+         (if title
+             (compound-paragraph plain (list title p))
+             p))]
+      [title (compound-paragraph plain (list title (make-table block-color lines)))]
+      [else (make-table block-color lines)])))
 
 ;; extracts from a datum or syntax object --- while keeping the
 ;; syntax-objectness of the original intact, instead of always
@@ -267,41 +248,40 @@
   (define (get-outputs)
     (define (get getter what)
       (define s (getter ev))
-      (if (string? s)
-        s
-        (error who "missing ~a, possibly from a sandbox without a `sandbox-~a' configured to 'string"
-               what (string-join (string-split what) "-"))))
+      (unless (string? s)
+        (error who
+               "missing ~a, possibly from a sandbox without a `sandbox-~a' configured to 'string"
+               what
+               (string-join (string-split what) "-")))
+      s)
     (list (get get-output "output") (get get-error-output "error output")))
   (define (render-value v)
-    (let-values ([(eval-print eval-print-as-expr?)
-                  (call-in-sandbox-context ev
-                    (lambda () (values (current-print) (print-as-expression))))])
-      (cond [(and (eq? eval-print (current-print))
-                  eval-print-as-expr?)
-             ;; default printer => get result as S-expression
-             (make-reader-graph (copy-value v (make-hasheq)))]
-            [else
-             ;; other printer => go through a pipe
-             ;; If it happens to be the pretty printer, tell it to retain
-             ;; convertible objects (via write-special)
-             (box (call-in-sandbox-context
-                   ev
-                   (lambda ()
-                     (define-values [in out] (make-pipe-with-specials))
-                     (parameterize ((current-output-port out)
-                                    (pretty-print-size-hook
-                                     (lambda (obj _mode _out)
-                                       (and (convertible? obj) 1)))
-                                    (pretty-print-print-hook
-                                     (lambda (obj _mode out)
-                                       (write-special (if (serializable? obj)
-                                                          (make-serialized-convertible
-                                                           (serialize obj))
-                                                          obj)
-                                                      out))))
-                       (map (current-print) v))
-                     (close-output-port out)
-                     in)))])))
+    (define-values (eval-print eval-print-as-expr?)
+      (call-in-sandbox-context ev (lambda () (values (current-print) (print-as-expression)))))
+    (cond
+      [(and (eq? eval-print (current-print)) eval-print-as-expr?)
+       ;; default printer => get result as S-expression
+       (make-reader-graph (copy-value v (make-hasheq)))]
+      [else
+       ;; other printer => go through a pipe
+       ;; If it happens to be the pretty printer, tell it to retain
+       ;; convertible objects (via write-special)
+       (box (call-in-sandbox-context
+             ev
+             (lambda ()
+               (define-values (in out) (make-pipe-with-specials))
+               (parameterize ([current-output-port out]
+                              [pretty-print-size-hook (lambda (obj _mode _out)
+                                                        (and (convertible? obj) 1))]
+                              [pretty-print-print-hook
+                               (lambda (obj _mode out)
+                                 (write-special (if (serializable? obj)
+                                                    (make-serialized-convertible (serialize obj))
+                                                    obj)
+                                                out))])
+                 (map (current-print) v))
+               (close-output-port out)
+               in)))]))
   (define (do-ev/expect s expect error-expected?)
     (define-values (val error? render+output)
       (with-handlers ([(lambda (x) (not (exn:break? x)))
@@ -399,26 +379,26 @@
            (vector-set! v2 i (loop (vector-ref v i))))
          v2)]
       [(box? v)
-       (let ([v2 (box #f)])
-         (hash-set! ht v v2)
-         (set-box! v2 (loop (unbox v)))
-         v2)]
+       (define v2 (box #f))
+       (hash-set! ht v v2)
+       (set-box! v2 (loop (unbox v)))
+       v2]
       [(hash? v)
-       (let ([ph (make-placeholder #f)])
-         (hash-set! ht v ph)
-         (let ([a (hash-map v (lambda (k v) (cons (loop k) (loop v))))])
-           (placeholder-set!
-            ph
-            (cond [(hash-eq? v) (make-hasheq-placeholder a)]
-                  [(hash-eqv? v) (make-hasheqv-placeholder a)]
-                  [else (make-hash-placeholder a)])))
-         ph)]
+       (define ph (make-placeholder #f))
+       (hash-set! ht v ph)
+       (let ([a (hash-map v (lambda (k v) (cons (loop k) (loop v))))])
+         (placeholder-set! ph
+                           (cond
+                             [(hash-eq? v) (make-hasheq-placeholder a)]
+                             [(hash-eqv? v) (make-hasheqv-placeholder a)]
+                             [else (make-hash-placeholder a)])))
+       ph]
       [else v])))
 
 (define (strip-comments stx)
   (cond
     [(syntax? stx)
-     (datum->syntax stx (strip-comments (syntax-e stx)) stx stx stx)]
+     (datum->syntax stx (strip-comments (syntax-e stx)) stx stx)]
     [(pair? stx)
      (define a (car stx))
      (define (comment? a)
@@ -449,49 +429,50 @@
                              '(file/convertible
                                racket/serialize
                                scribble/private/serialize))])
-       (let ([e (apply make-evaluator lang ips)])
-         (when pretty-print?
-           (call-in-sandbox-context e
-             (lambda ()
-               (current-print (dynamic-require 'racket/pretty 'pretty-print-handler)))))
-         e)))))
+       (define e (apply make-evaluator lang ips))
+       (when pretty-print?
+         (call-in-sandbox-context
+          e
+          (lambda () (current-print (dynamic-require 'racket/pretty 'pretty-print-handler)))))
+       e))))
 
 (define (make-base-eval-factory mod-paths
                                 #:lang [lang '(begin)]
                                 #:pretty-print? [pretty-print? #t] . ips)
   (parameterize ([sandbox-namespace-specs
-                  (cons (λ () (let ([ns
-                          ;; This namespace-creation choice needs to be consistent
-                          ;; with the sandbox (i.e., with `make-base-eval')
-                          (if gui?
-                              ((gui-dynamic-require 'make-gui-empty-namespace))
-                              (make-base-empty-namespace))])
-                     (parameterize ([current-namespace ns])
-                       (for ([mod-path (in-list mod-paths)])
-                         (dynamic-require mod-path #f))
-                       (when pretty-print? (dynamic-require 'racket/pretty #f)))
-                                ns))
+                  (cons (λ () (define ns
+                                ;; This namespace-creation choice needs to be consistent
+                                ;; with the sandbox (i.e., with `make-base-eval')
+                                (if gui?
+                                    ((gui-dynamic-require 'make-gui-empty-namespace))
+                                    (make-base-empty-namespace)))
+                              (parameterize ([current-namespace ns])
+                                (for ([mod-path (in-list mod-paths)])
+                                  (dynamic-require mod-path #f))
+                                (when pretty-print?
+                                  (dynamic-require 'racket/pretty #f)))
+                              ns)
                         (append mod-paths (if pretty-print? '(racket/pretty) '())))])
     (lambda ()
-      (let ([ev (apply make-base-eval #:lang lang #:pretty-print? #f ips)])
-        (when pretty-print?
-          (call-in-sandbox-context ev
-            (lambda ()
-              (current-print (dynamic-require 'racket/pretty 'pretty-print-handler)))))
-        ev))))
+      (define ev (apply make-base-eval #:lang lang #:pretty-print? #f ips))
+      (when pretty-print?
+        (call-in-sandbox-context
+         ev
+         (lambda () (current-print (dynamic-require 'racket/pretty 'pretty-print-handler)))))
+      ev)))
 
 (define (make-eval-factory mod-paths
                            #:lang [lang '(begin)]
                            #:pretty-print? [pretty-print? #t] . ips)
-  (let ([base-factory (apply make-base-eval-factory mod-paths #:lang lang #:pretty-print? pretty-print? ips)])
-    (lambda ()
-      (let ([ev (base-factory)])
-        (call-in-sandbox-context
-         ev
-         (lambda ()
-           (for ([mod-path (in-list mod-paths)])
-             (namespace-require mod-path))))
-        ev))))
+  (define base-factory
+    (apply make-base-eval-factory mod-paths #:lang lang #:pretty-print? pretty-print? ips))
+  (lambda ()
+    (define ev (base-factory))
+    (call-in-sandbox-context ev
+                             (lambda ()
+                               (for ([mod-path (in-list mod-paths)])
+                                 (namespace-require mod-path))))
+    ev))
 
 (define (make-log-based-eval logfile mode)
   (case mode
@@ -499,102 +480,113 @@
     ((replay) (make-eval/replay logfile))))
 
 (define (make-eval/record logfile)
-  (let* ([ev (make-base-eval)]
-         [super-cust (current-custodian)]
-         [out (parameterize ((current-custodian (get-user-custodian ev)))
-                (open-output-file logfile #:exists 'replace))])
-    (display ";; This file was created by make-log-based-eval\n" out)
-    (flush-output out)
-    (call-in-sandbox-context ev
-      (lambda ()
-        ;; Required for serialization to work.
-        (namespace-attach-module (namespace-anchor->namespace anchor) 'racket/serialize)
-        (let ([old-eval (current-eval)]
-              [init-out-p (current-output-port)]
-              [init-err-p (current-error-port)]
-              [out-p (open-output-bytes)]
-              [err-p (open-output-bytes)])
-          (current-eval
-           (lambda (x)
-             (let* ([x (syntax->datum (datum->syntax #f x))]
-                    [x (if (and (pair? x) (eq? (car x) '#%top-interaction)) (cdr x) x)]
-                    [result
-                     (with-handlers ([exn? values])
-                       (call-with-values (lambda ()
-                                           (parameterize ((current-eval old-eval)
-                                                          (current-custodian (make-custodian))
-                                                          (current-output-port out-p)
-                                                          (current-error-port err-p))
-                                             (begin0 (old-eval x)
-                                               (wait-for-threads (current-custodian) super-cust))))
-                         list))]
-                    [out-s (get-output-bytes out-p #t)]
-                    [err-s (get-output-bytes err-p #t)])
-               (let ([result* (serialize (cond [(list? result) (cons 'values result)]
-                                               [(exn? result) (list 'exn (exn-message result))]))])
-                 (pretty-write (list x result* out-s err-s) out)
-                 (flush-output out))
-               (display out-s init-out-p)
-               (display err-s init-err-p)
-               (cond [(list? result) (apply values result)]
-                     [(exn? result) (raise result)])))))))
-    ev))
+  (define ev (make-base-eval))
+  (define super-cust (current-custodian))
+  (define out
+    (parameterize ([current-custodian (get-user-custodian ev)])
+      (open-output-file logfile #:exists 'replace)))
+  (display ";; This file was created by make-log-based-eval\n" out)
+  (flush-output out)
+  (call-in-sandbox-context
+   ev
+   (lambda ()
+     ;; Required for serialization to work.
+     (namespace-attach-module (namespace-anchor->namespace anchor) 'racket/serialize)
+     (define old-eval (current-eval))
+     (define init-out-p (current-output-port))
+     (define init-err-p (current-error-port))
+     (define out-p (open-output-bytes))
+     (define err-p (open-output-bytes))
+     (current-eval
+      (lambda (x)
+        (let* ([x (syntax->datum (datum->syntax #f x))]
+               [x (if (and (pair? x) (eq? (car x) '#%top-interaction))
+                      (cdr x)
+                      x)]
+               [result (with-handlers ([exn? values])
+                         (call-with-values (lambda ()
+                                             (parameterize ([current-eval old-eval]
+                                                            [current-custodian (make-custodian)]
+                                                            [current-output-port out-p]
+                                                            [current-error-port err-p])
+                                               (begin0 (old-eval x)
+                                                 (wait-for-threads (current-custodian) super-cust))))
+                                           list))]
+               [out-s (get-output-bytes out-p #t)]
+               [err-s (get-output-bytes err-p #t)])
+          (let ([result* (serialize (cond
+                                      [(list? result) (cons 'values result)]
+                                      [(exn? result) (list 'exn (exn-message result))]))])
+            (pretty-write (list x result* out-s err-s) out)
+            (flush-output out))
+          (display out-s init-out-p)
+          (display err-s init-err-p)
+          (cond
+            [(list? result) (apply values result)]
+            [(exn? result) (raise result)]))))))
+  ev)
 
 ;; Wait for threads created by evaluation so that the evaluator catches output
 ;; they generate, etc.
 ;; FIXME: see what built-in scribble evaluators do
 (define (wait-for-threads sub-cust super-cust)
-  (let ([give-up-evt (alarm-evt (+ (current-inexact-milliseconds) 200.0))])
-    ;; find a thread to wait on
-    (define (find-thread cust)
-      (let* ([managed (custodian-managed-list cust super-cust)]
-             [thds (filter thread? managed)]
-             [custs (filter custodian? managed)])
-        (cond [(pair? thds) (car thds)]
-              [else (ormap find-thread custs)])))
-    ;; keep waiting on threads (one at a time) until time to give up
-    (define (wait-loop cust)
-      (let ([thd (find-thread cust)])
-        (when thd
-          (cond [(eq? give-up-evt (sync thd give-up-evt)) (void)]
-                [else (wait-loop cust)]))))
-    (wait-loop sub-cust)))
+  (define give-up-evt (alarm-evt (+ (current-inexact-milliseconds) 200.0)))
+  ;; find a thread to wait on
+  (define (find-thread cust)
+    (define managed (custodian-managed-list cust super-cust))
+    (define thds (filter thread? managed))
+    (define custs (filter custodian? managed))
+    (cond
+      [(pair? thds) (car thds)]
+      [else (ormap find-thread custs)]))
+  ;; keep waiting on threads (one at a time) until time to give up
+  (define (wait-loop cust)
+    (define thd (find-thread cust))
+    (when thd
+      (cond
+        [(eq? give-up-evt (sync thd give-up-evt)) (void)]
+        [else (wait-loop cust)])))
+  (wait-loop sub-cust))
 
 (define (make-eval/replay logfile)
-  (let* ([ev (make-base-eval)]
-         [evaluations (file->list logfile)])
-    (call-in-sandbox-context ev
-      (lambda ()
-        (namespace-attach-module (namespace-anchor->namespace anchor) 'racket/serialize)
-        (let ([old-eval (current-eval)]
-              [init-out-p (current-output-port)]
-              [init-err-p (current-error-port)])
-          (current-eval
-           (lambda (x)
-             (let* ([x (syntax->datum (datum->syntax #f x))]
-                    [x (if (and (pair? x) (eq? (car x) '#%top-interaction)) (cdr x) x)])
-               (unless (and (pair? evaluations) (equal? x (car (car evaluations))))
-                 ;; TODO: smarter resync
-                 ;;  - can handle *additions* by removing next set!
-                 ;;  - can handle *deletions* by searching forward (but may jump to far
-                 ;;    if terms occur more than once, eg for stateful code)
-                 ;; For now, just fail early and often.
-                 (set! evaluations null)
-                 (error 'eval "unable to replay evaluation of ~.s" x))
-               (let* ([evaluation (car evaluations)]
-                      [result (parameterize ((current-eval old-eval))
-                                (deserialize (cadr evaluation)))]
-                      [result (case (car result)
-                                ((values) (cdr result))
-                                ((exn) (make-exn (cadr result) (current-continuation-marks))))]
-                      [output (caddr evaluation)]
-                      [error-output (cadddr evaluation)])
-                 (set! evaluations (cdr evaluations))
-                 (display output init-out-p #| (current-output-port) |#)
-                 (display error-output init-err-p #| (current-error-port) |#)
-                 (cond [(exn? result) (raise result)]
-                       [(list? result) (apply values result)]))))))))
-    ev))
+  (define ev (make-base-eval))
+  (define evaluations (file->list logfile))
+  (call-in-sandbox-context
+   ev
+   (lambda ()
+     (namespace-attach-module (namespace-anchor->namespace anchor) 'racket/serialize)
+     (define old-eval (current-eval))
+     (define init-out-p (current-output-port))
+     (define init-err-p (current-error-port))
+     (current-eval
+      (lambda (x)
+        (let* ([x (syntax->datum (datum->syntax #f x))]
+               [x (if (and (pair? x) (eq? (car x) '#%top-interaction))
+                      (cdr x)
+                      x)])
+          (unless (and (pair? evaluations) (equal? x (car (car evaluations))))
+            ;; TODO: smarter resync
+            ;;  - can handle *additions* by removing next set!
+            ;;  - can handle *deletions* by searching forward (but may jump to far
+            ;;    if terms occur more than once, eg for stateful code)
+            ;; For now, just fail early and often.
+            (set! evaluations null)
+            (error 'eval "unable to replay evaluation of ~.s" x))
+          (let* ([evaluation (car evaluations)]
+                 [result (parameterize ([current-eval old-eval])
+                           (deserialize (cadr evaluation)))]
+                 [result (case (car result)
+                           [(values) (cdr result)]
+                           [(exn) (make-exn (cadr result) (current-continuation-marks))])]
+                 [output (caddr evaluation)]
+                 [error-output (cadddr evaluation)])
+            (set! evaluations (cdr evaluations))
+            (display output init-out-p #| (current-output-port) |#)
+            (display error-output init-err-p #| (current-error-port) |#)
+            (cond
+              [(exn? result) (raise result)]
+              [(list? result) (apply values result)])))))))
+  ev)
 
 (define (close-eval e)
   (kill-evaluator e)
@@ -652,29 +644,27 @@
             ;; Also preserve syntax-original?, since that seems important
             ;; to some syntax-based code (eg redex term->pict).
             (define (get-source-location e)
-              (let* ([src (build-source-location-list e)]
-                     [old-source (source-location-source src)]
-                     [new-source
-                      (cond [(path? old-source) ;; not quotable/writable
-                             ;;(path->string old-source) ;; don't leak build paths
-                             'eval]
-                            [(or (string? old-source)
-                                 (symbol? old-source))
-                             ;; Okay? Or should this be replaced also?
-                             old-source]
-                            [else #f])])
-                (update-source-location src #:source new-source)))
+              (define src (build-source-location-list e))
+              (define old-source (source-location-source src))
+              (define new-source
+                (cond
+                  ;; not quotable/writable
+                  ;;(path->string old-source) ;; don't leak build paths
+                  [(path? old-source) 'eval]
+                  ;; Okay? Or should this be replaced also?
+                  [(or (string? old-source) (symbol? old-source)) old-source]
+                  [else #f]))
+              (update-source-location src #:source new-source))
             (let loop ([e #'e])
               (cond [(syntax? e)
-                     (let ([src (get-source-location e)]
-                           [original? (syntax-original? (syntax-local-introduce e))])
-                       #`(syntax-property
-                          (datum->syntax #f
-                                         #,(loop (syntax-e e))
-                                         (quote #,src)
-                                         #,(if original? #'orig-stx #'#f))
-                          'paren-shape
-                          (quote #,(syntax-property e 'paren-shape))))]
+                     (define src (get-source-location e))
+                     (define original? (syntax-original? (syntax-local-introduce e)))
+                     #`(syntax-property (datum->syntax #f
+                                                       #,(loop (syntax-e e))
+                                                       (quote #,src)
+                                                       #,(if original? #'orig-stx #'#f))
+                                        'paren-shape
+                                        (quote #,(syntax-property e 'paren-shape)))]
                     [(pair? e)
                      #`(cons #,(loop (car e)) #,(loop (cdr e)))]
                     [(vector? e)
@@ -870,15 +860,11 @@
     [(_ racketblock e ...)
      (racketblockX+eval racketblock #:eval (make-base-eval) #:escape unsyntax e ...)]))
 
-(define-syntax racketblock+eval
-  (syntax-rules ()
-    [(_ e ...)
-     (racketblockX+eval racketblock e ...)]))
+(define-syntax-rule (racketblock+eval e ...)
+  (racketblockX+eval racketblock e ...))
 
-(define-syntax racketblock0+eval
-  (syntax-rules ()
-    [(_ e ...)
-     (racketblockX+eval racketblock0 e ...)]))
+(define-syntax-rule (racketblock0+eval e ...)
+  (racketblockX+eval racketblock0 e ...))
 
 (define-syntax racketmod+eval
   (syntax-rules ()
@@ -963,7 +949,7 @@
 
 (define (do-splice l)
   (cond [(null? l) null]
-        [(splice? (car l)) `(,@(splice-run (car l)) ,@(do-splice (cdr l)))]
+        [(splice? (car l)) (append (splice-run (car l)) (do-splice (cdr l)))]
         [else (cons (car l) (do-splice (cdr l)))]))
 
 (define as-examples

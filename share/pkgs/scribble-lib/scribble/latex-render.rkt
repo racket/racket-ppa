@@ -226,7 +226,12 @@
                          (depth . > . 1)
                          (not no-number?))
                 (printf "~a\\quad{}" (car (format-number number null)))))
-            (printf "\n\n\\~a~a~a"
+            (printf "\n\n")
+            (unless no-toc?
+              (printf "\\SNextTitlePlain{")
+              (render-content (content->string (part-title-content d)) d ri)
+              (printf "}"))
+            (printf "\\~a~a~a"
                     (case depth
                       [(0 1) (if grouper?
                                  "partNewpage\n\n\\Spart"
@@ -694,6 +699,8 @@
               (when (string? s-name)
                 (printf "\\end{~a}" s-name)))
             (unless (or (null? blockss) (null? (car blockss)))
+              (define cell-paddingss (extract-cell-paddingss cell-styless))
+              (define column-paddings (extract-column-paddings cell-paddingss))
               (define all-left-line?s
                 (if (null? cell-styless)
                     null
@@ -732,16 +739,32 @@
                               "")
                           (string-append*
                            (let ([l
-                                  (map (lambda (i cell-style left-line?)
-                                         (format "~a~a@{}"
-                                                 (if left-line? "|@{}" "")
+                                  (map (lambda (i cell-style left-line? padding)
+                                         (format "~a~a@{~a}"
+                                                 (if left-line?
+                                                     (format "|@{~a}"
+                                                             (if (and padding
+                                                                      (not (= 0 (cell-padding-property-left padding))))
+                                                                 (format "\\hspace{~aex}" (exact->inexact (cell-padding-property-left padding)))
+                                                                 ""))
+                                                     "")
                                                  (cond
                                                   [(memq 'center (style-properties cell-style)) "c"]
                                                   [(memq 'right (style-properties cell-style)) "r"]
-                                                  [else "l"])))
+                                                  [else "l"])
+                                                 (if (and padding
+                                                          (not (= 0 (cell-padding-property-right padding))))
+                                                     (format "\\hspace{~aex}"
+                                                             (exact->inexact
+                                                              (+ (if left-line?
+                                                                     0
+                                                                     (cell-padding-property-left padding))
+                                                                 (cell-padding-property-right padding))))
+                                                     "")))
                                        (car blockss)
                                        (car cell-styless)
-                                       all-left-line?s)])
+                                       all-left-line?s
+                                       column-paddings)])
                              (let ([l (if all-right-line? (append l '("|")) l)])
                                (if boxed? (cons "@{\\SBoxedLeft}" l) l))))
                           "")])
@@ -772,9 +795,11 @@
                 ;; Loop through rows:
                 (let loop ([blockss blockss]
                            [cell-styless cell-styless]
+                           [cell-paddingss cell-paddingss]
                            [prev-styles #f]) ; for 'bottom-border styles
                   (let ([flows (car blockss)]
-                        [cell-styles (car cell-styless)])
+                        [cell-styles (car cell-styless)]
+                        [cell-paddings (car cell-paddingss)])
                     (unless index? (add-clines prev-styles cell-styles))
                     (define group-size
                       (cond
@@ -787,9 +812,18 @@
                               (loop (cdr blockss) (add1 group-size))]
                              [else group-size]))]
                         [else 1]))
+                    (unless index?
+                      (define top-pad (for/fold ([pad 0]) ([padding (in-list cell-paddings)])
+                                        (max pad (cell-padding-property-top padding))))
+                      (unless (= 0 top-pad)
+                        (printf "~a\\\\[\\dimexpr-\\normalbaselineskip+~aex]\n"
+                                (make-string (sub1 (length column-paddings)) #\&)
+                                (exact->inexact top-pad))))
                     (let loop ([flows flows]
                                [cell-styles cell-styles]
                                [all-left-line?s all-left-line?s]
+                               [cell-paddings cell-paddings]
+                               [column-paddings column-paddings]
                                [need-left? #f])
                       (unless (null? flows)
                         (define (render-cell cnt)
@@ -817,7 +851,13 @@
                                              (memq 'left-border (style-properties (car cell-styles)))
                                              (memq 'border (style-properties (car cell-styles)))))
                                 (printf "\\vline "))
+                              (when (and (not (car column-paddings))
+                                         (not (= 0 (cell-padding-property-left (car cell-paddings)))))
+                                (printf "\\hspace{~aex}" (cell-padding-property-left (car cell-paddings))))
                               (render-cell cnt)
+                              (when (and (not (car column-paddings))
+                                         (not (= 0 (cell-padding-property-right (car cell-paddings)))))
+                                (printf "\\hspace{~aex}" (cell-padding-property-right (car cell-paddings))))
                               (define right-line? (or (memq 'right-border (style-properties (list-ref cell-styles (sub1 cnt))))
                                                       (memq 'border (style-properties (list-ref cell-styles (sub1 cnt))))))
                               (when (and right-line? (null? (list-tail flows cnt)) (not all-right-line?))
@@ -829,6 +869,8 @@
                         (unless (null? (cdr flows)) (loop (cdr flows)
                                                           (cdr cell-styles)
                                                           (cdr all-left-line?s)
+                                                          (cdr cell-paddings)
+                                                          (cdr column-paddings)
                                                           right-line?))))
                     (define rest-blockss (list-tail blockss group-size))
                     (unless (or index?
@@ -838,15 +880,23 @@
                                                 (memq 'border (style-properties cell-style)))))))
                       (let ([row-skip (for/or ([cell-style (in-list cell-styles)])
                                         (for/or ([prop (style-properties cell-style)])
-                                          (and (table-row-skip? prop) prop)))])
-                        (printf " \\\\~a\n" (if row-skip
-                                                (format "[~a]" (table-row-skip-amount row-skip))
+                                          (and (table-row-skip? prop) prop)))]
+                            [bottom-pad (for/fold ([pad 0]) ([padding (in-list cell-paddings)])
+                                          (max pad (cell-padding-property-bottom padding)))])
+                        (printf " \\\\~a\n" (if (or row-skip
+                                                    (not (= bottom-pad 0)))
+                                                (format "[~a]" (if row-skip
+                                                                   (table-row-skip-amount row-skip)
+                                                                   (format "~aex" (exact->inexact bottom-pad))))
                                                 ""))))
                     (cond
                      [(null? rest-blockss)
                       (unless index? (add-clines cell-styles #f))]
                      [else
-                      (loop rest-blockss (list-tail cell-styless group-size) cell-styles)])))
+                      (loop rest-blockss
+                            (list-tail cell-styless group-size)
+                            (list-tail cell-paddingss group-size)
+                            cell-styles)])))
                 (unless inline?
                   (printf "\\end{~a}~a"
                           tableform
@@ -985,8 +1035,8 @@
           (cond
             [command? (printf "}")]
             [multicommand? (void)]
-            [else (printf "\\end{~a}" kind)])
-          null)))
+            [else (printf "\\end{~a}" kind)]))
+        null))
 
     (define/override (render-nested-flow t part ri starting-item?)
       (do-render-nested-flow t part ri #f #f #f))
@@ -1057,7 +1107,7 @@
           (let ([len (string-length s)])
             (let loop ([i 0])
               (unless (= i len)
-                (display
+                (define to-display
                  (let char-loop ([c (string-ref s i)])
                    (case c
                      [(#\\) (if (rendering-tt)
@@ -1075,7 +1125,7 @@
                      [(#\') "{\\textquotesingle}"]
                      [(#\? #\! #\. #\:)
                       (if (rendering-tt) (format "{\\hbox{\\texttt{~a}}}" c) c)]
-                     [(#\~) "$\\sim$"]
+                     [(#\~) "{\\textasciitilde}"]
                      [(#\{ #\}) (if (rendering-tt)
                                     (format "{\\char`\\~a}" c)
                                     (format "\\~a" c))]
@@ -1092,275 +1142,44 @@
                       (if ((char->integer c) . > . 127)
                           ;; first, try user-defined conversions
                           (or (convs c)
-                              ;; latex-prefix.rkt enables utf8 input, but this does not work for
-                              ;; all the characters below (e.g. ∞). Some parts of the table
-                              ;; below are therefore necessary, but some parts probably are not.
-                              ;; Which parts are necessary may depend on the latex version,
-                              ;; though, so we keep this table around to avoid regressions.
-                              (case c
-                                [(#\╔ #\═ #\╗ #\║ #\╚ #\╝ #\╦ #\╠ #\╣ #\╬ #\╩) (box-character c)]
-                                [(#\┌ #\─ #\┐ #\│ #\└ #\┘ #\┬ #\├ #\┤ #\┼ #\┴) (box-character c)]
-                                [(#\┏ #\━ #\┓ #\┃ #\┗ #\┛ #\┳ #\┣ #\┫ #\╋ #\┻) (box-character c 2)]
-                                [(#\u2011) "\\mbox{-}"] ; non-breaking hyphen
-                                [(#\uB0) "$^{\\circ}$"] ; degree
-                                [(#\uB2) "$^2$"]
-                                [(#\u039A) "K"] ; kappa
-                                [(#\u0391) "A"] ; alpha
-                                [(#\u039F) "O"] ; omicron
-                                [(#\u03A3) "$\\Sigma$"]
-                                [(#\u03BA) "$\\kappa$"]
-                                [(#\u03B1) "$\\alpha$"]
-                                [(#\u03B2) "$\\beta$"]
-                                [(#\u03B3) "$\\gamma$"]
-                                [(#\u03BF) "o"] ; omicron
-                                [(#\u03C3) "$\\sigma$"]
-                                [(#\u03C2) "$\\varsigma$"]
-                                [(#\u03BB) "$\\lambda$"]
-                                [(#\u039B) "$\\Lambda$"]
-                                [(#\u03BC) "$\\mu$"]
-                                [(#\u03C0) "$\\pi$"]
-                                [(#\₀) "$_0$"]
-                                [(#\₁) "$_1$"]
-                                [(#\₂) "$_2$"]
-                                [(#\₃) "$_3$"]
-                                [(#\₄) "$_4$"]
-                                [(#\₅) "$_5$"]
-                                [(#\₆) "$_6$"]
-                                [(#\₇) "$_7$"]
-                                [(#\₈) "$_8$"]
-                                [(#\₉) "$_9$"]
-                                [(#\‘) "{`}"]
-                                [(#\’) "{'}"]
-                                [(#\“) "{``}"]
-                                [(#\”) "{''}"]
-                                [(#\u2013) "{--}"]
-                                [(#\u2014) "{---}"]
-                                [(#\⟨ #\〈) "$\\langle$"] ; [MATHEMATICAL] LEFT ANGLE BRACKET
-                                [(#\⟩ #\〉) "$\\rangle$"] ; [MATHEMATICAL] RIGHT ANGLE BRACKET
-                                [(#\∞) "$\\infty$"]
-                                [(#\⇓) "$\\Downarrow$"]
-                                [(#\↖) "$\\nwarrow$"]
-                                [(#\↓) "$\\downarrow$"]
-                                [(#\⇒) "$\\Rightarrow$"]
-                                [(#\→) "$\\rightarrow$"]
-                                [(#\⟶) "$\\longrightarrow$"]
-                                [(#\↘) "$\\searrow$"]
-                                [(#\↙) "$\\swarrow$"]
-                                [(#\←) "$\\leftarrow$"]
-                                [(#\↑) "$\\uparrow$"]
-                                [(#\⇐) "$\\Leftarrow$"]
-                                [(#\−) "$\\longrightarrow$"]
-                                [(#\⇑) "$\\Uparrow$"]
-                                [(#\⇔) "$\\Leftrightarrow$"]
-                                [(#\↕) "$\\updownarrow$"]
-                                [(#\↔) "$\\leftrightarrow$"]
-                                [(#\↗) "$\\nearrow$"]
-                                [(#\↝) "$\\leadsto$"]
-                                [(#\↱) "$\\Lsh$"]
-                                [(#\↰) "$\\Rsh$"]
-                                [(#\⇀) "$\\rightharpoonup$"]
-                                [(#\↼) "$\\leftharpoonup$"]
-                                [(#\⇁) "$\\rightharpoondown$"]
-                                [(#\↽) "$\\leftharpoondown$"]
-                                [(#\⇌) "$\\rightleftharpoons$"]
-                                [(#\⇕) "$\\Updownarrow$"]
-                                [(#\א) "$\\aleph$"]
-                                [(#\′) "$\\prime$"]
-                                [(#\∅) "$\\emptyset$"]
-                                [(#\∇) "$\\nabla$"]
-                                [(#\♦) "$\\diamondsuit$"]
-                                [(#\♠) "$\\spadesuit$"]
-                                [(#\♣) "$\\clubsuit$"]
-                                [(#\♥) "$\\heartsuit$"]
-                                [(#\♯) "$\\sharp$"]
-                                [(#\♭) "$\\flat$"]
-                                [(#\♮) "$\\natural$"]
-                                [(#\√) "$\\surd$"]
-                                [(#\∆) "$\\Delta$"] ; no better mapping for than \Delta for "increment"
-                                [(#\u2211) "$\\sum$"] ; better than \Sigma, right?
-                                [(#\u220F) "$\\prod$"] ; better than \Pi, right?
-                                [(#\u2210) "$\\coprod$"]
-                                [(#\u222B) "$\\int$"]
-                                [(#\u222E) "$\\oint$"]
-                                [(#\¬) "$\\neg$"]
-                                [(#\△) "$\\triangle$"]
-                                [(#\∀) "$\\forall$"]
-                                [(#\∃) "$\\exists$"]
-                                [(#\∘) "$\\circ$"]
-                                [(#\∂) "$\\partial$"]
-                                [(#\θ) "$\\theta$"]
-                                [(#\ϑ) "$\\vartheta$"]
-                                [(#\τ) "$\\tau$"]
-                                [(#\υ) "$\\upsilon$"]
-                                [(#\φ) "$\\varphi$"]
-                                [(#\ϕ) "$\\phi$"]
-                                [(#\δ) "$\\delta$"]
-                                [(#\ρ) "$\\rho$"]
-                                [(#\ϱ) "$\\varrho$"]
-                                [(#\ϵ) "$\\epsilon$"]
-                                [(#\ε) "$\\varepsilon$"]
-                                [(#\ϖ) "$\\varpi$"]
-                                [(#\χ) "$\\chi$"]
-                                [(#\ψ) "$\\psi$"]
-                                [(#\ζ) "$\\zeta$"]
-                                [(#\ν) "$\\nu$"]
-                                [(#\ω) "$\\omega$"]
-                                [(#\η) "$\\eta$"]
-                                [(#\ι) "$\\iota$"]
-                                [(#\ξ) "$\\xi$"]
-                                [(#\Γ) "$\\Gamma$"]
-                                [(#\Ψ) "$\\Psi$"]
-                                [(#\Δ) "$\\Delta$"]
-                                [(#\Ξ) "$\\Xi$"]
-                                [(#\Υ) "$\\Upsilon$"]
-                                [(#\Ω) "$\\Omega$"]
-                                [(#\Θ) "$\\Theta$"]
-                                [(#\Π) "$\\Pi$"]
-                                [(#\Φ) "$\\Phi$"]
-                                [(#\±) "$\\pm$"]
-                                [(#\∩) "$\\cap$"]
-                                [(#\◇) "$\\diamond$"]
-                                [(#\⊕) "$\\oplus$"]
-                                [(#\∓) "$\\mp$"]
-                                [(#\∪) "$\\cup$"]
-                                [(#\△) "$\\bigtriangleup$"]
-                                [(#\⊖) "$\\ominus$"]
-                                [(#\×) "$\\times$"]
-                                [(#\⊎) "$\\uplus$"]
-                                [(#\▽) "$\\bigtriangledown$"]
-                                [(#\⊗) "$\\otimes$"]
-                                [(#\÷) "$\\div$"]
-                                [(#\⊓) "$\\sqcap$"]
-                                [(#\▹) "$\\triangleleft$"]
-                                [(#\⊘) "$\\oslash$"]
-                                [(#\∗) "$\\ast$"]
-                                [(#\⊔) "$\\sqcup$"]
-                                [(#\∨) "$\\vee$"]
-                                [(#\∧) "$\\wedge$"]
-                                [(#\◃) "$\\triangleright$"]
-                                [(#\◊) "$\\Diamond$"]
-                                [(#\⊙) "$\\odot$"]
-                                [(#\★) "$\\star$"]
-                                [(#\†) "$\\dagger$"]
-                                [(#\•) "$\\bullet$"]
-                                [(#\‡) "$\\ddagger$"]
-                                [(#\≀) "$\\wr$"]
-                                [(#\⨿) "$\\amalg$"]
-                                [(#\≤) "$\\leq$"]
-                                [(#\≥) "$\\geq$"]
-                                [(#\≡) "$\\equiv$"]
-                                [(#\⊨) "$\\models$"]
-                                [(#\≺) "$\\prec$"]
-                                [(#\≻) "$\\succ$"]
-                                [(#\∼) "$\\sim$"]
-                                [(#\⊥) "$\\perp$"]
-                                [(#\≼) "$\\preceq$"]
-                                [(#\≽) "$\\succeq$"]
-                                [(#\≃) "$\\simeq$"]
-                                [(#\≪) "$\\ll$"]
-                                [(#\≫) "$\\gg$"]
-                                [(#\≍) "$\\asymp$"]
-                                [(#\∥) "$\\parallel$"]
-                                [(#\⊂) "$\\subset$"]
-                                [(#\⊃) "$\\supset$"]
-                                [(#\≈) "$\\approx$"]
-                                [(#\⋈) "$\\bowtie$"]
-                                [(#\⊆) "$\\subseteq$"]
-                                [(#\⊇) "$\\supseteq$"]
-                                [(#\≌) "$\\cong$"] ;; this is wrong but left in for backwards compatibility
-                                [(#\≅) "$\\cong$"]
-                                [(#\⊏) "$\\sqsubset$"]
-                                [(#\⊐) "$\\sqsupset$"]
-                                [(#\≠) "$\\neq$"]
-                                [(#\⌣) "$\\smile$"]
-                                [(#\⊑) "$\\sqsubseteq$"]
-                                [(#\⊒) "$\\sqsupseteq$"]
-                                [(#\≐) "$\\doteq$"]
-                                [(#\⌢) "$\\frown$"]
-                                [(#\∈) "$\\in$"]
-                                [(#\∉) "$\\not\\in$"]
-                                [(#\∋) "$\\ni$"]
-                                [(#\∝) "$\\propto$"]
-                                [(#\⊢) "$\\vdash$"]
-                                [(#\⊣) "$\\dashv$"]    
-                                [(#\☠) "$\\skull$"]
-                                [(#\☺) "$\\smiley$"]
-                                [(#\☻) "$\\blacksmiley$"]
-                                [(#\☹) "$\\frownie$"]
-                                [(#\ø) "{\\o}"]
-                                [(#\Ø) "{\\O}"]
-                                [(#\ł) "{\\l}"]
-                                [(#\Ł) "{\\L}"]
-                                [(#\uA7) "{\\S}"]
-                                [(#\⟦ #\〚) "$[\\![$"]
-                                [(#\⟧ #\〛) "$]\\!]$"]
-                                [(#\↦) "$\\mapsto$"]
-                                [(#\⊤) "$\\top$"]
-                                [(#\¥) "{\\textyen}"]
-                                [(#\™) "{\\texttrademark}"]
-                                [(#\®) "{\\textregistered}"]
-                                [(#\©) "{\\textcopyright}"]
-                                [(#\u2070) "$^0$"]
-                                [(#\u00b9) "$^1$"]
-                                [(#\u00b2) "$^2$"]
-                                [(#\u00b3) "$^3$"]
-                                [(#\u2074) "$^4$"]
-                                [(#\u2075) "$^5$"]
-                                [(#\u2076) "$^6$"]
-                                [(#\u2077) "$^7$"]
-                                [(#\u2078) "$^8$"]
-                                [(#\u2079) "$^9$"]
-                                [(#\u207a) "$^+$"]
-                                [(#\u207b) "$^-$"]
-                                [(#\⋖) "$\\precdot$"]
-                                [(#\⋗) "$\\succdot$"]
-                                [(#\⋮) "\\vdots"]
-                                [(#\⋱) "$\\ddots$"]
-                                [(#\⋯) "$\\cdots$"]
-                                [(#\⋯) "\\hdots"]
-                                [(#\⊸) "$\\multimap$"]
-                                [(#\⟜) "$\\multimapinv$"]
-                                [(#\⅋) "$\\invamp$"]
-                                [(#\□) "$\\square$"]
+                              (convert-to-latex c)
+                              (convert-bb-bold c)
+                              (cond
+                                [(char<=? #\uAC00 c #\uD7AF) ; Korean Hangul
+                                 ;; This likely will not work right if it shows up in a section
+                                 ;; title as a table-of-contents entry. Originally, this approach
+                                 ;; was paired with the `tocstyle` package, which may have made it
+                                 ;; work, but that package is now deprecated and does not seem to
+                                 ;; solve the problem.
+                                 (format "\\begin{CJK}{UTF8}{mj}~a\\end{CJK}" c)]
                                 [else
+                                 ;; Detect characters that can be formed with combining characters
+                                 ;; and translate them to Latex combinations:
+                                 (define s (string-normalize-nfd (string c)))
+                                 (define len (string-length s))
                                  (cond
-                                  [(char<=? #\uAC00 c #\uD7AF) ; Korean Hangul
-                                   ;; This likely will not work right if it shows up in a section
-                                   ;; title as a table-of-contents entry. Originally, this approach
-                                   ;; was paired with the `tocstyle` package, which may have made it
-                                   ;; work, but that package is now deprecated and does not seem to
-                                   ;; solve the problem.
-                                   (format "\\begin{CJK}{UTF8}{mj}~a\\end{CJK}" c)]
-                                  [else
-                                   ;; Detect characters that can be formed with combining characters
-                                   ;; and translate them to Latex combinations:
-                                   (define s (string-normalize-nfd (string c)))
-                                   (define len (string-length s))
-                                   (cond
-                                    [(len . > . 1)
-                                     (define combiner (case (string-ref s (sub1 len))
-                                                        [(#\u300) "\\`{~a}"]
-                                                        [(#\u301) "\\'{~a}"]
-                                                        [(#\u302) "\\^{~a}"]
-                                                        [(#\u303) "\\~~{~a}"]
-                                                        [(#\u304) "\\={~a}"]
-                                                        [(#\u306) "\\u{~a}"]
-                                                        [(#\u307) "\\.{~a}"]
-                                                        [(#\u308) "\\\"{~a}"]
-                                                        [(#\u30a) "\\r{~a}"]
-                                                        [(#\u30b) "\\H{~a}"]
-                                                        [(#\u30c) "\\v{~a}"]
-                                                        [(#\u327) "\\c{~a}"]
-                                                        [(#\u328) "\\k{~a}"]
-                                                        [else #f]))
-                                     (define base (string-normalize-nfc (substring s 0 (sub1 len))))
-                                     (if (and combiner
-                                              (= 1 (string-length base)))
-                                         (format combiner (char-loop (string-ref base 0)))
-                                         c)]
-                                    [else c])])]))
+                                   [(len . > . 1)
+                                    (define combiner (latex-combiner (string-ref s (sub1 len))))
+                                    (define base (string-normalize-nfc (substring s 0 (sub1 len))))
+                                    (if (and combiner
+                                             (= 1 (string-length base)))
+                                        (format combiner (char-loop (string-ref base 0)))
+                                        c)]
+                                   [else c])]))
                           c)])))
-                (loop (add1 i))))))]))
+                (cond
+                  [(and (< (+ i 1) len)
+                        (latex-combiner (string-ref s (+ i 1))))
+                   =>
+                   ;; sometimes, the call to `string-normalize-nfc` still leaves
+                   ;; something we can combine via `latex-combiner` in the string, uncombined
+                   ;; this check here detects and uses it
+                   (λ (fmt)
+                     (display (format fmt to-display))
+                     (loop (+ i 2)))]
+                  [else
+                   (display to-display)
+                   (loop (add1 i))])))))]))
     
     
     (define/private (box-character c [line-thickness 1])
@@ -1507,6 +1326,300 @@
                    @mid-horizontal
                    @mid-vertical
                    @footer}]))
+
+    (define/private (latex-combiner c)
+      (case c
+        [(#\u300) "\\`{~a}"]
+        [(#\u301) "\\'{~a}"]
+        [(#\u302) "\\^{~a}"]
+        [(#\u303) "\\~~{~a}"]
+        [(#\u304) "\\={~a}"]
+        [(#\u306) "\\u{~a}"]
+        [(#\u307) "\\.{~a}"]
+        [(#\u308) "\\\"{~a}"]
+        [(#\u30a) "\\r{~a}"]
+        [(#\u30b) "\\H{~a}"]
+        [(#\u30c) "\\v{~a}"]
+        [(#\u327) "\\c{~a}"]
+        [(#\u328) "\\k{~a}"]
+        [else #f]))
+
+    (define/private (convert-bb-bold c)
+      (define (mathbb c) (format "$\\mathbb{~a}$" c))
+      (cond
+        [(and (char<=? #\𝔸 c #\𝕐)
+              ;; the blackboard bold C, H, N, P, Q, R, and Z
+              ;; are not in this range so handle them specially, below
+              (not (member c '(#\U0001D53A
+                               #\U0001D53F
+                               #\U0001D545
+                               #\U0001D547
+                               #\U0001D548
+                               #\U0001D549))))
+         (mathbb (integer->char
+                  (+ (- (char->integer c)
+                        (char->integer #\𝔸))
+                     (char->integer #\A))))]
+        [else
+         (case c
+           [(#\U2102) (mathbb "C")]
+           [(#\U1D554) (mathbb "C")]
+           [(#\U210D) (mathbb "H")]
+           [(#\U2115) (mathbb "N")]
+           [(#\U2119) (mathbb "P")]
+           [(#\U211A) (mathbb "Q")]
+           [(#\U211D) (mathbb "R")]
+           [(#\U2124) (mathbb "Z")]
+           [else #f])]))           
+    
+    (define/private (convert-to-latex c)
+      ;; latex-prefix.rkt enables utf8 input, but this does not work for
+      ;; all the characters below (e.g. ∞). Some parts of the table
+      ;; below are therefore necessary, but some parts probably are not.
+      ;; Which parts are necessary may depend on the latex version,
+      ;; though, so we keep this table around to avoid regressions.
+      (case c
+        [(#\╔ #\═ #\╗ #\║ #\╚ #\╝ #\╦ #\╠ #\╣ #\╬ #\╩) (box-character c)]
+        [(#\┌ #\─ #\┐ #\│ #\└ #\┘ #\┬ #\├ #\┤ #\┼ #\┴) (box-character c)]
+        [(#\┏ #\━ #\┓ #\┃ #\┗ #\┛ #\┳ #\┣ #\┫ #\╋ #\┻) (box-character c 2)]
+        [(#\u2011) "\\mbox{-}"] ; non-breaking hyphen
+        [(#\uB0) "$^{\\circ}$"] ; degree
+        [(#\uB2) "$^2$"]
+        [(#\u039A) "K"] ; kappa
+        [(#\u0391) "A"] ; alpha
+        [(#\u039F) "O"] ; omicron
+        [(#\u03A3) "$\\Sigma$"]
+        [(#\u03BA) "$\\kappa$"]
+        [(#\u03B1) "$\\alpha$"]
+        [(#\u03B2) "$\\beta$"]
+        [(#\u03B3) "$\\gamma$"]
+        [(#\u03BF) "o"] ; omicron
+        [(#\u03C3) "$\\sigma$"]
+        [(#\u03C2) "$\\varsigma$"]
+        [(#\u03BB) "$\\lambda$"]
+        [(#\u039B) "$\\Lambda$"]
+        [(#\u03BC) "$\\mu$"]
+        [(#\u03C0) "$\\pi$"]
+        [(#\₀) "$_0$"]
+        [(#\₁) "$_1$"]
+        [(#\₂) "$_2$"]
+        [(#\₃) "$_3$"]
+        [(#\₄) "$_4$"]
+        [(#\₅) "$_5$"]
+        [(#\₆) "$_6$"]
+        [(#\₇) "$_7$"]
+        [(#\₈) "$_8$"]
+        [(#\₉) "$_9$"]
+        [(#\‘) "{`}"]
+        [(#\’) "{'}"]
+        [(#\“) "{``}"]
+        [(#\”) "{''}"]
+        [(#\u2013) "{--}"]
+        [(#\u2014) "{---}"]
+        [(#\⟨ #\〈) "$\\langle$"] ; [MATHEMATICAL] LEFT ANGLE BRACKET
+        [(#\⟩ #\〉) "$\\rangle$"] ; [MATHEMATICAL] RIGHT ANGLE BRACKET
+        [(#\∞) "$\\infty$"]
+        [(#\⇓) "$\\Downarrow$"]
+        [(#\↖) "$\\nwarrow$"]
+        [(#\↓) "$\\downarrow$"]
+        [(#\⇒) "$\\Rightarrow$"]
+        [(#\→) "$\\rightarrow$"]
+        [(#\⟶) "$\\longrightarrow$"]
+        [(#\↘) "$\\searrow$"]
+        [(#\↙) "$\\swarrow$"]
+        [(#\←) "$\\leftarrow$"]
+        [(#\↑) "$\\uparrow$"]
+        [(#\⇐) "$\\Leftarrow$"]
+        [(#\−) "$\\longrightarrow$"]
+        [(#\⇑) "$\\Uparrow$"]
+        [(#\⇔) "$\\Leftrightarrow$"]
+        [(#\↕) "$\\updownarrow$"]
+        [(#\↔) "$\\leftrightarrow$"]
+        [(#\↗) "$\\nearrow$"]
+        [(#\↝) "$\\leadsto$"]
+        [(#\↱) "$\\Lsh$"]
+        [(#\↰) "$\\Rsh$"]
+        [(#\⇀) "$\\rightharpoonup$"]
+        [(#\↼) "$\\leftharpoonup$"]
+        [(#\⇁) "$\\rightharpoondown$"]
+        [(#\↽) "$\\leftharpoondown$"]
+        [(#\⇌) "$\\rightleftharpoons$"]
+        [(#\⇕) "$\\Updownarrow$"]
+        [(#\א) "$\\aleph$"]
+        [(#\′) "$\\prime$"]
+        [(#\∅) "$\\emptyset$"]
+        [(#\∇) "$\\nabla$"]
+        [(#\♦) "$\\diamondsuit$"]
+        [(#\♠) "$\\spadesuit$"]
+        [(#\♣) "$\\clubsuit$"]
+        [(#\♥) "$\\heartsuit$"]
+        [(#\♯) "$\\sharp$"]
+        [(#\♭) "$\\flat$"]
+        [(#\♮) "$\\natural$"]
+        [(#\√) "$\\surd$"]
+        [(#\∆) "$\\Delta$"] ; no better mapping for than \Delta for "increment"
+        [(#\u2211) "$\\sum$"] ; better than \Sigma, right?
+        [(#\u220F) "$\\prod$"] ; better than \Pi, right?
+        [(#\u2210) "$\\coprod$"]
+        [(#\u222B) "$\\int$"]
+        [(#\u222E) "$\\oint$"]
+        [(#\¬) "$\\neg$"]
+        [(#\△) "$\\triangle$"]
+        [(#\∀) "$\\forall$"]
+        [(#\∃) "$\\exists$"]
+        [(#\∘) "$\\circ$"]
+        [(#\∂) "$\\partial$"]
+        [(#\θ) "$\\theta$"]
+        [(#\ϑ) "$\\vartheta$"]
+        [(#\τ) "$\\tau$"]
+        [(#\υ) "$\\upsilon$"]
+        [(#\φ) "$\\varphi$"]
+        [(#\ϕ) "$\\phi$"]
+        [(#\δ) "$\\delta$"]
+        [(#\ρ) "$\\rho$"]
+        [(#\ϱ) "$\\varrho$"]
+        [(#\ϵ) "$\\epsilon$"]
+        [(#\ε) "$\\varepsilon$"]
+        [(#\ϖ) "$\\varpi$"]
+        [(#\χ) "$\\chi$"]
+        [(#\ψ) "$\\psi$"]
+        [(#\ζ) "$\\zeta$"]
+        [(#\ν) "$\\nu$"]
+        [(#\ω) "$\\omega$"]
+        [(#\η) "$\\eta$"]
+        [(#\ι) "$\\iota$"]
+        [(#\ξ) "$\\xi$"]
+        [(#\Γ) "$\\Gamma$"]
+        [(#\Ψ) "$\\Psi$"]
+        [(#\Δ) "$\\Delta$"]
+        [(#\Ξ) "$\\Xi$"]
+        [(#\Υ) "$\\Upsilon$"]
+        [(#\Ω) "$\\Omega$"]
+        [(#\Θ) "$\\Theta$"]
+        [(#\Π) "$\\Pi$"]
+        [(#\Φ) "$\\Phi$"]
+        [(#\±) "$\\pm$"]
+        [(#\∩) "$\\cap$"]
+        [(#\◇) "$\\diamond$"]
+        [(#\⊕) "$\\oplus$"]
+        [(#\∓) "$\\mp$"]
+        [(#\∪) "$\\cup$"]
+        [(#\△) "$\\bigtriangleup$"]
+        [(#\⊖) "$\\ominus$"]
+        [(#\×) "$\\times$"]
+        [(#\⊎) "$\\uplus$"]
+        [(#\▽) "$\\bigtriangledown$"]
+        [(#\⊗) "$\\otimes$"]
+        [(#\÷) "$\\div$"]
+        [(#\⊓) "$\\sqcap$"]
+        [(#\▹) "$\\triangleleft$"]
+        [(#\⊘) "$\\oslash$"]
+        [(#\∗) "$\\ast$"]
+        [(#\⊔) "$\\sqcup$"]
+        [(#\∨) "$\\vee$"]
+        [(#\∧) "$\\wedge$"]
+        [(#\◃) "$\\triangleright$"]
+        [(#\◊) "$\\Diamond$"]
+        [(#\⊙) "$\\odot$"]
+        [(#\★) "$\\star$"]
+        [(#\†) "$\\dagger$"]
+        [(#\•) "$\\bullet$"]
+        [(#\‡) "$\\ddagger$"]
+        [(#\≀) "$\\wr$"]
+        [(#\⨿) "$\\amalg$"]
+        [(#\≤) "$\\leq$"]
+        [(#\≥) "$\\geq$"]
+        [(#\≡) "$\\equiv$"]
+        [(#\⊨) "$\\models$"]
+        [(#\≺) "$\\prec$"]
+        [(#\≻) "$\\succ$"]
+        [(#\∼) "$\\sim$"]
+        [(#\⊥) "$\\perp$"]
+        [(#\≼) "$\\preceq$"]
+        [(#\≽) "$\\succeq$"]
+        [(#\≃) "$\\simeq$"]
+        [(#\≪) "$\\ll$"]
+        [(#\≫) "$\\gg$"]
+        [(#\≍) "$\\asymp$"]
+        [(#\∥) "$\\parallel$"]
+        [(#\⊂) "$\\subset$"]
+        [(#\⊃) "$\\supset$"]
+        [(#\≈) "$\\approx$"]
+        [(#\⋈) "$\\bowtie$"]
+        [(#\⊆) "$\\subseteq$"]
+        [(#\⊇) "$\\supseteq$"]
+        [(#\⊈) "$\\nsubseteq$"]
+        [(#\⊊) "$\\subsetneq$"]
+        [(#\≌) "$\\cong$"] ;; this is wrong but left in for backwards compatibility
+        [(#\≅) "$\\cong$"]
+        [(#\⊏) "$\\sqsubset$"]
+        [(#\⊐) "$\\sqsupset$"]
+        [(#\≠) "$\\neq$"]
+        [(#\⌣) "$\\smile$"]
+        [(#\⊑) "$\\sqsubseteq$"]
+        [(#\⊒) "$\\sqsupseteq$"]
+        [(#\≐) "$\\doteq$"]
+        [(#\⌢) "$\\frown$"]
+        [(#\∈) "$\\in$"]
+        [(#\∉) "$\\not\\in$"]
+        [(#\∋) "$\\ni$"]
+        [(#\∝) "$\\propto$"]
+        [(#\⊢) "$\\vdash$"]
+        [(#\⊣) "$\\dashv$"]
+        [(#\☠) "$\\skull$"]
+        [(#\☺) "$\\smiley$"]
+        [(#\☻) "$\\blacksmiley$"]
+        [(#\☹) "$\\frownie$"]
+        [(#\ø) "{\\o}"]
+        [(#\Ø) "{\\O}"]
+        [(#\ł) "{\\l}"]
+        [(#\Ł) "{\\L}"]
+        [(#\uA7) "{\\S}"]
+        [(#\⟦ #\〚) "$[\\![$"]
+        [(#\⟧ #\〛) "$]\\!]$"]
+        [(#\↦) "$\\mapsto$"]
+        [(#\⊤) "$\\top$"]
+        [(#\¥) "{\\textyen}"]
+        [(#\™) "{\\texttrademark}"]
+        [(#\®) "{\\textregistered}"]
+        [(#\©) "{\\textcopyright}"]
+        [(#\u2070) "$^0$"]
+        [(#\u00b9) "$^1$"]
+        [(#\u00b2) "$^2$"]
+        [(#\u00b3) "$^3$"]
+        [(#\u2074) "$^4$"]
+        [(#\u2075) "$^5$"]
+        [(#\u2076) "$^6$"]
+        [(#\u2077) "$^7$"]
+        [(#\u2078) "$^8$"]
+        [(#\u2079) "$^9$"]
+        [(#\u207a) "$^+$"]
+        [(#\u207b) "$^-$"]
+        [(#\⋖) "$\\precdot$"]
+        [(#\⋗) "$\\succdot$"]
+        [(#\⋮) "\\vdots{}"]
+        [(#\⋱) "$\\ddots$"]
+        [(#\⋯) "$\\cdots$"]
+        [(#\⊸) "$\\multimap$"]
+        [(#\⟜) "$\\multimapinv$"]
+        [(#\⅋) "$\\invamp$"]
+        [(#\□) "$\\square$"]
+        [(#\ℋ) "${\\mathcal H}$"]
+        [(#\ℌ) "$\\mathfrak{H}$"]
+        [(#\ℑ) "$\\mathfrak{I}$"]
+        [(#\ℜ) "$\\mathfrak{R}$"]
+        [(#\ℨ) "$\\mathfrak{Z}$"]
+        [(#\ℭ) "$\\mathfrak{C}$"]
+        [(#\«) "\\guillemotleft{}"]  ; the correct spelling is guillemet,
+        [(#\») "\\guillemotright{}"] ; but guillemot works in older LaTeX versions
+        [(#\∠) "$\\angle$"]
+        [(#\∬) "$\\iint$"]
+        [(#\∭) "$\\iiint$"]
+        [(#\∯) "$\\oiint$"]
+        [(#\∰) "$\\oiiint$"]
+        [(#\ℜ) "$\\Re$"]
+        [(#\ℑ) "$\\Im$"]
+        [else #f]))
 
     ;; ----------------------------------------
 

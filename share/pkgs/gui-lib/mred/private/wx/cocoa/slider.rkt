@@ -44,7 +44,9 @@
   (inherit get-cocoa register-as-child
            init-font)
 
-  (define vert? (memq 'vertical style))
+  (define vert? (or (memq 'vertical style)
+                    (memq 'upward style)))
+  (define up? (memq 'upward style))
 
   (define slider-lo lo)
   (define slider-hi hi)
@@ -63,6 +65,8 @@
                                              (make-NSPoint 0 0)
                                              (make-NSSize (if vert? 24 32)
                                                           (if vert? 64 24))))
+      (when (and vert? (version-10.12-or-later?))
+        (tellv cocoa setVertical: #:type _BOOL #t))
       (tellv cocoa setContinuous: #:type _BOOL #t)
       ;; (tellv cocoa sizeToFit)
       cocoa))
@@ -153,7 +157,9 @@
 
   (define/private (flip v)
     (if vert?
-        (+ slider-lo (- slider-hi v))
+        (if up?
+            v
+            (+ slider-lo (- slider-hi v)))
         v))
 
   (define/public (set-value v)

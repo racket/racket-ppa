@@ -1,19 +1,27 @@
 #lang racket/base
 
-(require syntax/parse
+(require (for-syntax racket/base
+                     racket/syntax
+                     syntax/parse)
+         (for-template racket/base
+                       racket/list
+                       racket/unsafe/ops)
          racket/match
-         (for-template racket/base racket/unsafe/ops racket/list)
-         (for-syntax racket/base syntax/parse racket/syntax)
-         "../utils/utils.rkt"
+         syntax/parse
+         (only-in "../utils/tc-utils.rkt" current-type-enforcement-mode)
+         (only-in "../types/match-expanders.rkt" Listof:)
+         "../optimizer/logging.rkt"
+         "../optimizer/utils.rkt"
          "../rep/type-rep.rkt"
-         "../types/type-table.rkt"
-         "../types/utils.rkt"
+         "../typecheck/typechecker.rkt"
          "../types/base-abbrev.rkt"
          "../types/resolve.rkt"
          "../types/subtype.rkt"
-         "../typecheck/typechecker.rkt"
-         "utils.rkt"
-         "logging.rkt")
+         "../types/type-table.rkt"
+         "../types/utils.rkt"
+         "../utils/utils.rkt"
+         "logging.rkt"
+         "utils.rkt")
 
 (provide pair-opt-expr)
 
@@ -33,7 +41,7 @@
   (subtypeof? e (-pair Univ Univ)))
 ;; can't do the above for mpairs, as they are invariant
 (define (has-mpair-type? e)
-  (match (type-of e) ; type of the operand
+  (match (maybe-type-of e) ; type of the operand
     [(tc-result1: (MPair: _ _)) #t]
     [_ #f]))
 
@@ -70,7 +78,7 @@
 
 ;; change the source location of a given syntax object
 (define ((relocate loc-stx) stx)
-  (datum->syntax stx (syntax->datum stx) loc-stx stx stx))
+  (datum->syntax stx (syntax->datum stx) loc-stx stx))
 
 ;; if the equivalent sequence of cars and cdrs is guaranteed not to fail,
 ;; we can optimize
@@ -139,7 +147,7 @@
     (let-values
         ([(t res)
           (for/fold ([t   (match (type-of #'e.arg)
-                            [(tc-result1: t) t])]
+                            [(tc-result1: t) (static-type->dynamic-type t)])]
                      [res #'e.arg])
               ([accessor (in-list (reverse (syntax->list #'e.alt)))])
             (cond
@@ -161,3 +169,26 @@
               (values t ; stays unsafe from now on
                       #`(#,accessor #,res))]))])
       res)))
+
+(define (static-type->dynamic-type type)
+  ;; simple: forget all type structure except list spines
+  (define te-mode (current-type-enforcement-mode))
+  (case te-mode
+    ((deep)
+     type)
+    ((shallow)
+     (match type
+      [(Listof: _)
+       (-lst Univ)]
+      [(Pair: _ t-cdr)
+       (let cdr-loop ((t t-cdr))
+         (match t
+          [(Pair: _ t-cdr)
+           (-pair Univ (cdr-loop t-cdr))]
+          [tail
+           (-pair Univ (if (eq? tail -Null) -Null Univ))]))]
+      [(app resolve (Pair: _ _))
+       (-pair Univ Univ)]
+      [_
+        Univ]))
+    (else (raise-optimizer-context-error te-mode))))

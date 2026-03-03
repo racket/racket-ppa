@@ -24,38 +24,74 @@
               set-front-hook!
               set-menu-bar-hooks!
               set-mouse-or-key-hook!
+              set-post-key-callback-hook!
               set-fixup-window-locations!
               post-dummy-event
 
               try-to-sync-refresh
               try-to-flush
               sync-cocoa-events
-              set-screen-changed-callback!)
+              set-screen-changed-callback!
+              set-queue-events-to-refresh-all-canvases!)
 
  ;; from common/queue:
  current-eventspace
  queue-event
  yield)
 
-(import-class NSApplication NSAutoreleasePool NSColor NSProcessInfo NSArray NSMenu NSThread)
+(import-class NSApplication NSAutoreleasePool NSColor NSProcessInfo NSArray NSMenu NSThread
+              NSUserDefaults NSDictionary)
 
 (unless (tell #:type _BOOL NSThread isMainThread)
   (error 'racket/gui
          "cannot instantiate in a non-main place on Mac OS"))
 
-;; Extreme hackery to hide original arguments from
-;; NSApplication, because NSApplication wants to turn 
-;; the arguments into `application:openFile:' calls.
-;; To hide the arguments, we replace the implementation
-;; of `arguments' in the NSProcessInfo object.
-(define (hack-argument-replacement self method)
-  (tell NSArray 
-        arrayWithObjects: #:type (_vector i _NSString) (vector (path->string (find-system-path 'exec-file)))
-        count: #:type _NSUInteger 1))
-(let ([m (class_getInstanceMethod NSProcessInfo (selector arguments))])
-  (void (method_setImplementation m hack-argument-replacement)))
+;; Hide original arguments from NSApplication, because NSApplication
+;; otherwise turns the arguments into `application:openFile:' calls.
+(void
+ (tell (tell NSUserDefaults standardUserDefaults)
+       registerDefaults:
+       (tell NSDictionary
+             dictionaryWithObjects:
+             (tell NSArray
+                   arrayWithObjects: #:type (_vector i _NSString) (vector "NO")
+                   count: #:type _NSUInteger 1)
+             forKeys:
+             (tell NSArray
+                   arrayWithObjects: #:type (_vector i _NSString) (vector "NSTreatUnknownArgumentsAsOpen")
+                   count: #:type _NSUInteger 1))))
 
 (define app (tell NSApplication sharedApplication))
+
+;; ------------------------------------------------------------
+;; Create an event to post when Racket has been sleeping but is
+;;  ready to wake up
+
+(import-class NSEvent)
+(define wake-evt
+  (tell NSEvent
+        otherEventWithType: #:type _NSUInteger NSApplicationDefined
+        location: #:type _NSPoint (make-NSPoint 0.0 0.0)
+        modifierFlags: #:type _NSUInteger 0
+        timestamp: #:type _double 0.0
+        windowNumber: #:type _NSUInteger 0
+        context: #:type _pointer #f
+        subtype: #:type _short 0
+        data1: #:type _NSInteger 0
+        data2: #:type _NSInteger 0))
+(retain wake-evt)
+(define (post-dummy-event)
+  (tell #:type _void app postEvent: wake-evt atStart: #:type _BOOL YES))
+
+;; This callback will be invoked by the CoreFoundation run loop
+;; when data is available on `ready_sock', which is used to indicate
+;; that Racket would like to wake up (and posting a Cocoa event
+;; causes the event-getting function to unblock).
+(define (socket_callback)
+  (read2 ready_sock read-buf 1)
+  (post-dummy-event))
+
+;; ------------------------------------------------------------
 
 (define got-file? #f)
 
@@ -90,8 +126,20 @@
   [-a _void (applicationDidFinishLaunching: [_id notification])
       ;; Create an empty windows menu for right clicking in the dock
       (tell app setWindowsMenu: (tell (tell NSMenu alloc) init))
+      (when (version-10.9-or-later?)
+        (tell app addObserver:
+              self
+              forKeyPath: #:type _NSString "effectiveAppearance"
+              options: #f
+              context: #f))
       (unless got-file?
         (queue-start-empty-event))]
+  [-a _void (observeValueForKeyPath: [_NSString keyPath] ofObject: ofObject change: change context: context)
+      ;; we add an observer only for "effectiveAppearance",
+      ;; so no check is needed to know why we got here
+      (queue-dark-mode-event)
+      (queue-events-to-refresh-all-canvases)
+      (void)]
   [-a _BOOL (applicationShouldHandleReopen: [_id app] hasVisibleWindows: [_BOOL has-visible?])
       ;; If we have any visible windows, return #t to do the default thing.
       ;; Otherwise return #f, because we don't want any invisible windows resurrected.
@@ -109,6 +157,10 @@
       (try-dock-to-front)]
   [-a _void (retrySelfToFront: o)
       (tellv app activateIgnoringOtherApps: #:type _BOOL #t)])
+
+(define queue-events-to-refresh-all-canvases void)
+(define (set-queue-events-to-refresh-all-canvases! f)
+  (set! queue-events-to-refresh-all-canvases f))
 
 (define fixup-window-locations void)
 (define (set-fixup-window-locations! f) (set! fixup-window-locations f))
@@ -205,34 +257,6 @@
                                                      NSActivityIdleSystemSleepDisabled)
          reason: #:type _NSString "Racket default")
    retain))
-
-;; ------------------------------------------------------------
-;; Create an event to post when Racket has been sleeping but is
-;;  ready to wake up
-
-(import-class NSEvent)
-(define wake-evt
-  (tell NSEvent 
-        otherEventWithType: #:type _NSUInteger NSApplicationDefined
-        location: #:type _NSPoint (make-NSPoint 0.0 0.0)
-        modifierFlags: #:type _NSUInteger 0 
-        timestamp: #:type _double 0.0
-        windowNumber: #:type _NSUInteger 0
-        context: #:type _pointer #f
-        subtype: #:type _short 0
-        data1: #:type _NSInteger 0
-        data2: #:type _NSInteger 0))
-(retain wake-evt)
-(define (post-dummy-event)
-  (tell #:type _void app postEvent: wake-evt atStart: #:type _BOOL YES))
-
-;; This callback will be invoked by the CoreFoundation run loop
-;; when data is available on `ready_sock', which is used to indicate
-;; that Racket would like to wake up (and posting a Cocoa event
-;; causes the event-getting function to unblock).
-(define (socket_callback)
-  (read2 ready_sock read-buf 1)
-  (post-dummy-event))
 
 ;; ------------------------------------------------------------
 ;; Create a pipe's pair of file descriptors, used to communicate
@@ -403,6 +427,9 @@
 (define front-hook (lambda () (values #f #f)))
 (define (set-front-hook! proc) (set! front-hook proc))
 
+(define get-post-key-callback (lambda () #f))
+(define (set-post-key-callback-hook! proc) (set! get-post-key-callback proc))
+
 (define in-menu-bar-range? (lambda (p flipped?) #f))
 (define (set-menu-bar-hooks! r?) 
   (set! in-menu-bar-range? r?))
@@ -502,8 +529,14 @@
                                           (lambda ()
                                             ;; in atomic mode
                                             (with-autorelease
-                                             (tellv app sendEvent: evt)
-                                             (release evt))))
+                                              (define post-key
+                                                (and (not w)
+                                                     (= NSEventTypeKeyDown (tell #:type _NSUInteger evt type))
+                                                     (not (tell app keyWindow))
+                                                     (get-post-key-callback evt)))
+                                              (tellv app sendEvent: evt)
+                                              (when post-key (post-key evt))
+                                              (release evt))))
                                          (when mouse-or-key?
                                            (set! avoid-mouse-key-until #f)))))
                       (tellv app sendEvent: evt)))

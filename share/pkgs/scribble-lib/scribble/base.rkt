@@ -23,69 +23,79 @@
 (define-syntax-rule (title-like-contract)
   (->* ()
        (#:tag (or/c #f string? (listof string?))
-              #:tag-prefix (or/c #f string? module-path?)
-              #:style (or/c style? string? symbol? (listof symbol?) #f))
+              #:tag-prefix (or/c #f string? module-path? hash?)
+              #:style (or/c style? string? symbol? (listof symbol?) #f)
+              #:index-extras desc-extras/c)
        #:rest (listof pre-content?)
        part-start?))
 
-(provide/contract
- [title (->* ()
-             (#:tag (or/c #f string? (listof string?))
-                    #:tag-prefix (or/c #f string? module-path?)
-                    #:style (or/c style? string? symbol? (listof symbol?) #f)
-                    #:version (or/c string? #f)
-                    #:date (or/c string? #f))
-             #:rest (listof pre-content?)
-             title-decl?)]
- [section (title-like-contract)]
- [subsection (title-like-contract)]
- [subsubsection (title-like-contract)]
- [subsubsub*section  (->* ()
-                          (#:tag (or/c #f string? (listof string?)))
-                          #:rest (listof pre-content?)
-                          block?)])
+(provide (contract-out
+          [title
+           (->* ()
+                (#:tag (or/c #f string? (listof string?))
+                       #:tag-prefix (or/c #f string? module-path? hash?)
+                       #:style (or/c style? string? symbol? (listof symbol?) #f)
+                       #:version (or/c string? #f)
+                       #:date (or/c string? #f)
+                       #:index-extras desc-extras/c)
+                #:rest (listof pre-content?)
+                title-decl?)]
+          [section (title-like-contract)]
+          [subsection (title-like-contract)]
+          [subsubsection (title-like-contract)]
+          [subsubsub*section
+           (->* () (#:tag (or/c #f string? (listof string?))) #:rest (listof pre-content?) block?)]))
 (provide include-section)
 
 (define (title #:tag [tag #f] #:tag-prefix [prefix #f] #:style [style plain]
                #:version [version #f] #:date [date #f]
+               #:index-extras [extras #hash()]
                . str)
   (let ([content (decode-content str)])
-    (make-title-decl (prefix->string prefix)
-                     (convert-tag tag content)
-                     version
-                     (let ([s (convert-part-style 'title style)])
-                       (if date
-                           (make-style (style-name s)
-                                       (cons (make-document-date date)
-                                             (style-properties s)))
-                           s))
-                     content)))
+    (make-title-decl* (prefix->string prefix)
+                      (convert-tag tag content)
+                      version
+                      (let ([s (convert-part-style 'title style)])
+                        (if date
+                            (make-style (style-name s)
+                                        (cons (make-document-date date)
+                                              (style-properties s)))
+                            s))
+                      content
+                      (index-desc/part extras))))
 
 (define (section #:tag [tag #f] #:tag-prefix [prefix #f] #:style [style plain]
+                 #:index-extras [extras #hash()]
                  . str)
   (let ([content (decode-content str)])
-    (make-part-start 0 (prefix->string prefix)
-                     (convert-tag tag content)
-                     (convert-part-style 'section style)
-                     content)))
+    (make-part-start* 0 (prefix->string prefix)
+                      (convert-tag tag content)
+                      (convert-part-style 'section style)
+                      content
+                      (index-desc/part extras))))
 
 (define (subsection #:tag [tag #f] #:tag-prefix [prefix #f] #:style [style plain]
+                    #:index-extras [extras #hash()]
                     . str)
   (let ([content (decode-content str)])
-    (make-part-start 1
-                     (prefix->string prefix)
-                     (convert-tag tag content)
-                     (convert-part-style 'subsection style)
-                     content)))
+    (make-part-start* 1
+                      (prefix->string prefix)
+                      (convert-tag tag content)
+                      (convert-part-style 'subsection style)
+                      content
+                      (index-desc/part extras))))
 
 (define (subsubsection #:tag [tag #f] #:tag-prefix [prefix #f]
-                       #:style [style plain] . str)
+                       #:style [style plain]
+                       #:index-extras [extras #hash()]
+                       . str)
   (let ([content (decode-content str)])
-    (make-part-start 2
-                     (prefix->string prefix)
-                     (convert-tag tag content)
-                     (convert-part-style 'subsubsection style)
-                     content)))
+    (make-part-start* 2
+                      (prefix->string prefix)
+                      (convert-tag tag content)
+                      (convert-part-style 'subsubsection style)
+                      content
+                      (index-desc/part extras))))
 
 (define (subsubsub*section #:tag [tag #f] . str)
   (let ([content (decode-content str)])
@@ -109,11 +119,19 @@
            (require (only-in mod [doc-from-mod doc]))
            doc))]))
 
+(define (index-desc/part extras)
+  (index-desc (let* ([extras (if (hash-has-key? extras 'kind)
+                                 extras
+                                 (hash-set extras 'kind "part"))]
+                     [extras (if (hash-has-key? extras 'part?)
+                                 extras
+                                 (hash-set extras 'part? #t))])
+                extras)))
+
 ;; ----------------------------------------
 
-(provide/contract 
- [author (->* (content?) () #:rest (listof content?) block?)]
- [author+email (->* (content? string?) (#:obfuscate? any/c) element?)])
+(provide (contract-out [author (->* (content?) () #:rest (listof content?) block?)]
+                       [author+email (->* (content? string?) (#:obfuscate? any/c) element?)]))
 
 (define (author . auths)
   (make-paragraph 
@@ -122,10 +140,9 @@
      (case (length auths)
        [(1) auths]
        [(2) (list (car auths) nl "and " (cadr auths))]
-       [else (let ([r (reverse auths)])
-               (append (add-between (reverse (cdr r))
-                                    (make-element #f (list "," nl)))
-                       (list "," nl "and " (car r))))]))))
+       [else (define r (reverse auths))
+             (append (add-between (reverse (cdr r)) (make-element #f (list "," nl)))
+                     (list "," nl "and " (car r)))]))))
 
 (define (author+email name email #:obfuscate? [obfuscate? #f])
   (make-element #f
@@ -143,28 +160,20 @@
 
 (define (item? x) (an-item? x))
 
-(define recur-items/c
-  (make-flat-contract 
-   #:name 'items/c
-   #:first-order (lambda (x)
-                   ((flat-contract-predicate items/c) x))))
+(define items/c
+  (flat-rec-contract
+   items/c
+   item?
+   block?
+   (listof items/c)
+   (spliceof items/c)))
 
-(define items/c (or/c item?
-                      block?
-                      (listof recur-items/c)
-                      (spliceof recur-items/c)))
-                       
 (provide items/c)
 
-(provide/contract 
- [itemlist (->* () 
-                (#:style (or/c style? string? symbol? #f)) 
-                #:rest (listof items/c)
-                itemization?)]
- [item (->* () 
-            () 
-            #:rest (listof pre-flow?)
-            item?)])
+(provide (contract-out
+          [itemlist
+           (->* () (#:style (or/c style? string? symbol? #f)) #:rest (listof items/c) itemization?)]
+          [item (->* () () #:rest (listof pre-flow?) item?)]))
 (provide/contract
  [item? (any/c . -> . boolean?)])
 
@@ -329,6 +338,7 @@
                 compound-paragraph?)]
  [tabular (->* ((listof (listof (or/c 'cont block? content?))))
                (#:style (or/c style? string? symbol? #f)
+                #:pad (or/c real? (list/c real? real?) (list/c real? real? real? real?))
                 #:sep (or/c content? block? #f)
                 #:column-properties (listof any/c)
                 #:row-properties (listof any/c)
@@ -355,6 +365,7 @@
                            (decode-flow c)))
 
 (define (tabular #:style [style #f]
+                 #:pad [pad 0]
                  #:sep [sep #f]
                  #:sep-properties [sep-props #f]
                  #:column-properties [column-properties null]
@@ -477,7 +488,7 @@
                 (define all-column-properties
                   (and (pair? column-properties)
                        full-column-properties))
-                ;; Will werge `cell-properties` and `column-properties` into
+                ;; Will merge `cell-properties` and `column-properties` into
                 ;; `s`. Start by finding any existing `table-columns`
                 ;; and `table-cells` properties with the right number of
                 ;; styles:
@@ -501,6 +512,21 @@
                                                    (table-cells-styless tl)))
                                       tl
                                       #f))))
+                (define pad-prop
+                  (cond
+                    [(number? pad)
+                     (and (not (= 0 pad)) (cell-padding-property pad pad pad pad))]
+                    [(= 2 (length pad))
+                     (and (not (= 0 (car pad) (cadr pad)))
+                          (cell-padding-property (car pad) (cadr pad) (car pad) (cadr pad)))]
+                    [(not (= 0 (list-ref pad 0) (list-ref pad 1) (list-ref pad 2) (list-ref pad 3)))
+                     (cell-padding-property (list-ref pad 0) (list-ref pad 1)
+                                            (list-ref pad 2) (list-ref pad 3))]))
+                (define (add-padding props)
+                  (if (or (not pad-prop)
+                          (ormap cell-padding-property? props))
+                      props
+                      (cons pad-prop props)))
                 ;; Merge:
                 (define (cons-maybe v l) (if v (cons v l) l))
                 (make-style (style-name s)
@@ -511,22 +537,31 @@
                                        (for/list ([ps (in-list all-column-properties)]
                                                   [cs (in-list (table-columns-styles tc))])
                                          (make-style (style-name cs)
-                                                     (append ps (style-properties cs))))
+                                                     (add-padding
+                                                      (append ps (style-properties cs)))))
                                        (for/list ([ps (in-list all-column-properties)])
-                                         (make-style #f ps)))))
+                                         (make-style #f (add-padding ps))))))
                              (cons-maybe
-                              (and all-cell-properties
-                                   (table-cells
-                                    (if tl
-                                        (for/list ([pss (in-list all-cell-properties)]
-                                                   [css (in-list (table-cells-styless tl))])
-                                          (for/list ([ps (in-list pss)]
-                                                     [cs (in-list css)])
-                                            (make-style (style-name cs)
-                                                        (append ps (style-properties cs)))))
-                                        (for/list ([pss (in-list all-cell-properties)])
-                                          (for/list ([ps (in-list pss)])
-                                            (make-style #f ps))))))
+                              (if all-cell-properties
+                                  (table-cells
+                                   (if tl
+                                       (for/list ([pss (in-list all-cell-properties)]
+                                                  [css (in-list (table-cells-styless tl))])
+                                         (for/list ([ps (in-list pss)]
+                                                    [cs (in-list css)])
+                                           (make-style (style-name cs)
+                                                       (add-padding
+                                                        (append ps (style-properties cs))))))
+                                       (for/list ([pss (in-list all-cell-properties)])
+                                         (for/list ([ps (in-list pss)])
+                                           (make-style #f (add-padding ps))))))
+                                  (if (and pad-prop
+                                           (not all-column-properties))
+                                      (table-cells
+                                       (for/list ([row (in-list cells)])
+                                         (for/list ([cell (in-list row)])
+                                           (make-style #f (list pad-prop)))))
+                                      #f))
                               (remq tc (remq tl props))))))
               ;; Process cells:
               (map (lambda (row)
@@ -603,9 +638,11 @@
                      (make-section-tag s #:doc doc #:tag-prefixes prefix)))
 (define (Secref s #:underline? [u? #t] #:doc [doc #f] #:tag-prefixes [prefix #f]
                 #:link-render-style [link-style #f])
-  (let ([le (secref s #:underline? u? #:doc doc #:tag-prefixes prefix)])
+  (let ([le (secref s #:underline? u? #:doc doc #:tag-prefixes prefix
+                    #:link-render-style link-style)])
     (make-link-element
-     (make-style (element-style le) '(uppercase))
+     (let ([es (or (element-style le) plain)])
+       (style (style-name es) (cons 'uppercase (style-properties es))))
      (element-content le)
      (link-element-tag le))))
 
@@ -645,8 +682,8 @@
                  #:rest (listof pre-content?)
                  element?)]
  [url (-> string? element?)]
- [margin-note (->* () (#:left? any/c) #:rest (listof pre-flow?) block?)]
- [margin-note* (->* () (#:left? any/c) #:rest (listof pre-content?) element?)]
+ [margin-note (->* () (#:left? any/c #:footnote? any/c) #:rest (listof pre-flow?) block?)]
+ [margin-note* (->* () (#:left? any/c #:footnote? any/c) #:rest (listof pre-content?) element?)]
  [centered (->* () () #:rest (listof pre-flow?) block?)]
  [verbatim (->* (content?) (#:indent exact-nonnegative-integer?) #:rest (listof content?) block?)])
 
@@ -669,9 +706,12 @@
 (define (url str)
   (hyperlink str (make-element 'url str)))
 
-(define (margin-note #:left? [left? #f] . c)
+(define (margin-note #:left? [left? #f] #:footnote? [footnote? #f] . c)
   (make-nested-flow
-   (make-style (if left? "refparaleft" "refpara")
+   (make-style (cond
+                 [footnote? "reffootnote"]
+                 [left? "refparaleft"]
+                 [else "refpara"])
                '(command never-indents))
    (list
     (make-nested-flow
@@ -682,9 +722,13 @@
        (make-style "refcontent" null)
        (decode-flow c)))))))
 
-(define (margin-note* #:left? [left? #f] . c)
+(define (margin-note* #:left? [left? #f] #:footnote? [footnote? #f] . c)
   (make-element
-   (make-style (if left? "refelemleft" "refelem") null)
+   (make-style (cond
+                 [footnote? "reffootnote"]
+                 [left? "refelemleft"]
+                 [else "refelem"])
+               null)
    (make-element
     (make-style (if left? "refcolumnleft" "refcolumn") null)
     (make-element
@@ -772,40 +816,57 @@
 (provide get-index-entries)
 (provide/contract
  [index-block (-> delayed-block?)]
- [index (((or/c string? (listof string?))) ()  #:rest (listof pre-content?) . ->* . index-element?)]
- [index* (((listof string?) (listof any/c)) ()  #:rest (listof pre-content?) . ->* . index-element?)] ; XXX first any/c wrong in docs 
- [as-index (() () #:rest (listof pre-content?) . ->* . index-element?)]
- [section-index (() () #:rest (listof string?) . ->* . part-index-decl?)]
+ [index (((or/c string? (listof string?)))
+         (#:extras desc-extras/c)
+         #:rest (listof pre-content?)
+         . ->* . index-element?)]
+ [index* (((listof string?) (listof any/c))
+          (#:extras desc-extras/c)
+          #:rest (listof pre-content?)
+          . ->* . index-element?)] ; XXX first any/c wrong in docs
+ [as-index (()
+            (#:extras desc-extras/c)
+            #:rest (listof pre-content?)
+            . ->* . index-element?)]
+ [section-index (()
+                 (#:extras desc-extras/c)
+                 #:rest (listof string?)
+                 . ->* . part-index-decl?)]
  [index-section (() (#:tag (or/c #f string?)) . ->* . part?)])
 
-(define (section-index . elems)
-  (make-part-index-decl (map content->string elems) elems))
+(define (section-index #:extras [extras #hash()]
+                       . elems)
+  (make-part-index-decl* (map content->string elems) elems (index-desc extras)))
 
-(define (record-index word-seq element-seq tag content)
+(define (record-index word-seq element-seq tag content extras)
   (make-index-element #f
                       (list (make-target-element #f content `(idx ,tag)))
                       `(idx ,tag)
                       word-seq
                       element-seq
-                      #f))
+                      (index-desc extras)))
 
-(define (index* word-seq content-seq . s)
+(define (index* word-seq content-seq
+                #:extras [extras #hash()]
+                . s)
   (let ([key (make-generated-tag)])
     (record-index (map clean-up-index-string word-seq)
-                  content-seq key (decode-content s))))
+                  content-seq key (decode-content s)
+                  extras)))
 
-(define (index word-seq . s)
+(define (index word-seq #:extras [extras #hash()] . s)
   (let ([word-seq (if (string? word-seq) (list word-seq) word-seq)])
-    (apply index* word-seq word-seq s)))
+    (apply index* word-seq word-seq s #:extras extras)))
 
-(define (as-index . s)
+(define (as-index #:extras [extras #hash()] . s)
   (let ([key (make-generated-tag)]
         [content (decode-content s)])
     (record-index
      (list (clean-up-index-string (content->string content)))
      (if (= 1 (length content)) content (list (make-element #f content)))
      key
-     content)))
+     content
+     extras)))
 
 (define (index-section #:title [title "Index"] #:tag [tag #f])
   (make-part #f
@@ -836,8 +897,14 @@
              (cons 'libs (map (lambda (l)
                                 (format "~s" l))
                               (exported-index-desc-from-libs desc)))]
-            [(module-path-index-desc? desc) '(mod)]
-            [(part-index-desc? desc) '(part)]
+            [(or (module-path-index-desc? desc)
+                 (and (index-desc? desc)
+                      (hash-ref (index-desc-extras desc) 'module-kind #f)))
+             '(mod)]
+            [(or (part-index-desc? desc)
+                 (and (index-desc? desc)
+                      (hash-ref (index-desc-extras desc) 'part? #f)))
+             '(part)]
             [(delayed-index-desc? desc) '(delayed)]
             [else '(#f)])))
   ;; parts first, then modules, then bindings, delayed means it's not
@@ -891,8 +958,11 @@
          (collect-info-ext-ht ci))))
    (lambda (k v)
      (when (and (pair? k) (eq? 'index-entry (car k)))
-       (let ([v (if (known-doc? v) (known-doc-v v) v)])
-         (set! l (cons (cons (cadr k) v) l))))))
+       (let ([pkg (and (known-doc? v) (known-doc-pkg v))]
+             [v (if (known-doc? v) (known-doc-v v) v)])
+         (define-values (plain-seq entry-seq desc) (apply values v))
+         (set! l (cons (list (cadr k) plain-seq entry-seq desc pkg)
+                       l))))))
   (sort l entry<?))
 
 (define (index-block)
@@ -904,7 +974,15 @@
                      rows)))
   (define contents
     (lambda (renderer sec ri)
-      (define l (get-index-entries sec ri))
+      (define l (for/list ([e (in-list (get-index-entries sec ri))]
+                           #:unless (let* ([desc (list-ref e 3)]
+                                           [desc (if (delayed-index-desc? desc)
+                                                     (delayed-index-desc-content desc ri)
+                                                     desc)])
+                                      (or (constructor-index-desc? desc)
+                                          (and (exported-index-desc*? desc)
+                                               (hash-ref (exported-index-desc*-extras desc) 'hidden? #f)))))
+                  e))
       (define manual-newlines? (send renderer index-manual-newlines?))
       (define alpha-starts (make-hasheq))
       (define alpha-row

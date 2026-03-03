@@ -84,6 +84,10 @@ require holding the Shift key).
        it is typically drawn from the set of available top-level
        bindings.}
 
+  @key["Shift-Tab" ee-id-completion/indent/reverse]{Like Tab
+       completion or indentation, but cycles through indentation
+       options in reverse order.}
+
   @key["^R" ee-next-id-completion]{Steps through the next possible
        completion when there are multiple possible completions.}
 
@@ -350,6 +354,11 @@ keys:
 
 ]
 
+The result of a key binding is a potentially updated entry, where only
+predefined functions can update an entry, or @racket[#f] to indicate
+that the current entry should be accepted as an
+@racket[expeditor-read] result.
+
 As examples, here are a few bindings from the default set:
 
 @racketblock[
@@ -411,6 +420,8 @@ case that the input should be accepted.}
 @keyproc[ee-indent-all]{@see-key["Esc-q"]}
 
 @keyproc[ee-id-completion/indent]{@see-key["Tab"]}
+
+@keyproc[ee-id-completion/indent/reverse]{@see-key["Shift-Tab"] @history[#:added "1.2"]}
 
 @keyproc[ee-id-completion]{
 
@@ -569,7 +580,12 @@ terminal ports and the terminal configuration is recognized, the
 result is a representation of the terminal state. The result is
 @racket[#f] if the expeditor cannot be initialized.
 
-The @racket[history] argument provides the }
+The @racket[history] argument provides the initial list of history
+entries, which is navigated by functions like @racket[ee-history-bwd].
+This history is updated as input is accepted during
+@racket[expeditor-read], and @racket[expeditor-close] reports an
+updated history. The amount of preserved history is limited.}
+
 
 @defproc[(expeditor-close [ee estate?]) (listof string?)]{
 
@@ -578,22 +594,35 @@ resources, if any. The result is the expeditor's history as
 initialized by @racket[expeditor-open] and updated by
 @racket[expeditor-read] calls.}
 
-@defproc[(expeditor-read [ee estate?]) any/c]{
+@defproc[(expeditor-read [ee estate?]
+                         [#:prompt prompt-str string? ">"])
+         any/c]{
 
 Reads input from the terminal. The @racket[ee] argument holds terminal
 state as well as history that is updated during
-@racket[expeditor-read].}
+@racket[expeditor-read]. The @racket[prompt-str] is used as a prompt;
+a space is added between @racket[prompt-str] and input, unless
+@racket[prompt-str] is @racket[""].
 
-@defproc[(call-with-expeditor [proc ((-> any/c) -> any)]) any]{
+@history[#:changed "1.1" @elem{Added the @racket[#:prompt] argument.}]}
+
+@defproc[(call-with-expeditor [proc ((->* () (#:prompt string?) any/c) -> any)]
+                              [#:prompt prompt-str string? ">"])
+         any]{
 
 Combines @racket[expeditor-open], a call to @racket[proc], and
 @racket[expeditor-close], where the reading procedure passed to
 @racket[proc] can be called any number of times to read input.
+The @racket[prompt-str] argument is used in the same way as for
+@racket[expeditor-read], the reading procedure can also receive an 
+optional string to update the @racket[prompt-str].
 
 Expeditor history is initialized from
 @racket[current-expeditor-history] on open, and the value of
 @racket[current-expeditor-history] is updated with the new history on
-close.}
+close.
+
+@history[#:changed "1.1" @elem{Added the @racket[#:prompt] argument.}]}
 
 
 @defproc[(expeditor-configure) void?]{
@@ -624,8 +653,9 @@ following keys:
  @item{@racket['drracket:grouping-position] --- Sets
        @racket[current-expeditor-grouper].}
 
- @item{@racket['drracket:indentation] and
-       @racket['drracket:range-indentation] --- Sets
+ @item{@racket['drracket:indentation],
+       @racket['drracket:range-indentation],
+       and @racket['drracket:range-indentation/reverse-choices] --- Sets
        @racket[current-expeditor-indenter] based on a combination of
        both values.}
 
@@ -690,7 +720,14 @@ work. @see-dr["Keystrokes"]}
 @defparam[current-expeditor-indenter proc procedure?]{
 
 A parameter that determines how automatic indentation works.
-@see-dr["Indentation"].}
+It expects either three or four arguments: a representation of
+the editor, a position in the editor, a boolean indicating whether
+the indentation request is automatic due to starting a new line,
+and an optional boolean indicating whether to cycle through indentation
+choices in reverse order. The protocol for results is the same as an
+indentation function for DrRacket. @see-dr["Indentation"]
+
+@history[#:changed "1.2" @elem{Added support for an optional fourth argument.}]}
 
 @defparam[current-expeditor-color-enabled on? boolean?]{
 

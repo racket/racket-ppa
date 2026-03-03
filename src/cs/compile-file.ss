@@ -1,21 +1,26 @@
 
 ;; Check to make we're using a build of Chez Scheme
 ;; that has all the features we need.
-(define-values (need-maj need-min need-sub need-dev)
-  (values 9 5 7 2))
+(define-values (need-maj need-min need-sub need-pre)
+  (values 9 9 9 23))
 
-(unless (guard (x [else #f]) (eval 'scheme-fork-version-number))
+(unless (guard (x [else #f]) (eval 'scheme-pre-release))
   (error 'compile-file
-         (error 'compile-file "need the Racket fork of Chez Scheme to build")))
+         (error 'compile-file "need a newer version of Chez Scheme")))
 
-(let-values ([(maj min sub dev) (scheme-fork-version-number)])
+(let-values ([(maj min sub) (scheme-version-number)]
+             [(pre) (scheme-pre-release)])
   (unless (or (> maj need-maj)
               (and (= maj need-maj)
                    (or (> min need-min)
                        (and (= min need-min)
                             (or (> sub need-sub)
                                 (and (= sub need-sub)
-                                     (>= dev need-dev)))))))
+                                     ;; #f pre-release is after a non-#f pre-release
+                                     (if need-pre
+                                         (or (not pre)
+                                             (>= pre need-pre))
+                                         (not pre))))))))
     (error 'compile-file "need a newer Chez Scheme")))
 
 ;; ----------------------------------------
@@ -41,10 +46,11 @@
 (define inspector-information? #f)
 (define source-information? #f)
 (define compressed? #f)
+(define source-dir "")
 (define build-dir "")
 (define xpatch-path #f)
 
-(define-values (src deps)
+(define-values (src dest deps)
   (let loop ([args (command-line-arguments)])
     (cond
      [(get-opt args "--debug" 0)
@@ -74,6 +80,10 @@
       => (lambda (args)
            (set! whole-program? #t)
            (loop args))]
+     [(get-opt args "--src" 1)
+      => (lambda (args)
+           (set! source-dir (car args))
+           (loop (cdr args)))]
      [(get-opt args "--dest" 1)
       => (lambda (args)
            (set! build-dir (car args))
@@ -91,22 +101,10 @@
            (loop (cdr args)))]
      [(null? args)
       (error 'compile-file "missing source file")]
+     [(null? (cdr args))
+      (error 'compile-file "missing destination file")]
      [else
-      (values (car args) (cdr args))])))
-
-(define src-so
-  (letrec ([find-dot (lambda (pos)
-                       (let ([pos (sub1 pos)])
-                         (cond
-                          [(zero? pos) (error 'compile-file "can't find extension in ~s" src)]
-                          [(char=? (string-ref src pos) #\.) pos]
-                          [else (find-dot pos)])))])
-    (string-append (substring src 0 (find-dot (string-length src))) ".so")))
-
-(define dest
-  (if (equal? build-dir "")
-      src-so
-      (string-append build-dir src-so)))
+      (values (car args) (cadr args) (cddr args))])))
 
 (when xpatch-path
   (load xpatch-path))
@@ -117,6 +115,7 @@
 (generate-procedure-source-information source-information?)
 (fasl-compressed compressed?)
 (enable-arithmetic-left-associative #t)
+(library-timestamp-mode 'exists)
 
 (define (compile-it)
  (cond
@@ -126,16 +125,19 @@
     (printf "Whole-program optimization for Racket core...\n")
     (printf "[If this step runs out of memory, try configuring with `--disable-wpo`]\n")
     (unless (equal? build-dir "")
-      (library-directories (list (cons "." build-dir))))
-    (compile-whole-program (car deps) src #t)]
+      (library-directories (list (cons source-dir build-dir))))
+    (compile-whole-program (car deps) dest #t)]
    [else
+    (unless (equal? source-dir "")
+      (library-directories (list (cons source-dir build-dir)))
+      (source-directories (list "." build-dir source-dir)))
     (for-each load deps)
     (parameterize ([current-generate-id
                     (let ([counter-ht (make-eq-hashtable)])
                       (lambda (sym)
                         (let* ([n (eq-hashtable-ref counter-ht sym 0)]
                                [s ((if (gensym? sym) gensym->unique-string symbol->string) sym)]
-                               [g (gensym (symbol->string sym) (format "rkt-~a-~a-~a" src s n))])
+                               [g (gensym (symbol->string sym) (format "rkt-~a-~a-~a" (path-last src) s n))])
                           (eq-hashtable-set! counter-ht sym (+ n 1))
                           g)))])
       (cond

@@ -20,6 +20,7 @@
          "sound.rkt"
          "keycode.rkt"
          "font.rkt"
+         "queue.rkt"
          "../../lock.rkt"
          "../common/handlers.rkt"
          (except-in "../common/default-procs.rkt"
@@ -71,7 +72,8 @@
  key-symbol-to-menu-key
  needs-grow-box-spacer?
  get-current-mouse-state
- graphical-system-type)
+ graphical-system-type
+ white-on-black-panel-scheme?)
 
 (import-class NSScreen NSCursor NSMenu NSEvent)
 
@@ -176,23 +178,43 @@
 ;; Text & highlight color
 
 (import-class NSColor)
-
-(define-cocoa NSDeviceRGBColorSpace _id)
+(import-class NSColorSpace)
+(import-class NSAppearance)
 
 (define (get-color get)
-  (let ([hi (as-objc-allocation-with-retain
-             (tell (get) colorUsingColorSpaceName: NSDeviceRGBColorSpace))]
-        [as-color (lambda (v)
-                    (inexact->exact (floor (* 255.0 v))))])
-    (begin0
-     (make-object color%
-                  (as-color
-                   (tell #:type _CGFloat hi redComponent))
-                  (as-color
-                   (tell #:type _CGFloat hi greenComponent))
-                  (as-color
-                   (tell #:type _CGFloat hi blueComponent)))
-     (release hi))))
+  (define hi
+    (as-objc-allocation-with-retain
+     (cond
+       [(version-11.0-or-later?)
+        (define ans #f)
+        (define keep (box null))
+        (tell (tell app effectiveAppearance)
+              performAsCurrentDrawingAppearance:
+              #:type _pointer
+              (objc-block
+               (_fun #:atomic? #t #:keep keep _pointer -> _void)
+               (λ (blk)
+                 (set! ans (tell (get) colorUsingColorSpace: (tell NSColorSpace deviceRGBColorSpace))))
+               #:keep keep))
+        (void/reference-sink keep)
+        ans]
+       [(version-10.7-or-later?)
+        (tell (get) colorUsingColorSpace: (tell NSColorSpace deviceRGBColorSpace))]
+       [else
+        ;; In 10.6 and earlier, `colorUsingColorSpace:` with (tell NSColorSpace deviceRGBColorSpace)`
+        ;; doesn't produce a color with RGB components
+        (tell (get) colorUsingColorSpaceName: #:type _NSString "NSDeviceRGBColorSpace")])))
+  (define (as-color v)
+    (inexact->exact (floor (* 255.0 v))))
+  (begin0
+    (make-object color%
+      (as-color
+       (tell #:type _CGFloat hi redComponent))
+      (as-color
+       (tell #:type _CGFloat hi greenComponent))
+      (as-color
+       (tell #:type _CGFloat hi blueComponent)))
+    (release hi)))
 
 (define (get-highlight-background-color)
   (get-color (lambda () (tell NSColor selectedTextBackgroundColor))))
@@ -210,6 +232,34 @@
                    (tell NSColor windowBackgroundColor)
                    ;; Seems like accurate than other option for Mojave:
                    (tell NSColor controlBackgroundColor)))))
+
+(define-appkit NSAppearanceNameAqua _id #:fail (λ () #f))
+(define-appkit NSAppearanceNameDarkAqua _id #:fail (λ () #f))
+(import-class NSArray)
+
+(define (white-on-black-panel-scheme?)
+  (cond
+    [(version-10.14-or-later?)
+     (equal?
+      NSAppearanceNameDarkAqua
+      (atomically
+       (tell (tell app effectiveAppearance)
+             bestMatchFromAppearancesWithNames:
+             (tell NSArray
+                   arrayWithObjects:
+                   #:type
+                   (_list i _id)
+                   (list NSAppearanceNameAqua
+                         NSAppearanceNameDarkAqua)
+                   count:
+                   #:type _NSUInteger
+                   2))))]
+    [else
+     ;; if the background and foreground are the same
+     ;; color, probably something has gone wrong;
+     ;; in that case we want to return #f.
+     (< (luminance (get-label-background-color))
+        (luminance (get-label-foreground-color)))]))
 
 (define (get-highlight-text-color)
   #f)

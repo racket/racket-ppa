@@ -1,17 +1,23 @@
 #lang racket/base
 
-(require syntax/parse racket/sequence racket/flonum racket/promise
-         syntax/parse/experimental/specialize
+(require (for-template racket/base
+                       racket/flonum
+                       racket/math
+                       racket/unsafe/ops)
+         racket/flonum
+         racket/promise
+         racket/sequence
          syntax/id-table
-         (for-template racket/base racket/flonum racket/unsafe/ops racket/math)
-         "../utils/utils.rkt"
-         "../utils/tc-utils.rkt"
-         "../types/numeric-tower.rkt"
+         syntax/parse
+         syntax/parse/experimental/specialize
          "../types/abbrev.rkt"
-         "utils.rkt"
-         "numeric-utils.rkt"
+         "../types/numeric-tower.rkt"
+         "../utils/tc-utils.rkt"
+         "../utils/utils.rkt"
+         "fixnum.rkt"
          "logging.rkt"
-         "fixnum.rkt")
+         "numeric-utils.rkt"
+         "utils.rkt")
 
 (provide float-opt-expr float-arg-expr int-expr float-op)
 

@@ -45,27 +45,44 @@
     #:with pos-args (if (attribute boundary-ctc?)
                         (stx-cdr #'*pos-args)
                         #'*pos-args)
-    (match (tc-expr #'fn)
-      [(tc-result1:
-        (Poly: vars
-               (Fun: (list (and ar (Arrow: dom #f kw-formals rng))))))
-       (=> fail)
-       (unless (set-empty? (fv/list kw-formals))
-         (fail))
-       (match (stx-map single-value #'pos-args)
-         [(list (tc-result1: argtys-t) ...)
-          (let* ([subst (infer vars null argtys-t dom rng
-                               (and expected (tc-results->values expected)))])
-            (unless subst (fail))
-            (tc-keywords #'form (list (subst-all subst ar))
-                         (type->list (tc-expr/t #'kws)) #'kw-arg-list #'pos-args expected))])]
-      [(tc-result1: (Fun: arrows))
-       (tc-keywords #'(#%plain-app . form) arrows (type->list (tc-expr/t #'kws))
-                    #'kw-arg-list #'pos-args expected)]
-      [(tc-result1: (Poly: _ (Fun: _)))
-       (tc-error/expr "Inference for polymorphic keyword functions not supported")]
-      [(tc-result1: t)
-       (tc-error/expr "Cannot apply expression of type ~a, since it is not a function type" t)])))
+
+    (let ()
+      (define (tc/app-mono-fun arrows)
+        (tc-keywords #'(#%plain-app . form) arrows (type->list (tc-expr/t #'kws))
+                     #'kw-arg-list #'pos-args expected))
+
+      (define (tc/app-poly-fun vars arrow fail)
+        (match-define (and ar (Arrow: dom rst kw-formals rng)) arrow)
+        ;; if the types of the keyword arguments have type variables or rst is
+        ;; set, stop.
+        (unless (or (set-empty? (fv/list kw-formals)) (not rst))
+          (fail))
+        (match (stx-map single-value #'pos-args)
+           [(list (tc-result1: argtys-t) ...)
+            (let* ([subst (infer vars null argtys-t dom rng
+                                 (and expected (tc-results->values expected)))])
+              (unless subst
+                (fail))
+              (tc-keywords #'form (list (subst-all subst ar))
+                           (type->list (tc-expr/t #'kws)) #'kw-arg-list #'pos-args expected))]))
+
+      (match (tc-expr/t #'fn)
+        [(Poly: vars
+                (Fun: (list arrow)))
+         (=> fail)
+         (tc/app-poly-fun vars arrow fail)]
+        [(Fun: arrows)
+         (tc/app-mono-fun arrows)]
+        [(Poly: _ (Fun: _))
+         (tc-error/expr "Inference for polymorphic keyword functions not supported")]
+        [(Intersection: (HasArrows: arrows) _)
+         (tc/app-mono-fun arrows)]
+        [(Intersection: (Poly: vars
+                               (Fun: (list arrow))) _)
+         (=> fail)
+         (tc/app-poly-fun vars arrow fail)]
+        [t
+         (tc-error/expr "Cannot apply expression of type ~a, since it is not a function type" t)]))))
 
 (define (tc-keywords/internal arity kws kw-args error?)
   (match arity
@@ -109,19 +126,19 @@
 
 (define (tc-keywords form arrows kws kw-args pos-args expected)
   (match arrows
-    [(list (and a (Arrow: dom (and rst (not (? RestDots?))) ktys rng)))
+    [(list (and a (Arrow: dom (and rst (not (? RestDots?))) ktys rng rng-T+)))
      (tc-keywords/internal a kws kw-args #t)
-     (tc/funapp (car (syntax-e form)) kw-args
-                (->* dom rst rng)
+     (tc/funapp (car (syntax-e form)) pos-args
+                (->* dom rst rng :T+ rng-T+)
                 (stx-map tc-expr pos-args) expected)]
-    [(list (and a (Arrow: doms (and rsts (not (? RestDots?))) _ rngs)) ...)
+    [(list (and a (Arrow: doms (and rsts (not (? RestDots?))) _ rngs rngs-T+)) ...)
      (let ([new-arrows
             (for/list ([a (in-list arrows)]
                        ;; find all the arrows where the keywords match
                        #:when (tc-keywords/internal a kws kw-args #f))
               (match a
-                [(Arrow: dom (and rst (not (? RestDots?))) ktys rng)
-                 (make-Arrow dom rst '() rng)]))])
+                [(Arrow: dom (and rst (not (? RestDots?))) ktys rng rng-T+)
+                 (make-Arrow dom rst '() rng rng-T+)]))])
        (if (null? new-arrows)
            (domain-mismatches
             (car (syntax-e form)) (cdr (syntax-e form))
@@ -132,7 +149,7 @@
             (lambda (dom)
               (string-append "No function domains matched in function application:\n"
                              dom)))
-           (tc/funapp (car (syntax-e form)) kw-args
+           (tc/funapp (car (syntax-e form)) pos-args
                       (make-Fun new-arrows)
                       (stx-map tc-expr pos-args) expected)))]))
 
@@ -142,5 +159,3 @@
      (cons k (type->list b))]
     [(? Base:Null?) null]
     [_ (int-err "bad value in type->list: ~a" t)]))
-
-

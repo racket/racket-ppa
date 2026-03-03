@@ -116,37 +116,54 @@
               (set! next-id (add1 next-id))
               (hash-set! t thd id)
               id)))))
+
+  ;; The sampler thread must hold its watched threads weakly
+  ;; This way if the thread it's watching is dead---which means
+  ;; it'll never run again---then it too can die.
+  (define weak-to-track
+    (let loop ([t to-track])
+      (cond [(thread? t) (make-weak-box t)]
+            [(list? t) (map loop t)]
+            ;; cannot assume that it's a list: we might get other values from
+            ;; a custodian managed list
+            [else t])))
+
   (define (sampler)
     (sleep delay)
-    (when (paused . <= . 0)
-      (let loop ([t to-track])
-        (cond [(thread? t)
-               (unless (eq? t sampler-thread)
-                 (when custom-keys
-                   (set! custom-snapshots
-                         (cons (continuation-mark-set->list*
-                                (continuation-marks t)
-                                custom-keys) ; frames
-                               custom-snapshots)))
-                 (set! snapshots
-                       (cons (list* (thread-id t)
-                                    (current-process-milliseconds t)
-                                    (if do-errortrace
-                                        (for/list ([frame (in-list
-                                                           (continuation-mark-set->list
-                                                            (continuation-marks t)
-                                                            errortrace-key))])
-                                            (intern-entry (errortrace-preprocess frame)))
-                                        (map intern-entry
-                                             (continuation-mark-set->context
-                                              (continuation-marks t)))))
-                             snapshots)))]
+    (define run-again?
+      (let loop ([t weak-to-track])
+        (cond [(paused . > . 0) #t]
+              [(eq? t sampler-thread) #f]
+              [(thread? t)
+               (when custom-keys
+                 (set! custom-snapshots
+                       (cons (continuation-mark-set->list*
+                              (continuation-marks t)
+                              custom-keys) ; frames
+                             custom-snapshots)))
+               (set! snapshots
+                     (cons (list* (thread-id t)
+                                  (current-process-milliseconds t)
+                                  (if do-errortrace
+                                      (for/list ([frame (in-list
+                                                         (continuation-mark-set->list
+                                                          (continuation-marks t)
+                                                          errortrace-key))])
+                                        (intern-entry (errortrace-preprocess frame)))
+                                      (map intern-entry
+                                           (continuation-mark-set->context
+                                            (continuation-marks t)))))
+                           snapshots))
+               #t]
               [(custodian? t)
-               (for-each loop (custodian-managed-list t super-cust))]
-              ;; cannot assume that it's a list: we might get other values from
-              ;; a custodian managed list
-              [(list? t) (for-each loop t)])))
-    (sampler))
+               (for-each loop (custodian-managed-list t super-cust))
+               ;; Custodians may spawn new threads, which we will then track
+               #t]
+              ;; If weak box value is GC'd, we fall through and ignore it
+              [(weak-box? t) (loop (weak-box-value t))]
+              [(list? t) (ormap loop t)])))
+    (when run-again?
+      (sampler)))
   (define cpu-time   0)
   (define start-time (current-process-milliseconds))
   (define (add-time)

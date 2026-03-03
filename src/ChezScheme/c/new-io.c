@@ -54,8 +54,8 @@
 #endif /* PTHREADS */
 
 /* locally defined functions */
-static ptr new_open_output_fd_helper PROTO((const char *filename, INT mode, INT flags, INT options));
-static INT lockfile PROTO((INT fd));
+static ptr new_open_output_fd_helper(const char *filename, INT mode, INT flags, INT options);
+static INT lockfile(INT fd);
 static int is_valid_zlib_length(iptr count);
 static int is_valid_lz4_length(iptr count);
 
@@ -703,6 +703,20 @@ ptr S_set_fd_pos(ptr file, ptr pos, IBOOL gzflag) {
   }
 }
 
+ptr S_fd_can_set_pos(ptr file) {
+  OFF_T offset = LSEEK(GET_FD(file), 0, SEEK_CUR);
+
+  if (offset != -1) {
+    if (LSEEK(GET_FD(file), offset, SEEK_SET) == offset)
+      return Strue;
+  }
+
+  if (errno == ESPIPE)
+    return Sfalse;
+
+  return S_strerror(errno);
+}
+
 ptr S_get_fd_non_blocking(WIN32_UNUSED ptr file, WIN32_UNUSED IBOOL gzflag) {
 #ifdef WIN32
   return Sfalse;
@@ -794,7 +808,7 @@ ptr S_set_fd_length(ptr file, ptr length, IBOOL gzflag) {
   return flag ? S_strerror(errno) : Strue;
 }
 
-void S_new_io_init() {
+void S_new_io_init(void) {
   if (S_boot_time) {
     S_set_symbol_value(S_intern((const unsigned char *)"$c-bufsiz"), Sinteger(SBUFSIZ));
   }
@@ -942,6 +956,6 @@ ptr S_bytevector_uncompress(ptr dest_bv, iptr d_start, iptr d_count,
           return Sstring("internal error uncompressing ~s");
       }
     default:
-      return Sstring("unepxected compress format ~s");
+      return Sstring("unexpected compress format ~s");
   }
 }

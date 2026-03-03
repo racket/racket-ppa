@@ -29,7 +29,8 @@
          syntax-transforming-with-lifts?
          syntax-transforming-module-expression?
          syntax-local-transforming-module-provides?
-         
+         syntax-local-compiling-module?
+
          syntax-local-context
          syntax-local-introduce
          syntax-local-identifier-as-binding
@@ -86,7 +87,14 @@
   (and ctx
        (expand-context-requires+provides ctx)
        #t))
-  
+
+(define (syntax-local-compiling-module?)
+  (define ctx (get-current-expand-context #:fail-ok? #t))
+  (and ctx
+       (eq? (expand-context-context ctx) 'module-begin)
+       (expand-context-to-parsed? ctx)
+       (module-path-index-resolved (root-expand-context-self-mpi ctx))))
+
 ;; ----------------------------------------
 
 (define (syntax-local-context)
@@ -318,8 +326,9 @@
   (add-lifted! lift-ctx post-s wrt-phase) ; record lift for the target phase
   (values ctx post-s))
 
-(define/who (syntax-local-lift-require s use-s)
-  (define sc (new-scope 'lifted-require))
+(define/who (syntax-local-lift-require s use-s [new-scope? #t])
+  (define sc (and new-scope?
+                  (new-scope 'lifted-require)))
   (define-values (ctx added-s)
     (do-local-lift-to-module who
                              (datum->syntax #f s)
@@ -336,11 +345,11 @@
                                (require-spec-shift-for-syntax s))
                              #:post-wrap
                              (lambda (s phase require-lift-ctx)
-                               (wrap-form '#%require (add-scope s sc) phase))))
+                               (wrap-form '#%require (if sc (add-scope s sc) s) phase))))
   (without-expand-context
    (namespace-visit-available-modules! (expand-context-namespace ctx)
                                        (expand-context-phase ctx)))
-  (define result-s (add-scope use-s sc))
+  (define result-s (if sc (add-scope use-s sc) use-s))
   (log-expand ctx 'lift-require added-s use-s result-s)
   result-s)
 

@@ -67,8 +67,12 @@ specially:
  @item{@as-index{@racketidfont{code:blank}} --- produces a space.}
 
  @item{@racket[(#,(as-index (racketidfont "code:comment")) _s ...)]
- --- produces a comment block, with each @racket[_s] on its own line,
- where each @racket[_s] must be a string or a pict.}
+ --- produces a comment (prefixed with a single semicolon), with each @racket[_s] on the same line,
+ where each @racket[_s] must be a string or a value that is @tech{pict convertible}.}
+
+ @item{@racket[(#,(as-index (racketidfont "code:comment2")) _s ...)]
+ --- produces a comment (prefixed with two semicolons), with each @racket[_s] on the same line,
+ where each @racket[_s] must be a string or a value that is @tech{pict convertible}.}
 
  @item{@racket[(#,(as-index (racketidfont "code:line")) _datum ...)]
  --- typesets the @racket[_datum] sequence, which is mostly useful for
@@ -199,7 +203,7 @@ ascent.}
 
 A list of strings to color as syntactic-form names. The default
 includes all of the forms provided by @racketmodname[racket/base] 
-and all of the forms provided by @racketmodname[mzscheme].}
+and all of the forms provided by @racketmodname[mzscheme #:indirect].}
 
 
 @defparam[current-const-list names (listof string?)]{

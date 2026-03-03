@@ -4,6 +4,7 @@
 (library (chezpart)
   (export)
   (import (chezscheme))
+  (import (only $system $begin-unsafe))
   (export (import
            (rename (except (chezscheme)
                            remq remove
@@ -28,14 +29,19 @@
                            dynamic-wind
                            call-with-current-continuation
                            call-in-continuation
+                           with-continuation-mark current-continuation-marks continuation-marks?
+                           call-with-immediate-continuation-mark continuation-marks-first
+                           continuation-marks->list continuation-marks->iterator
                            make-engine engine-block engine-return
                            current-eval load
                            sleep thread? buffer-mode?
                            equal?
                            vector? mutable-vector? vector-length vector-ref vector-set!
                            vector-copy vector-fill! vector->immutable-vector vector->list
+                           vector-append vector-set/copy vector-copy!
+                           immutable-vector?
                            random random-seed
-                           box? unbox set-box!
+                           box? unbox set-box! immutable-box? mutable-box?
 			   get-thread-id
 			   threaded?
                            map for-each andmap ormap
@@ -47,7 +53,12 @@
                            bitwise-not
                            fllog flatan
                            fxquotient
+                           expt
                            make-flvector flvector-copy
+                           make-pseudo-random-generator
+                           pseudo-random-generator?
+                           pseudo-random-generator-next!
+                           pseudo-random-generator->vector
                            vector->pseudo-random-generator
                            vector->pseudo-random-generator!)
                    [make-parameter chez:make-parameter]
@@ -89,4 +100,5 @@
                    [call-with-input-file chez:call-with-input-file]
                    [read-char chez:read-char]
                    [gcd chez:gcd]
-                   [lcm chez:lcm]))))
+                   [lcm chez:lcm]))
+          (rename [$begin-unsafe begin-unsafe])))

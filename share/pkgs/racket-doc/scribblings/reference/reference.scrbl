@@ -57,7 +57,9 @@ languages.}
 the @racketmodname[racket] library and will typically load faster.
 
 The @racketmodname[racket] library combines
-@racketmodname[racket/base]@racket-extra-libs[].}
+@racketmodname[racket/base]@racket-extra-libs[].
+In addition, it re-exports @racket[for-syntax] everything from
+@racketmodname[racket/base].}
 
 @table-of-contents[]
 
@@ -84,6 +86,13 @@ The @racketmodname[racket] library combines
 
 @(bibliography
 
+  (bib-entry #:key "Baker93"
+             #:author "Henry G. Baker"
+             #:title "Equal Rights for Functional Objects or, the More Things Change, the More They are the Same"
+             #:date "1993"
+             #:location "SIGPLAN OOPS Messenger"
+             #:url "https://doi.org/10.1145/165593.165596")
+
   (bib-entry #:key "C99"
              #:author "ISO/IEC"
              #:title "ISO/IEC 9899:1999 Cor. 3:2007(E)"
@@ -100,7 +109,7 @@ The @racketmodname[racket] library combines
              #:author "Olivier Danvy and Andre Filinski"
              #:title "Abstracting Control"
              #:location "LISP and Functional Programming"
-             #:url "http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.6.960&rep=rep1&type=pdf"
+             #:url "https://doi.org/10.1145/91556.91622"
              #:date "1990")
 
   (bib-entry #:key "Felleisen88a"
@@ -128,8 +137,22 @@ The @racketmodname[racket] library combines
              #:author "Matthew Flatt"
              #:title "Composable and Compilable Macros: You Want it When?"
              #:location "International Conference on Functional Programming (ICFP)"
-             #:url "http://www.cs.utah.edu/plt/publications/gpce13-f-color.pdf"
+             #:url "https://www.cs.utah.edu/plt/publications/macromod.pdf"
              #:date "2002")
+
+  (bib-entry #:key "Flatt07"
+             #:author "Matthew Flatt, Gang Yu, Robert Bruce Findler, and Matthias Felleisen"
+             #:title "Adding Delimited and Composable Control to a Production Programming Environment"
+             #:location "International Conference on Functional Programming (ICFP)"
+             #:url "http://www.cs.utah.edu/plt/publications/icfp07-fyff.pdf"
+             #:date "2007")
+
+  (bib-entry #:key "Flatt13"
+             #:author "Matthew Flatt"
+             #:title "Submodules in Racket: You Want It When, Again?"
+             #:location "International Conference on Generative Programming: Concepts & Experiences (GPCE'13)"
+             #:url "https://www.cs.utah.edu/plt/publications/gpce13-f-color.pdf"
+             #:date "2013")
 
   (bib-entry #:key "Friedman95"
              #:title "Exception system proposal"
@@ -218,7 +241,7 @@ The @racketmodname[racket] library combines
   (bib-entry #:key "Sapin18"
              #:author "Simon Sapin"
              #:title "The WTF-8 Encoding"
-             #:url "http://simonsapin.github.io/wtf-8/"
+             #:url "https://wtf-8.codeberg.page"
              #:date "2018")
 
   (bib-entry #:key "Shan04"
@@ -261,6 +284,20 @@ The @racketmodname[racket] library combines
              #:location "Object-Oriented Programming, Systems, and Languages (OOPSLA)"
              #:url "http://www.eecs.northwestern.edu/~robby/pubs/papers/oopsla2012-stff.pdf"
              #:date "2012")
+
+  (bib-entry #:key "Stucki15"
+             #:title "RRB Vector: A Practical General Purpose Immutable Sequence"
+             #:author "Nicolas Stucki, Tiark Rompf, Vlad Ureche, and Phil Bagwell"
+             #:location "International Conference on Functional Programming"
+             #:url "https://dl.acm.org/doi/abs/10.1145/2784731.2784739"
+             #:date "2015")
+
+  (bib-entry #:key "Torosyan21"
+             #:title "Runtime and Compiler Support for HAMTs"
+             #:author "Son Torosyan, Jon Zeppieri, and Matthew Flatt"
+             #:location "Dynamic Languages Symposium (DLS)"
+             #:url "https://www.cs.utah.edu/plt/publications/dls21-tzf.pdf"
+             #:date "2021")
   )
 
 @;------------------------------------------------------------------------

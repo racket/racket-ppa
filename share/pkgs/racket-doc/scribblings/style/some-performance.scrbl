@@ -1,6 +1,9 @@
 #lang scribble/base
 
-@(require "shared.rkt")
+@(require "shared.rkt"
+          (for-label syntax/parse
+                     racket/fixnum
+                     racket/unsafe/ops))
 
 @; -----------------------------------------------------------------------------
 
@@ -87,9 +90,8 @@ Macros copy code. Also, Racket is really a tower of macro-implemented
 When you design your own macro with a large expansion, try to factor it
  into a function call that consumes small thunks or procedures.
 
-@compare[
-@racketmod0[#:file
-@tt{good}
+@compare0[
+@racketmod0[
 racket
 ...
 (define-syntax (search s)
@@ -101,36 +103,31 @@ racket
               (λ (x) b))]))
 
 (define (sar/λ l p)
-  (for ((a '())) ((y l))
+  (for/fold ([a '()]) ([y l])
     (unless (bad? y)
       (cons (p y) a))))
 
 (define (bad? x)
   ... many lines ...)
-...
 ]
 @; -----------------------------------------------------------------------------
-@(begin
-#reader scribble/comment-reader
-[racketmod0 #:file
-@tt{bad}
+[racketmod0
 racket
 ...
 (define-syntax (search s)
   (syntax-parse s
     [(_ x (e:expr ...)
-       (~datum in)
-       b:expr)
+        (~datum in)
+        b:expr)
      #'(begin
          (define (bad? x)
            ... many lines ...)
          (define l
-	   (list e ...))
-         (for ((a '())) ((x l))
+           (list e ...))
+         (for/fold ([a '()]) ([x l])
            (unless (bad? x)
              (cons b a))))]))
 ]
-)
 ]
 
 As you can see, the macro on the left calls a function with a list of the
@@ -169,12 +166,9 @@ the code in the @tt{no-contract} submodule may go wrong in various ways.
 The @emph{first} and simplest way to create a @tt{no-contract} submodule is to use
 the @racket[#:unprotected-submodule] functionality of @racket[contract-out].
 
-@compare[
+@compare0[#:right "fast"
 @;%
-@(begin
-#reader scribble/comment-reader
-(racketmod0 #:file
- @tt{good}
+(racketmod0
  racket
 
  (define state? zero?)
@@ -183,14 +177,13 @@ the @racket[#:unprotected-submodule] functionality of @racket[contract-out].
    (-> state? action?))
 
  (provide
-   (contract-out
-     (human strategy/c)
-     (ai strategy/c)))
+  (contract-out
+   [human strategy/c]
+   [ai strategy/c]))
 
 
-
- (code:comment #, @1/2-line[])
- (code:comment #, @t{implementation})
+ (code:comment2 #, @1/2-line[])
+ (code:comment2 #, @t{implementation})
 
  (define (general p)
    (lambda (_) pi))
@@ -199,13 +192,10 @@ the @racket[#:unprotected-submodule] functionality of @racket[contract-out].
    ((general 'gui) x))
 
  (define (ai x)
-   ((general 'tra) x))))
+   ((general 'tra) x)))
 
-@(begin
-#reader scribble/comment-reader
-(racketmod0 #:file
- @tt{fast}
- racket 
+(racketmod0
+ racket
 
  (define state? zero?)
  (define action? odd?)
@@ -213,23 +203,22 @@ the @racket[#:unprotected-submodule] functionality of @racket[contract-out].
    (-> state? action?))
 
  (provide
-   (contract-out
-     (code:hilite #:unprotected-submodule) 
-       (code:hilite no-contract)
-     (human strategy/c)
-     (ai strategy/c)))
+  (contract-out (code:hilite (code:line
+   #:unprotected-submodule no-contract))
+   [human strategy/c]
+   [ai strategy/c]))
 
- (code:comment #, @1/2-line[])
- (code:comment #, @t{implementation})
+ (code:comment2 #, @1/2-line[])
+ (code:comment2 #, @t{implementation})
 
-  (define (general s)
-    (lambda (_) pi))
+ (define (general s)
+   (lambda (_) pi))
 
-  (define (human x)
-    ((general 'gui) x))
-  
-  (define (ai x)
-    ((general 'tra) x))))
+ (define (human x)
+   ((general 'gui) x))
+
+ (define (ai x)
+   ((general 'tra) x)))
 ]
 
 The module called @tt{good} illustrates what the code might look
@@ -241,39 +230,32 @@ the same identifiers as the original module but without contracts.
 
 Once the submodule exists, using the library with or without contracts is
 straightforward:
-@compare[
+@compare0[#:left "needs-goodness" #:right "needs-speed"
 @;%
-@(begin
-#reader scribble/comment-reader
-(racketmod0 #:file
- @tt{needs-goodness}
+(racketmod0
  racket
 
  (require "fast.rkt")
 
  human
- ;; comes with contracts 
- ;; as if we had required 
- ;; "good.rkt" itself
+ (code:comment2 #, @elem{comes with contracts})
+ (code:comment2 #, @elem{as if we had required })
+ (code:comment2 #, @elem{"good.rkt" itself})
 
  (define state1 0)
  (define state2 
-   (human state1))))
+   (human state1)))
 
 @(begin
 #reader scribble/comment-reader
-(racketmod0 #:file
- @tt{needs-speed}
+(racketmod0
  racket
 
- (require 
-  (submod 
-    "fast.rkt"
-    no-contract))
+ (require (submod "fast.rkt" no-contract))
 
  human
- ;; comes without
- ;; a contract
+ (code:comment2 #, @elem{comes without})
+ (code:comment2 #, @elem{a contract})
 
  (define state* 
    (build-list 0 1))
@@ -282,7 +264,7 @@ straightforward:
 ]
 Both modules @racket[require] the @tt{fast} module, but @tt{needs-goodness}
 on the left goes through the contracted @racket[provide] while
-@tt{needs-speed} on the right uses the @tt{no-contract} submodule. Tchnically,
+@tt{needs-speed} on the right uses the @tt{no-contract} submodule. Technically,
 the left module imports @racket[human] with contracts; the right one
 imports the same function without contract and thus doesn't have to pay the
 performance penalty.
@@ -303,9 +285,7 @@ The @tt{no-contract} submodule generated by this first, easy approach
 retains the dependency on @racketmodname[#, 'racket/contract] at both compile and run time. 
 Here is a variant of the above module that demonstrates this point: 
 @;%
-@(begin
-#reader scribble/comment-reader
-(racketmod0 #:file 
+@(racketmod0 #:file
  @tt{problems-with-unprotected-submodule}
  racket
 
@@ -316,23 +296,21 @@ Here is a variant of the above module that demonstrates this point:
 (provide
  (contract-out
   #:unprotected-submodule no-contract
-  (human strategy/c)
-  (ai strategy/c)))
+  [human strategy/c]
+  [ai strategy/c]))
 
 (define (general p) pi)
 
 (define human (general 'gui))
 
-(define ai (general 'tra))))
+(define ai (general 'tra)))
 @;%
 Even though the @racket[contract-out] specification seems to remove the
 contracts, requiring the @tt{no-contract} still raises a contract error: 
 @;%
-@(begin
-#reader scribble/comment-reader
-(racketblock
+@(racketblock
 (require (submod "." server no-contract))
-))
+)
 @;%
 @bold{Explanation} The @tt{no-contract} submodule depends on the main
 module, so the require runs the body of the main module, and doing so
@@ -343,12 +321,9 @@ The @emph{second} way to create a @tt{no-contract} submodule requires
 systematic work from the developer and eliminates the run-time dependency
 on @racketmodname[#, 'racket/contract]. Here are the two modules from
 above, with the right one derived manually from the one on the left: 
-@compare[
+@compare0[#:left "good2" #:right "fast2"
 @;%
-@(begin
-#reader scribble/comment-reader
-(racketmod0 #:file
- @tt{good2}
+(racketmod0
  racket
 
  (define state? zero?)
@@ -357,12 +332,12 @@ above, with the right one derived manually from the one on the left:
    (-> state? action?))
 
  (provide
-   (contract-out
-     (human strategy/c)
-     (ai strategy/c)))
+  (contract-out
+   [human strategy/c]
+   [ai strategy/c]))
 
- (code:comment #, @1/2-line[])
- (code:comment #, @t{implementation})
+ (code:comment2 #, @1/2-line[])
+ (code:comment2 #, @t{implementation})
 
  (define (general p)
    (lambda (_) pi))
@@ -371,12 +346,9 @@ above, with the right one derived manually from the one on the left:
    ((general 'gui) x))
 
  (define (ai x)
-   ((general 'tra) x))))
+   ((general 'tra) x)))
 
-@(begin
-#reader scribble/comment-reader
-(racketmod0 #:file
- @tt{fast2}
+(racketmod0
  racket 
 
  (define state? zero?)
@@ -385,17 +357,17 @@ above, with the right one derived manually from the one on the left:
    (-> state? action?))
 
  (provide
-   (contract-out
-     (human strategy/c)
-     (ai strategy/c)))
+  (contract-out
+   [human strategy/c]
+   [ai strategy/c]))
 
- (code:comment #, @1/2-line[])
- (code:comment #, @t{implementation})
+ (code:comment2 #, @1/2-line[])
+ (code:comment2 #, @t{implementation})
 
  (module no-contract racket 
    (provide 
-     human 
-     ai)
+    human
+    ai)
 
    (define (general s)
      (lambda (_) pi))
@@ -407,7 +379,7 @@ above, with the right one derived manually from the one on the left:
      ((general 'tra) x)))
 
  (require 'no-contract)
-))
+)
 ]
 The @tt{fast2} module on the right encapsulates the
 definitions in a submodule called @tt{no-contract}; the @racket[provide] in

@@ -6,6 +6,8 @@
 
 @(define the-eval (make-base-eval))
 @(the-eval '(require typed/racket))
+@(define the-eval* (make-base-eval))
+@(the-eval* '(require typed/racket))
 
 @title[#:tag "occurrence-typing"]{Occurrence Typing}
 
@@ -84,6 +86,56 @@ the typechecker learns from the result of applying the function:
 Predicates for all built-in types are annotated with similar propositions
 that allow the type system to reason logically about predicate checks.
 
+@subsection{Specifying Propositions}
+
+While propositions are provided for all built-in type predicates,
+we may want to provide propositions for our own predicates as well.
+For instance, consider the following predicate,
+which determines whether a given list contains only strings.
+Intuitively, a value that satisfies the predicate must have type
+@racket[(Listof String)].
+
+@examples[#:no-result #:eval the-eval*
+  (: listof-string? (-> (Listof Any) Boolean))
+  (define (listof-string? lst)
+    (andmap string? lst))
+]
+
+We then may wish to use this predicate to narrow a type in the @racket[main] function:
+
+@examples[#:label #f #:eval the-eval*
+  (: main (-> (Listof Any) String))
+  (eval:error (define (main lst)
+                (cond
+                  [(listof-string? lst) (first lst)]
+                  [else "not a list of strings"])))
+]
+
+Unfortunately, Typed Racket fails to narrow the type, because we did not specify
+a proposition for @racket[listof-string?].@margin-note*{
+  Note that if we directly use @racket[(andmap string? lst)] as the conditional expression,
+  @racket[main] would be successfully type-checked,
+  because @racket[andmap] and @racket[string?] do provide propositions
+  that allow Typed Racket to narrow the type.
+} To fix this issue, we include
+the proposition in the @racket[->] form for @racket[listof-string?].
+
+@examples[#:no-result #:eval the-eval
+  (: listof-string? (-> (Listof Any) Boolean : (Listof String)))
+  (define (listof-string? lst)
+    (andmap string? lst))
+]
+
+With the proposition, Typed Racket successfully type-checks @racket[main].
+
+@examples[#:label #f #:eval the-eval
+  (: main (-> (Listof Any) String))
+  (define (main lst)
+    (cond
+      [(listof-string? lst) (first lst)]
+      [else "not a list of strings"]))
+]
+
 @subsection{One-sided Propositions}
 
 Sometimes, a predicate may provide information when it
@@ -137,7 +189,7 @@ be re-written to use @racket[cond] with no additional effort:
 ]
 
 In some cases, the type system does not have enough information or is
-too conservative to typecheck an expression. For example, consider
+too conservative to type-check an expression. For example, consider
 the following interaction:
 
 @examples[#:label #f #:eval the-eval
@@ -216,7 +268,7 @@ Typed Racket is able to reason about some cases when variables introduced
 by let-expressions alias other values (e.g. when they alias non-mutated identifiers, 
 @racket[car]/@racket[cdr]/@racket[struct] accesses into immutable values, etc...). 
 This allows programs which explicitly rely on occurrence typing and aliasing to 
-typecheck:
+type-check:
 
 @examples[#:no-result #:eval the-eval
 (: f (Any -> Number))

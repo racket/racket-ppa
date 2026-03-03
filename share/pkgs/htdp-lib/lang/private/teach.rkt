@@ -164,6 +164,14 @@
 (define-for-syntax (stepper-ignore-checker stx)
   (stepper-syntax-property stx 'stepper-skipto '(syntax-e cdr syntax-e cdr car)))
 
+
+;; wrap-lambda-remove-name: syntax? -> syntax?
+;;   Removes source-location names for lambdas by erasing the source location
+;;   Preserves the lexical context, the syntax properties, but removes the source location
+(define-for-syntax (wrap-lambda-remove-name stx)
+  (cond [(syntax-local-name) stx]
+        [else (datum->syntax stx (syntax-e stx) #f stx)]))
+
 (define-for-syntax (map-with-index proc . lists)
   (let loop ([i 0] [lists lists] [rev-result '()])
     (if (null? (car lists))
@@ -1018,17 +1026,27 @@
                           #,(if setters?
                                 (quasisyntax/loc stx
                                   (define (#,parametric-signature-name field_ ...)
-                                    (make-combined-signature
-                                     '#,signature-name
-                                     (list (signature (at name_ (predicate raw-predicate)))
-                                           #,@(map (lambda (field-name getter-name)
-                                                     #`(make-property-signature (signature-name #,field-name)
-                                                                                #,getter-name
-                                                                                #,field-name
-                                                                                (signature-syntax #,field-name)))
-                                                   (syntax->list #'(field_ ...))
-                                                   (syntax->list #'(getter-id ...))))
-                                     'parametric-signature)))
+                                    (let ((sig
+                                           (make-combined-signature
+                                            '#,signature-name
+                                            (list (signature (at name_ (predicate raw-predicate)))
+                                                  #,@(map (lambda (field-name getter-name)
+                                                            #`(make-property-signature (signature-name #,field-name)
+                                                                                       #,getter-name
+                                                                                       #,field-name
+                                                                                       (signature-syntax #,field-name)))
+                                                          (syntax->list #'(field_ ...))
+                                                          (syntax->list #'(getter-id ...))))
+                                            'parametric-signature)))
+                                      (let ((arbs (map signature-arbitrary (list field_ ...))))
+                                        (when (andmap values arbs)
+                                          (set-signature-arbitrary! 
+                                           sig
+                                           (apply arbitrary-record
+                                                  #,constructor-name 
+                                                  (list #,@getter-names)
+                                                  arbs))))
+                                      sig)))
                                 (quasisyntax/loc stx
                                   (define (#,parametric-signature-name field_ ...)
                                     (let* ((sigs (list (signature field_) ...))
@@ -1794,13 +1812,12 @@
   ;; Syntax Identifier -> Expression
   ;; Produces an expression which raises an error reporting unfinished code.
   (define (dots-error stx name)
-    (stepper-syntax-property
-     (stepper-syntax-property
+    (with-stepper-syntax-properties
+        (['stepper-black-box-expr stx]
+         ['stepper-skip-completely #t])
       (quasisyntax/loc stx
         (error (quote (unsyntax name))
-               "expected a finished expression, but found a template"))
-      'stepper-black-box-expr stx)
-     'stepper-skip-completely #t))
+               "expected a finished expression, but found a template"))))
 
   ;; Expression -> Expression
   ;; Transforms unfinished code (... and the like) to code
@@ -1818,17 +1835,18 @@
        (syntax-case stx (set!)
          [(set! form expr) (dots-error stx (syntax form))]
          [(form . rest)
-
-	  (quasisyntax/loc stx
-            (begin
-              #,(dots-error stx (syntax form))
-	      #,(stepper-syntax-property
-                 (quasisyntax/loc stx
-                   (quote-syntax
-                    #,(syntax-property #'rest 'identifiers-as-disappeared-uses? #t)
-                    #:local))
-                 'stepper-skip-completely
-                 #t)))
+          (stepper-syntax-property
+           (quasisyntax/loc stx
+             (begin
+               #,(dots-error stx (syntax form))
+               #,(stepper-syntax-property
+                  (quasisyntax/loc stx
+                    (quote-syntax
+                     #,(syntax-property #'rest 'identifiers-as-disappeared-uses? #t)
+                     #:local))
+                  'stepper-skip-completely
+                  #t)))
+           'stepper-skipto '(syntax-e cdr car))
 
 	  ;; The solution below enforces that `rest` is syntactically
 	  ;; correct, and as a result, it displays _correct_ binding arrows.
@@ -2287,7 +2305,8 @@
                                      stx
                                      (syntax->list (syntax (lexpr ...)))
                                      args)
-            (syntax/loc stx (lambda arg-seq lexpr ...)))]
+            (wrap-lambda-remove-name
+             (syntax/loc stx (lambda arg-seq lexpr ...))))]
          ;; Bad lambda because bad args:
          [(_ args . __)
           (teach-syntax-error
@@ -2494,7 +2513,8 @@
                                      stx
                                      (syntax->list (syntax exprs))
                                      names)
-            (syntax/loc stx (lambda (name ...) . exprs)))]
+            (wrap-lambda-remove-name
+             (syntax/loc stx (lambda (name ...) . exprs))))]
          [(_ args . __)
           (teach-syntax-error
            'lambda
@@ -3228,7 +3248,7 @@
 
 (define Boolean (signature/arbitrary arbitrary-boolean Boolean (predicate boolean?)))
 
-(define True (signature True (enum #f)))
+(define True (signature True (enum #t)))
 (define False (signature False (enum #f)))
 
 (define String (signature/arbitrary arbitrary-printable-ascii-string String (predicate string?)))
@@ -3245,10 +3265,11 @@
 
 ; QuickCheck
 
-(provide for-all ==>
+(provide for-all 
          check-property
          expect expect-within expect-member-of expect-range
-         Property)
+         Property
+         (rename ==> ===>))
 
 (define-syntax (for-all stx)
   (syntax-case stx ()
@@ -3299,7 +3320,8 @@
   (with-handlers ((exn:fail?
                    (lambda (e)
                      (add-failed-check! (failed-check (property-error srcloc e)
-                                                      (exn-srcloc e))))))
+                                                      (exn-srcloc e)))
+                     #f)))
     (call-with-values
      (lambda ()
        (with-handlers

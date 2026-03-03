@@ -104,6 +104,7 @@ enum {
 
 typedef struct {
   int init_ns;
+  int make;
 #ifndef DONT_PARSE_COMMAND_LINE
   int num_enl;
 #endif  
@@ -230,6 +231,30 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
   volatile int exit_val = 0;
   volatile int did_config = 0;
 
+  if (fa->a->make) {
+    Scheme_Thread * volatile p;
+    mz_jmp_buf * volatile save, newbuf;
+
+    p = scheme_get_current_thread();
+    save = p->error_buf;
+    p->error_buf = &newbuf;
+    
+    if (!scheme_setjmp(newbuf)) {
+      Scheme_Object *a[2], *p, *param;
+      a[0] = scheme_intern_symbol("compiler/private/cm-minimal");
+      a[1] = scheme_intern_symbol("make-compilation-manager-load/use-compiled-handler");
+      p = scheme_dynamic_require(2, a);
+
+      p = _scheme_apply(p, 0, NULL);
+
+      param = scheme_builtin_value("current-load/use-compiled");
+      a[0] = p;
+      _scheme_apply(param, 1, a);
+    }
+
+    p->error_buf = save;
+  }
+
   if (fa->a->init_ns) {
     Scheme_Object *a[1], *nsreq;
     Scheme_Thread * volatile p;
@@ -282,10 +307,10 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
         
         if (!scheme_setjmp(newbuf)) {
           if (fa->eval_kind[i] == mzcmd_EVAL) {
-            scheme_eval_string_all_with_prompt(fa->evals_and_loads[i], fa->global_env, 2);
+            scheme_eval_string_all_with_prompt(fa->evals_and_loads[i], NULL, 2);
           } else if (fa->eval_kind[i] == mzcmd_LOAD) {
             /* eval from stdin */
-            scheme_eval_all_with_prompt(NULL, fa->global_env, 2);
+            scheme_eval_all_with_prompt(NULL, NULL, 2);
           } else if (fa->eval_kind[i] == mzcmd_EMBEDDED_REG) {
             scheme_register_embedded_load(-1, fa->evals_and_loads[i]);
             scheme_embedded_load(-1, fa->evals_and_loads[i], 1);
@@ -355,7 +380,7 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
           a[0] = e;
           b = scheme_apply(idb, 1, a);
           if (b == scheme_make_false()) {
-            if (!scheme_lookup_global(scheme_intern_symbol("main"), fa->global_env)) {
+            if (!scheme_lookup_global(scheme_intern_symbol("main"), NULL)) {
               scheme_signal_error("main: not defined or required into the top-level environment");
             }
           }
@@ -363,7 +388,7 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
           e = scheme_make_pair(e, scheme_vector_to_list(fa->main_args));
           e = scheme_datum_to_kernel_stx(e);
           
-	  e = scheme_eval_multi_with_prompt(e, fa->global_env);
+	  e = scheme_eval_multi_with_prompt(e, NULL);
 
           if (SAME_OBJ(e, SCHEME_MULTIPLE_VALUES)) {
             Scheme_Object **mv;
@@ -692,9 +717,9 @@ static int run_from_cmd_line(int argc, char *_argv[],
   int skip_coll_dirs = 0;
   Scheme_Object *collects_path = NULL, *collects_extra = NULL, *addon_dir = NULL;
   Scheme_Object *config_path = NULL;
-  Scheme_Object *host_collects_path = NULL, *host_config_path = NULL;
+  Scheme_Object *host_collects_path = NULL, *host_config_path = NULL, *host_addon_path = NULL;
   char *compiled_paths = NULL;
-  Scheme_Object *collects_paths_l, *collects_paths_r;
+  Scheme_Object *collects_paths_l, *collects_paths_r, *config_table;
 #ifndef DONT_PARSE_COMMAND_LINE
   char **evals_and_loads, *real_switch = NULL, specific_switch[2];
   int *eval_kind, num_enl;
@@ -719,7 +744,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
 #endif
   char *init_lib = INITIAL_NAMESPACE_MODULE;
   int was_config_flag = 0, saw_nc_flag = 0;
-  int no_compiled = 0;
+  int make = 0, no_compiled = 0;
   int init_ns = 0, no_init_ns = 0;
   int cross_compile = 0;
   Scheme_Object *syslog_level = NULL, *stderr_level = NULL, *stdout_level = NULL;
@@ -773,6 +798,8 @@ static int run_from_cmd_line(int argc, char *_argv[],
       argv[0] = "-N";
     else if (!strcmp("--exec", argv[0]))
       argv[0] = "-E";
+    else if (!strcmp("--make", argv[0]))
+      argv[0] = "-y";
     else if (!strcmp("--no-compiled", argv[0]))
       argv[0] = "-c";
     else if (!strcmp("--no-lib", argv[0]))
@@ -900,6 +927,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
             was_config_flag = 1;
             host_config_path = config_path;
             host_collects_path = collects_path;
+            host_addon_path = addon_dir;
           }
 	  break;
 	case 'U':
@@ -930,6 +958,10 @@ static int run_from_cmd_line(int argc, char *_argv[],
           collects_extra = scheme_make_pair(check_make_path(prog, real_switch, argv[0]), collects_extra);
           was_config_flag = 1;
 	  break;
+        case 'y':
+          make = 1;
+          was_config_flag = 1;
+          break;
         case 'c':
           no_compiled = 1;
           was_config_flag = 1;
@@ -1196,19 +1228,6 @@ static int run_from_cmd_line(int argc, char *_argv[],
 
   if (no_init_ns)
     init_ns = 0;
-
-  if (show_vers) {
-#ifndef RACKET_CMD_LINE  
-    if (!use_repl
-#ifdef CMDLINE_STDIO_FLAG
-	|| alternate_rep
-#endif
-	)
-#endif
-      PRINTF("%s", BANNER);
-
-   CMDLINE_FFLUSH(stdout);
-  }
 #endif /* DONT_PARSE_COMMAND_LINE */
 
   if (!syslog_level) {
@@ -1290,6 +1309,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
   if (cross_compile) {
     host_config_path = adjust_config_path(host_config_path);
     scheme_set_host_config_path(host_config_path);
+    /* host_addon_path installed below */
   }
 
   /* Make list of additional collection paths: */
@@ -1327,9 +1347,10 @@ static int run_from_cmd_line(int argc, char *_argv[],
   set_os_process_name(sprog);
 #endif
   
-  if (no_compiled)
+  if (no_compiled) {
     scheme_set_compiled_file_paths(scheme_make_null());
-  else {
+    make = 0;
+  } else {
     const char *s;
     s = getenv("PLT_ZO_PATH");
     if (s)
@@ -1366,13 +1387,53 @@ static int run_from_cmd_line(int argc, char *_argv[],
     addon_dir = scheme_path_to_complete_path(addon_dir, NULL);
     scheme_set_addon_dir(addon_dir);
   }
+  if (cross_compile) {
+    if (!host_addon_path) {
+     char *s;
+     s = getenv("PLTADDONDIR");
+     if (s) {
+       s = scheme_expand_filename(s, -1, NULL, NULL, 0);
+       if (s) host_addon_path = scheme_make_path(s);
+     }
+    }
+    scheme_set_host_addon_dir(host_addon_path);
+  }
 
   /* Creates the main kernel environment */
   global_env = mk_basic_env();
 
+  config_table = scheme_read_installation_config_table(global_env);
   if (!skip_coll_dirs)
-    scheme_init_collection_paths_post(global_env, collects_paths_l, collects_paths_r);
-  scheme_init_compiled_roots(global_env, compiled_paths);
+    scheme_init_collection_paths_post_config(global_env, collects_paths_l, collects_paths_r, config_table);
+  scheme_init_compiled_roots_config(global_env, compiled_paths, config_table);
+
+  {
+    Scheme_Object *build_stamp;
+    build_stamp = scheme_hash_tree_get((Scheme_Hash_Tree *)config_table, scheme_intern_symbol("build-stamp"));
+    if (build_stamp) {
+      char *s;
+      intptr_t s_len;
+      s = scheme_display_to_string(build_stamp, &s_len);
+      if (s_len) {
+        scheme_set_build_stamp(s);
+      }
+    }
+  }
+
+#ifndef DONT_PARSE_COMMAND_LINE
+  if (show_vers) {
+#ifndef RACKET_CMD_LINE
+    if (!use_repl
+#ifdef CMDLINE_STDIO_FLAG
+        || alternate_rep
+#endif
+        )
+#endif
+      PRINTF("%s", BANNER);
+
+    CMDLINE_FFLUSH(stdout);
+  }
+#endif
 
   scheme_seal_parameters();
 
@@ -1380,6 +1441,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
   fa = (FinishArgs *)scheme_malloc(sizeof(FinishArgs));
   fa->a = fa_a;
   fa->a->init_ns = init_ns;
+  fa->a->make = make;
 #ifndef DONT_PARSE_COMMAND_LINE
   fa->evals_and_loads = evals_and_loads;
   fa->eval_kind = eval_kind;
@@ -1431,13 +1493,14 @@ static int run_from_cmd_line(int argc, char *_argv[],
   "  -e <exprs>, --eval <exprs>\n"
   "     Evaluate <exprs>, print results\n"
   "  -f <file>, --load <file>\n"
-  "     Like -e '(load \"<file>\")' without printing\n"
+  "     Like -e '(load \"<file>\")' without printing, or\n"
+  "     evaluates all from input when <file> is \"-\"\n"
   "  -t <file>, --require <file>\n"
   "     Like -e '(require (file \"<file>\"))' [*]\n"
   "  -l <path>, --lib <path>\n"
   "     Like -e '(require (lib \"<path>\"))' [*]\n"
   "  -p <package>\n"
-  "     Like -e '(require (planet \"<package>\")' [*]\n"
+  "     Like -e '(require (planet \"<package>\"))' [*]\n"
   "  -r <file>, --script <file>\n"
   "     Same as -f <file> -N <file> --\n"
   "  -u <file>, --require-script <file>\n"
@@ -1464,10 +1527,12 @@ static int run_from_cmd_line(int argc, char *_argv[],
 # endif
 # ifndef NO_YIELD_BEFORE_EXIT
   "  -V, --no-yield\n"
-  "     Skip `((executable-yield-handler) <status>)` on exit\n"
+  "     Skip `((executable-yield-handler) <status>)` on exit; implies -v\n"
 # endif
   "\n"
   "Configuration options:\n\n"
+  "  -y, --make\n"
+  "     Yes, enable automatic update of compiled files\n"
   "  -c, --no-compiled\n"
   "     Disable loading of compiled files\n"
   "  -q, --no-init-file\n"

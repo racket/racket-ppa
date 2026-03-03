@@ -159,7 +159,9 @@ context's transformation applies to stipple and gradient coordinates.}
 @defmethod[(is-immutable?)
            boolean?]{
 
-Returns @racket[#t] if the brush object is immutable.
+Returns @racket[#t] if the brush object is immutable or if it has been
+  locked. A pen is locked when it is selected into a @racket[dc<%>] object
+  (via @method[dc<%> set-brush]) or was obtained from a @racket[brush-list%].
 
 }
 
@@ -171,9 +173,8 @@ Returns @racket[#t] if the brush object is immutable.
              [(set-color [red byte?] [green byte?] [blue byte?])
               void?])]{
 
-Sets the brush's color.  A brush cannot be modified if it was obtained
- from a @racket[brush-list%] or while it is selected into a drawing
- context.
+Sets the brush's color. A brush may not be modified if it @method[brush% is-immutable?].
+
 
 For the case that the color is specified using a string, see
  @racket[color-database<%>] for information about color names.
@@ -193,9 +194,8 @@ Sets or removes the @tech{brush stipple} bitmap, where @racket[#f]
  information about drawing with stipples.
 
 If @racket[bitmap] is modified while is associated with a brush, the
- effect on the brush is unspecified. A brush cannot be modified if it
- was obtained from a @racket[brush-list%] or while it is selected into
- a drawing context.
+ effect on the brush is unspecified.
+  A brush may not be modified if it @method[brush% is-immutable?].
 
 }
 
@@ -205,9 +205,7 @@ If @racket[bitmap] is modified while is associated with a brush, the
 Sets the @tech{brush style}. See
 @racket[brush%] for information about the possible styles.
 
-A brush cannot be modified if it was obtained from a
- @racket[brush-list%] or while it is selected into a drawing
- context.
+A brush may not be modified if it @method[brush% is-immutable?].
 
 }}
 

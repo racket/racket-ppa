@@ -74,6 +74,10 @@ A pict is serializable via @racketmodname[racket/serialize], but
 serialization loses sub-pict information (preserving only the pict's
 drawing and bounding box).
 
+All of the pict functions that accept picts also accept values that
+are @tech{pict convertible}, meaning that picts can be mixed
+and matched with values from various other libraries.
+
 @history[#:changed "1.2" @elem{Added support for
                                @racket['png-bytes+bounds],
                                @racket['png-bytes+bounds8] and similar
@@ -307,6 +311,10 @@ The @racket[style] argument must be one of the following:
        family (in case the face is unavailable; see @racket[font%])}
 
  @item{@racket[(cons 'bold style)] for a valid @racket[style]}
+ @item{@racket[(cons (cons 'weight _weight) style)] where @racket[_weight] is
+       a @tech[#:doc '(lib "scribblings/draw/draw.scrbl")]{font weight}
+
+       @history[#:added "1.14"]}
 
  @item{@racket[(cons 'italic style)]}
  @item{@racket[(cons 'subscript style)]}
@@ -572,7 +580,7 @@ argument for consistency with the other functions.}
                       [#:end-pull end-pull real? 1/4]
                       [#:line-width line-width (or/c #f real?) #f]
                       [#:color color (or/c #f string? (is-a?/c color%)) #f]
-                      [#:alpha alpha (real-in 0.0 1.0) #f]
+                      [#:alpha alpha (real-in 0.0 1.0) 1.0]
                       [#:style style (or/c 'transparent 'solid 'xor 'hilite
                                            'dot 'long-dash 'short-dash 'dot-dash
                                            'xor-dot 'xor-long-dash 'xor-short-dash
@@ -593,7 +601,7 @@ argument for consistency with the other functions.}
                       [#:end-pull end-pull real? 1/4]
                       [#:line-width line-width (or/c #f real?) #f]
                       [#:color color (or/c #f string? (is-a?/c color%)) #f]
-                      [#:alpha alpha (real-in 0.0 1.0) #f]
+                      [#:alpha alpha (real-in 0.0 1.0) 1.0]
                       [#:style style (or/c 'transparent 'solid 'xor 'hilite
                                            'dot 'long-dash 'short-dash 'dot-dash
                                            'xor-dot 'xor-long-dash 'xor-short-dash
@@ -617,7 +625,7 @@ argument for consistency with the other functions.}
                       [#:end-pull end-pull real? 1/4]
                       [#:line-width line-width (or/c #f real?) #f]
                       [#:color color (or/c #f string? (is-a?/c color%)) #f]
-                      [#:alpha alpha (real-in 0.0 1.0) #f]
+                      [#:alpha alpha (real-in 0.0 1.0) 1.0]
                       [#:style style (or/c 'transparent 'solid 'xor 'hilite
                                            'dot 'long-dash 'short-dash 'dot-dash
                                            'xor-dot 'xor-long-dash 'xor-short-dash
@@ -938,6 +946,20 @@ scale while drawing the original @racket[pict].
 
 }
 
+@defproc*[([(flip-x [pict pict-convertible?]) pict?]
+           [(flip-y [pict pict-convertible?]) pict?])]{
+Flips a pict drawing horizontally or vertically.
+
+@examples[#:eval ss-eval
+          (standard-fish 100 50)
+          (flip-x (standard-fish 100 50))
+          (flip-x (flip-x (standard-fish 100 50)))
+          (flip-y (standard-fish 100 50))
+          (flip-y (flip-y (standard-fish 100 50)))
+          (flip-y (flip-x (standard-fish 100 50)))
+          (flip-x (flip-y (standard-fish 100 50)))]
+}
+
 @defproc*[([(scale-to-fit [pict pict-convertible?] [size-pict pict-convertible?]
                           [#:mode mode (or/c 'preserve 'inset
                                              'preserve/max 'inset/max
@@ -1113,20 +1135,29 @@ converted to black.
             (make-color 170 180 120))
 ]}
 
-@defproc[(cellophane [pict pict-convertible?] [opacity (real-in 0 1)])
+@defproc[(cellophane [pict pict-convertible?]
+                     [opacity (real-in 0 1)]
+                     [#:composite? composite? any/c #t])
          pict?]{
 
 Makes the given @racket[pict] semi-transparent, where an opacity of
 @racket[0] is fully transparent, and an opacity of @racket[1] is fully
-opaque.  See @method[dc<%> set-alpha] for information about the
-contexts and cases when semi-transparent drawing works.
+opaque.
+
+If @racket[composite?] is a true value, then the opacity adjustment is
+applied to @racket[pict] as a whole, instead of to individual drawing
+operations within @racket[pict]. Rendering @racket[pict] with
+compositing may take longer than with @racket[composite?] as
+@racket[#false].
 
 @examples[#:eval ss-eval
   (cc-superimpose (filled-rectangle 70 45 #:color "darkcyan")
                   (cellophane (disk 40) 0.2))
   (cc-superimpose (filled-rectangle 70 45 #:color "darkcyan")
                   (cellophane (disk 40) 0.8))
-]}
+]
+
+@history[#:changed "1.15" @elem{Added @racket[#:composite?] and enabled compositing by default.}]}
 
 @defproc[(clip [pict pict-convertible?]) pict]{
 
@@ -1409,29 +1440,40 @@ element of @racket[sub-pict] is used as the new last element for
 
 @section{Pict Finders}
 
-@defproc*[([(lt-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(ltl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(lc-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(lbl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(lb-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(ct-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(ctl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(cc-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(cbl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(cb-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(rt-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(rtl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(rc-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(rbl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
-           [(rb-find [pict pict-convertible?] [find pict-path?]) (values real? real?)])]{
+@defproc*[([(lt-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(ltl-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(lc-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(lbl-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(lb-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(ct-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(ctl-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(cc-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(cbl-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(cb-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(rt-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(rtl-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(rc-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(rbl-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)]
+           [(rb-find [pict pict-convertible?] [find pict-path?] [#:nth nth (or/c exact-nonnegative-integer? 'unique) 0]) (values real? real?)])]{
 
-Locates a pict designated by @racket[find] is within @racket[pict]. If
+Locates a pict designated by @racket[find] within @racket[pict]. If
 @racket[find] is a pict, then the @racket[pict] must have been created
 as some combination involving @racket[find].
 
 If @racket[find] is a list, then the first element of @racket[find]
 must be within @racket[pict], the second element of @racket[find] must
-be within the second element, and so on.
+be within the first element, and so on. In general, the @math{i+1}st element
+must be within the @math{i}th element, so the list can provide a path to
+some specific pict, in case there is more than one occurrence of the pict
+that's being searched for within @racket[pict].
+
+If the last pict in @racket[find] exists multiple times in the
+enclosing pict (either @racket[pict] or the next-to-last element of
+@racket[find]), then the location for the first found occurrence is
+returned by default. If @racket[nth] is a larger number, then then
+first @racket[nth] found locations are skipped. If @racket[nth] is
+@racket['unique], then all instances are found, and an error is
+reported if multiple instances are found at different locations.
 
 @examples[#:eval ss-eval
   (define p1 (disk 60))
@@ -1453,7 +1495,8 @@ be within the second element, and so on.
 ]
 
 @history[#:changed "1.11" @elem{Removed implicit truncation of some centered coordinates
-           to integers.}]}
+           to integers.}
+         #:changed "1.16" @elem{Added the @racket[nth] argument.}]}
 
 @defproc[(pict-path? [v any/c]) boolean?]{
 
@@ -1692,7 +1735,11 @@ values to be @deftech{pict convertible}, meaning they can convert themselves to 
 The protocol is used by DrRacket's interactions window, for example, to render
 values that it prints. Anything that is @racket[pict-convertible?]
 can be used wherever a @racket[pict] can be used. These values will
-be automatically converted to a pict when needed.}
+be automatically converted to a pict when needed.
+
+This set includes at least images from
+@racketmodname[2htdp/image #:indirect], but is extensible so may
+include other values as well. }
 
 @defthing[prop:pict-convertible struct-type-property?]{
 

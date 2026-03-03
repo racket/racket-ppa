@@ -28,9 +28,9 @@
          interpretable-jitified-linklet
          interpret-linklet)
 
-(struct indirect (pos element))
-(struct boxed (pos))
-(struct boxed/check boxed ())
+(struct indirect (pos element) #:authentic)
+(struct boxed (pos) #:authentic)
+(struct boxed/check boxed () #:authentic)
 
 (define primitives '#hasheq())
 (define strip-annotations (lambda (e) e))
@@ -39,14 +39,16 @@
 (define variable-ref/no-check (lambda (var) (unbox var)))
 (define variable-set! (lambda (var v) (set-box! var v)))
 (define variable-set!/define (lambda (var v) (set-box! var v)))
-(define make-interp-procedure* (lambda (proc mask name) proc))
+(define make-interp-procedure* (lambda (proc mask name+realm) proc))
+(define decode-procedure-name (lambda (name) name))
 
 (define (interpreter-link! prims
                            strip
                            make-var
                            var-ref var-ref/no-check
                            var-set! var-set!/def
-                           make-proc)
+                           make-proc
+                           decode-proc-name)
   (set! primitives prims)
   (set! strip-annotations strip)
   (set! make-internal-variable make-var)
@@ -54,9 +56,10 @@
   (set! variable-ref/no-check var-ref/no-check)
   (set! variable-set! var-set!)
   (set! variable-set!/define var-set!/def)
-  (set! make-interp-procedure* make-proc))
+  (set! make-interp-procedure* make-proc)
+  (set! decode-procedure-name decode-proc-name))
 
-(define (interpretable-jitified-linklet linklet-e serializable?)
+(define (interpretable-jitified-linklet linklet-e serializable? realm)
   ;; Return a compiled linklet as an expression for the linklet body.
   
   ;; Conceptually, the run-time environment is implemented as a list,
@@ -207,7 +210,7 @@
        (define rev-cmap (for/hasheq ([(i pos) (in-hash cmap)]) (values (- -1 pos) i)))
        (vector 'lambda
                (count->mask count rest?)
-               (extract-procedure-wrap-data e)
+               (extract-procedure-wrap-data e realm)
                (for/vector #:length (hash-count cmap) ([i (in-range (hash-count cmap))])
                  (stack->pos (hash-ref rev-cmap i) stk-i))
                (add-boxes/remove-unused new-body ids mutated body-env body-stk-i))]
@@ -217,7 +220,7 @@
                       (compile-expr `(lambda ,ids . ,body) env stack-depth stk-i tail? mutated)))
        (define mask (for/fold ([mask 0]) ([lam (in-list lams)])
                       (bitwise-ior mask (interp-match lam [#(lambda ,mask) mask]))))
-       (list->vector (list* 'case-lambda mask (extract-procedure-wrap-data e) lams))]
+       (list->vector (list* 'case-lambda mask (extract-procedure-wrap-data e realm) lams))]
       [`(let ([,ids ,rhss] ...) . ,body)
        (define len (length ids))
        (define body-env
@@ -254,7 +257,7 @@
                                e
                                (vector 'clear poss e))])
                     ;; Use `beginl` instead of `begin` to encourage further collapsing
-                    (vector 'beginl (append new-rhss (begins->list e))))]
+                    (vector 'beginl (append (map ensure-single-valued new-rhss) (begins->list e))))]
                  [(null? poss) #f]
                  [(eqv? pos (car poss))
                   (loop (add1 pos) (cdr poss) (cdr rhss))]
@@ -389,6 +392,8 @@
       [`(variable-ref/no-check ,id)
        (define var (hash-ref env (unwrap id)))
        (vector 'ref-variable (stack->pos var stk-i))]
+      [`(ffi-static-call-and-callback-core ,_ ...)
+       (error 'compile "unexpected ffi-static-call-and-callback-core in interpreter mode")]
       [`(#%app ,_ ...) (compile-apply (wrap-cdr e) env stack-depth stk-i tail? mutated)]
       [`(#%app/value ,_ ...) (compile-apply (wrap-cdr e) env stack-depth stk-i tail? mutated)]
       [`(#%app/no-return ,_ ...) (compile-apply (wrap-cdr e) env stack-depth stk-i tail? mutated)]
@@ -474,9 +479,9 @@
        (extract-list-mutated body (extract-list-mutated rhss mutated))]
       [`(begin . ,vs)
        (extract-list-mutated vs mutated)]
-      [`(begin0 ,vs)
+      [`(begin0 . ,vs)
        (extract-list-mutated vs mutated)]
-      [`(begin-unsafe ,vs)
+      [`(begin-unsafe . ,vs)
        (extract-list-mutated vs mutated)]
       [`($value ,e)
        (extract-expr-mutated e mutated)]
@@ -504,6 +509,8 @@
       [`(variable-ref ,id)
        mutated]
       [`(variable-ref/no-check ,id)
+       mutated]
+      [`(ffi-static-call-and-callback-core ,_ ...)
        mutated]
       [`(#%app ,es ...)
        (extract-list-mutated es mutated)]
@@ -579,27 +586,14 @@
          [else
           (vector 'enbox pos e)])]))
 
-  (define (extract-procedure-wrap-data e)
+  (define (extract-procedure-wrap-data e realm)
     ;; Get name and method-arity information
     (define encoded-name (wrap-property e 'inferred-name))
-    (define name
-      (cond
-        [(eq? encoded-name '|[|) #f]
-        [(symbol? encoded-name)
-         (define s (symbol->immutable-string encoded-name))
-         (cond
-           [(fx= 0 (string-length s)) encoded-name]
-           [else
-            (define ch (string-ref s 0))
-            (cond
-              [(or (char=? #\[ ch)
-                   (char=? #\] ch))
-               (string->symbol (substring s 1 (string-length s)))]
-              [else encoded-name])])]
-        [else encoded-name]))
+    (define name (decode-procedure-name encoded-name))
+    (define name+realm (if realm (cons name realm) name))
     (if (wrap-property e 'method-arity-error)
-        (box name)
-        name))
+        (box name+realm)
+        name+realm))
 
   (define (begins->list e)
     ;; Convert an expression to a list of expressions, trying to
@@ -623,6 +617,18 @@
         [#() (list e)])]
       [else (list e)]))
 
+  (define (ensure-single-valued e)
+    (cond
+      [(vector? e)
+       (interp-match
+        e
+        [#(quote) e]
+        [#($value) e]
+        [#(lambda) e]
+        [#(case-lambda) e]
+        [#() `#($value ,e)])]
+      [else e]))
+
   (with-deterministic-gensym
     (start linklet-e)))
 
@@ -637,16 +643,25 @@
       (define args-stack (for/fold ([stack start-stack]) ([arg (in-list args)]
                                                           [i (in-naturals 0)])
                            (stack-set stack i arg)))
-      (define post-args-pos (stack-count args-stack))
+      (define post-args-pos (length args))
       (define args+vars-stack (for/fold ([stack args-stack]) ([var (in-list internal-var-syms)]
                                                               [i (in-naturals 0)])
                                 (stack-set stack (+ i post-args-pos) (make-internal-variable var))))
-      (define post-args+vars-pos (stack-count args+vars-stack))
+      (define post-args+vars-pos (+ post-args-pos (length internal-var-syms)))
       (define stack (for/fold ([stack args+vars-stack]) ([i (in-range num-body-vars)])
                       (stack-set stack (+ i post-args+vars-pos) (box unsafe-undefined))))
       (interpret-expr b stack))]))
 
 (define (interpret-expr b stack)
+  ;; We need to customize result-arity errors to hide the stack result:
+  (define-syntax-rule (let-interp-values
+                       ([(new-stack v) (interpret b stack)])
+                       body ...)
+    (call-with-values
+     (lambda () (interpret b stack))
+     (case-lambda
+       [(new-stack v) body ...]
+       [(new-stack . vals) (apply raise-result-arity-error #f 1 #f vals)])))
 
   ;; An updated "stack" must be returned when bindings are removed
   ;; from the stack on their last uses (where there is a non-tail call
@@ -679,56 +694,61 @@
         b
         [#(app ,rator-b)
          (define len (vector*-length b))
-         (define-values (rand-stack rator) (interpret rator-b stack))
-         (define-syntax-rule (return-stack stack app)
-           (if (eq? return-mode 'values)
-               (call-with-values
-                (lambda () app)
-                (case-lambda
-                  [(v) (values stack v)]
-                  [vs (apply values stack vs)]))
-               (let ([marks return-mode])
-                 (values
-                  'trampoline
-                  (lambda ()
-                    (call-with-values
-                     (lambda ()
-                       (let loop ([i (hash-iterate-first marks)])
-                         (cond
-                           [(not i) app]
-                           [else
-                            (define-values (k v) (hash-iterate-key+value marks i))
-                            (with-continuation-mark
+         (let-interp-values
+          ([(rand-stack rator) (interpret rator-b stack)])
+          (define-syntax-rule (return-stack stack app)
+            (if (eq? return-mode 'values)
+                (call-with-values
+                 (lambda () app)
+                 (case-lambda
+                   [(v) (values stack v)]
+                   [vs (apply values stack vs)]))
+                (let ([marks return-mode])
+                  (values
+                   'trampoline
+                   (lambda ()
+                     (call-with-values
+                      (lambda ()
+                        (let loop ([i (hash-iterate-first marks)])
+                          (cond
+                            [(not i) app]
+                            [else
+                             (define-values (k v) (hash-iterate-key+value marks i))
+                             (with-continuation-mark
                              k v
                              (loop (hash-iterate-next marks i)))])))
-                     (case-lambda
-                       [(v) (values stack v)]
-                       [vs (apply values stack vs)])))))))
-         (cond
-           [(eq? len 2)
-            (if return-mode
-                (return-stack rand-stack (rator))
-                (rator))]
-           [(eq? len 3)
-            (define-values (stack rand) (interpret (vector*-ref b 2) rand-stack))
-            (if return-mode
-                (return-stack stack (rator rand))
-                (rator rand))]
-           [(eq? len 4)
-            (define-values (stack1 rand1) (interpret (vector*-ref b 2) rand-stack))
-            (define-values (stack2 rand2) (interpret (vector*-ref b 3) stack1))
-            (if return-mode
-                (return-stack stack2 (rator rand1 rand2))
-                (rator rand1 rand2))]
-           [else
-            (define-values (stack rev-rands)
-              (for/fold ([stack rand-stack] [rev-rands null]) ([b (in-vector b 2)])
-                (define-values (new-stack v) (interpret b stack))
-                (values new-stack (cons v rev-rands))))
-            (define rands (reverse rev-rands))
-            (if return-mode
-                (return-stack stack (apply rator rands))
-                (apply rator rands))])]
+                      (case-lambda
+                        [(v) (values stack v)]
+                        [vs (apply values stack vs)])))))))
+          (cond
+            [(eq? len 2)
+             (if return-mode
+                 (return-stack rand-stack (rator))
+                 (rator))]
+            [(eq? len 3)
+             (let-interp-values
+              ([(stack rand) (interpret (vector*-ref b 2) rand-stack)])
+              (if return-mode
+                  (return-stack stack (rator rand))
+                  (rator rand)))]
+            [(eq? len 4)
+             (let-interp-values
+              ([(stack1 rand1) (interpret (vector*-ref b 2) rand-stack)])
+              (let-interp-values
+               ([(stack2 rand2) (interpret (vector*-ref b 3) stack1)])
+               (if return-mode
+                   (return-stack stack2 (rator rand1 rand2))
+                   (rator rand1 rand2))))]
+            [else
+             (define-values (stack rev-rands)
+               (for/fold ([stack rand-stack] [rev-rands null]) ([b (in-vector b 2)])
+                 (let-interp-values
+                  ([(new-stack v) (interpret b stack)])
+                  (values new-stack (cons v rev-rands)))))
+             (define rands (reverse rev-rands))
+             (if return-mode
+                 (return-stack stack (apply rator rands))
+                 (apply rator rands))]))]
         [#(quote ,v)
          (if return-mode
              (values stack v)
@@ -765,8 +785,9 @@
              (cond
                [(fx= i len) stack]
                [else
-                (define-values (new-stack val) (interpret (vector*-ref rhss i) stack))
-                (stack-set (loop (fx+ i 1) new-stack) (fx+ i pos) val)])))
+                (let-interp-values
+                 ([(new-stack val) (interpret (vector*-ref rhss i) stack)])
+                 (stack-set (loop (fx+ i 1) new-stack) (fx+ i pos) val))])))
          (interpret b body-stack return-mode)]
         [#(let* ,poss ,rhsss ,b)
          (define body-stack
@@ -777,8 +798,9 @@
                (cond
                  [(fx= i len) stack]
                  [else
-                  (define-values (new-stack val) (interpret (vector*-ref rhss i) stack))
-                  (loop (fx+ i 1) (stack-set new-stack (fx+ i pos) val))]))))
+                  (let-interp-values
+                   ([(new-stack val) (interpret (vector*-ref rhss i) stack)])
+                   (loop (fx+ i 1) (stack-set new-stack (fx+ i pos) val)))]))))
          (interpret b body-stack return-mode)]
         [#(letrec ,pos ,rhss ,b)
          (define len (vector*-length rhss))
@@ -798,9 +820,10 @@
              [(fx= i len)
               (interpret b stack return-mode)]
              [else
-              (define-values (new-stack val) (interpret (vector*-ref rhss i) stack))
-              (set-box! (car boxes) val)
-              (loop (fx+ i 1) new-stack (cdr boxes))]))]
+              (let-interp-values
+               ([(new-stack val) (interpret (vector*-ref rhss i) stack)])
+               (set-box! (car boxes) val)
+               (loop (fx+ i 1) new-stack (cdr boxes)))]))]
         [#(begin)
          (define last (fx- (vector*-length b) 1))
          (let loop ([i 1] [stack stack])
@@ -842,10 +865,11 @@
                       (apply values vals))
                   (loop (fx+ i 1) new-stack)))))]
         [#($value ,e)
-         (let-values ([(new-stack v) (interpret e stack)])
-           (if return-mode
-               (values new-stack v)
-               v))]
+         (let-interp-values
+          ([(new-stack v) (interpret e stack)])
+          (if return-mode
+              (values new-stack v)
+              v))]
         [#(clear ,clears ,e)
          (let loop ([clears clears] [stack stack])
            (cond
@@ -857,43 +881,46 @@
          (define new-stack (stack-set stack pos (box (stack-ref stack pos #t))))
          (interpret e new-stack return-mode)]
         [#(if ,tst ,thn ,els)
-         (define-values (new-stack val) (interpret tst stack))
-         (if val
-             (interpret thn new-stack return-mode)
-             (interpret els new-stack return-mode))]
+         (let-interp-values
+          ([(new-stack val) (interpret tst stack)])
+          (if val
+              (interpret thn new-stack return-mode)
+              (interpret els new-stack return-mode)))]
         [#(wcm ,key ,val ,body)
-         (define-values (k-stack k-val) (interpret key stack))
-         (define-values (v-stack v-val) (interpret val k-stack))
-         (cond
-           [(not return-mode)
-            ;; In tail position, so we can just use
-            ;; with-continuation-mark` directly:
-            (with-continuation-mark
-             k-val
-             v-val
-             (interpret body v-stack #f))]
-           [(eq? return-mode 'values)
-            ;; Not in tail position with respect to a `with-continuation-mark`.
-            ;; Build a trampoline so that we can get an updated stack, but a function
-            ;; can be called in tail position with respect to marks
-            ((call-with-values
-              (lambda ()
-                (with-continuation-mark
+         (let-interp-values
+          ([(k-stack k-val) (interpret key stack)])
+          (let-interp-values
+           ([(v-stack v-val) (interpret val k-stack)])
+           (cond
+             [(not return-mode)
+              ;; In tail position, so we can just use
+              ;; with-continuation-mark` directly:
+              (with-continuation-mark
+                k-val
+                v-val
+                (interpret body v-stack #f))]
+             [(eq? return-mode 'values)
+              ;; Not in tail position with respect to a `with-continuation-mark`.
+              ;; Build a trampoline so that we can get an updated stack, but a function
+              ;; can be called in tail position with respect to marks
+              ((call-with-values
+                (lambda ()
+                  (with-continuation-mark
                  k-val v-val
                  (interpret body v-stack (hasheq k-val v-val))))
-              (case-lambda
-                [(stack v) (if (eq? stack 'trampoline)
-                               ;; trampoline return:
-                               v
-                               ;; normal return:
-                               (lambda () (values stack v)))]
-                [(stack . vs) (lambda () (apply values stack vs))])))]
-           [else
-            ;; In tail position with respect to a `with-continuation-mark`,
-            ;; so take advantage of its `return-mode` trampoline:
-            (with-continuation-mark
+                (case-lambda
+                  [(stack v) (if (eq? stack 'trampoline)
+                                 ;; trampoline return:
+                                 v
+                                 ;; normal return:
+                                 (lambda () (values stack v)))]
+                  [(stack . vs) (lambda () (apply values stack vs))])))]
+             [else
+              ;; In tail position with respect to a `with-continuation-mark`,
+              ;; so take advantage of its `return-mode` trampoline:
+              (with-continuation-mark
              k-val v-val
-             (interpret body v-stack (hash-set return-mode k-val v-val)))])]
+             (interpret body v-stack (hash-set return-mode k-val v-val)))])))]
         [#(cwv ,b ,pos ,name ,clauses)
          (define-values (new-stack vs)
            (call-with-values
@@ -971,35 +998,39 @@
              val)]
         [#(set-variable! ,s ,b ,c ,defn?)
          (define-values (var-stack var) (stack-ref stack s))
-         (define-values (val-stack val) (interpret b var-stack))
-         (if defn?
-             (variable-set!/define var val c)
-             (variable-set! var val))
-         (if return-mode
-             (values val-stack (void))
-             (void))]
+         (let-interp-values
+          ([(val-stack val) (interpret b var-stack)])
+          (if defn?
+              (variable-set!/define var val c)
+              (variable-set! var val))
+          (if return-mode
+              (values val-stack (void))
+              (void)))]
         [#(set!-indirect ,s ,e ,b)
          (define-values (vec-stack vec) (stack-ref stack s))
-         (define-values (val-stack val) (interpret b vec-stack))
-         (vector*-set! vec e val)
-         (if return-mode
-             (values val-stack (void))
-             (void))]
+         (let-interp-values
+          ([(val-stack val) (interpret b vec-stack)])
+          (vector*-set! vec e val)
+          (if return-mode
+              (values val-stack (void))
+              (void)))]
         [#(set!-boxed ,s ,b ,name)
          (define-values (bx-stack bx) (stack-ref stack s))
-         (define-values (v-stack v) (interpret b bx-stack))
-         (set-box*! bx v)
-         (if return-mode
-             (values v-stack (void))
-             (void))]
+         (let-interp-values
+          ([(v-stack v) (interpret b bx-stack)])
+          (set-box*! bx v)
+          (if return-mode
+              (values v-stack (void))
+              (void)))]
         [#(set!-boxed/checked ,s ,b ,name)
          (define-values (bx-stack bx) (stack-ref stack s))
-         (define-values (v-stack v) (interpret b bx-stack))
-         (check-not-unsafe-undefined/assign (unbox* bx) name)
-         (set-box*! bx v)
-         (if return-mode
-             (values v-stack (void))
-             (void))])]
+         (let-interp-values
+          ([(v-stack v) (interpret b bx-stack)])
+          (check-not-unsafe-undefined/assign (unbox* bx) name)
+          (set-box*! bx v)
+          (if return-mode
+              (values v-stack (void))
+              (void)))])]
       [else (if return-mode
                 (values stack b)
                 b)]))
@@ -1069,7 +1100,8 @@
                      var
                      var-val var-val
                      (lambda (b v) (set-var-val! b v)) (lambda (b v c) (set-var-val! b v))
-                     (lambda (proc mask name) proc))
+                     (lambda (proc mask name) proc)
+                     (lambda (name) name))
   (define b
     (interpretable-jitified-linklet '(lambda (x two-box)
                                        (define other 5)
@@ -1109,7 +1141,8 @@
                                                  (f 'vec) (g 'also-vec 'more)
                                                  one two (variable-ref two-box)
                                                  (continuation-mark-set-first #f 'x 'no)))))
-                                    #f))
+                                    #f
+                                    'racket))
   (pretty-print b)
   (define l (interpret-linklet b))
   (l 'the-x (var #f)))

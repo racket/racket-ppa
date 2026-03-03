@@ -200,26 +200,19 @@
          [(and (pair? (cdr preds))
                (null? (cddr preds)))
           (cond
-            [(chaperone-of? (car preds) real?)
+            [(eq? (car preds) real?)
              (define second-pred (cadr preds))
              (cond
-               [(chaperone-of? second-pred negative?)
+               [(eq? second-pred negative?)
                 (renamed-<-ctc 0 `(and/c real? negative?))]
-               [(chaperone-of? second-pred positive?)
+               [(eq? second-pred positive?)
                 (renamed->-ctc 0 `(and/c real? positive?))]
                [else
-                (define second-contract (cadr contracts))
-                (cond
-                  [(equal? (contract-name second-contract) '(not/c positive?))
-                   (renamed-between/c -inf.0 0 `(and/c real? (not/c positive?)))]
-                  [(equal? (contract-name second-contract) '(not/c negative?))
-                   (renamed-between/c 0 +inf.0 `(and/c real? (not/c negative?)))]
-                  [else
-                   (make-first-order-and/c contracts preds)])])]
-            [(or (chaperone-of? (car preds) exact-nonnegative-integer?)
-                 (chaperone-of? (car preds) natural?)
-                 (chaperone-of? (cadr preds) exact-nonnegative-integer?)
-                 (chaperone-of? (cadr preds) natural?))
+                (make-first-order-and/c contracts preds)])]
+            [(or (eq? (car preds) exact-nonnegative-integer?)
+                 (eq? (car preds) natural?)
+                 (eq? (cadr preds) exact-nonnegative-integer?)
+                 (eq? (cadr preds) natural?))
              (define other (if (procedure? (car preds)) (cadr contracts) (car contracts)))
              (cond
                [(between/c-s? other)
@@ -228,8 +221,8 @@
                 (integer-in (exact-ceiling (max 0 (if (= other-low -inf.0) 0 other-low)))
                             (if (= other-high +inf.0) #f (exact-floor other-high)))]
                [else (make-first-order-and/c contracts preds)])]
-            [(or (chaperone-of? (car preds) exact-positive-integer?)
-                 (chaperone-of? (cadr preds) exact-positive-integer?))
+            [(or (eq? (car preds) exact-positive-integer?)
+                 (eq? (cadr preds) exact-positive-integer?))
              (define other (if (procedure? (car preds)) (cadr contracts) (car contracts)))
              (cond
                [(between/c-s? other)
@@ -238,8 +231,8 @@
                 (integer-in (exact-ceiling (max 1 (if (= other-low -inf.0) 1 other-low)))
                             (if (= other-high +inf.0) #f (exact-floor other-high)))]
                [else (make-first-order-and/c contracts preds)])]
-            [(or (chaperone-of? (car preds) exact-integer?)
-                 (chaperone-of? (cadr preds) exact-integer?))
+            [(or (eq? (car preds) exact-integer?)
+                 (eq? (cadr preds) exact-integer?))
              (define other (if (procedure? (car preds)) (cadr contracts) (car contracts)))
              (cond
                [(between/c-s? other)
@@ -254,9 +247,9 @@
                (pair? (cddr preds))
                (null? (cdddr preds)))
           (cond
-            [(or (chaperone-of? (car preds) exact-integer?)
-                 (chaperone-of? (cadr preds) exact-integer?)
-                 (chaperone-of? (caddr preds) exact-integer?))
+            [(or (eq? (car preds) exact-integer?)
+                 (eq? (cadr preds) exact-integer?)
+                 (eq? (caddr preds) exact-integer?))
              (define lb #f)
              (define ub #f)
              (for ([ctc (in-list contracts)])
@@ -399,7 +392,12 @@
     [else
      (integer-in-ctc start end)]))
 
+(define integer-in-ff (integer-in #f #f))
+(define integer-in-0f (integer-in 0 #f))
+(define integer-in-1f (integer-in 1 #f))
+
+;; passing only defined names here gives the demodularizer license to prune:
 (set-some-basic-integer-in-contracts! renamed-integer-in
-                                      (integer-in #f #f)
-                                      (integer-in 0 #f)
-                                      (integer-in 1 #f))
+                                      integer-in-ff
+                                      integer-in-0f
+                                      integer-in-1f)

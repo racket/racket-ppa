@@ -83,15 +83,31 @@
          ;; Look just at the "rest" part:
          (for ([e (in-list (struct-type-info-rest info))]
                [pos (in-naturals)])
-           (define prop-vals (and (= pos struct-type-info-rest-properties-list-pos)
-                                  (pure-properties-list e prim-knowns knowns imports mutated simples)))
            (cond
-             [prop-vals
-              ;; check individual property values using `ids`, so procedures won't
-              ;; count as used until some instace is created
-              (for ([e (in-list prop-vals)])
-                (find-mutated! e ids prim-knowns knowns imports mutated simples unsafe-mode?))]
+             [(= pos struct-type-info-rest-properties-list-pos)
+              (define prop-vals (pure-properties-list e prim-knowns knowns imports mutated simples))
+              (cond
+                [prop-vals
+                 ;; check individual values for "nice" properties using `ids`, so procedures won't
+                 ;; count as used until some instance is created
+                 (for ([do-nice? (in-list '(#f #t))])
+                   (for ([nice?+key+val (in-list prop-vals)])
+                     (match nice?+key+val
+                       [`(,nice? ,key . ,val)
+                        (cond
+                          [nice?
+                           (when do-nice?
+                             (find-mutated! val ids prim-knowns knowns imports mutated simples unsafe-mode?))]
+                          [else
+                           (when (not do-nice?)
+                             (find-mutated! key #f prim-knowns knowns imports mutated simples unsafe-mode?)
+                             (find-mutated! val #f prim-knowns knowns imports mutated simples unsafe-mode?))])])))]
+                [else
+                 ;; some arguments might be called via a guard
+                 (find-mutated! e #f prim-knowns knowns imports mutated simples unsafe-mode?)])]
              [else
+              ;; any function arguments in other positions will not be called until an instance
+              ;; is created
               (find-mutated! e ids prim-knowns knowns imports mutated simples unsafe-mode?)]))]
         [else
          (find-mutated! rhs ids prim-knowns knowns imports mutated simples unsafe-mode?)])
@@ -239,6 +255,7 @@
            (old-state)))
        (find-mutated! rhs #f)]
       [`(#%variable-reference . ,_) (void)]
+      [`(values ,exp) (find-mutated! exp ids)]
       [`(,rator ,exps ...)
        (cond
          [(and ids
@@ -250,11 +267,14 @@
                                  ;; useful to struct-type properties:
                                  (eq? rator 'cons)
                                  (eq? rator 'list)
+                                 (eq? rator 'list*)
                                  (eq? rator 'vector)
+                                 (eq? rator 'hasheq)
                                  (eq? rator 'make-struct-type-property))
                              (bitwise-bit-set? (known-procedure-arity-mask v) (length exps))))
                       (for/and ([exp (in-list exps)])
-                        (simple? exp prim-knowns knowns imports mutated simples unsafe-mode?)))))
+                        (simple? exp prim-knowns knowns imports mutated simples unsafe-mode?
+                                 #:pure? #f)))))
           ;; Can delay construction
           (delay! ids (lambda () (find-mutated!* exps #f)))]
          [else
@@ -266,7 +286,8 @@
            (define state (hash-ref mutated v #f))
            (cond
              [(not-ready-mutated-state? state)
-              (hash-set! mutated v 'too-early)]
+              (unless unsafe-mode? ; unsafe => assume too-early won't happen
+                (hash-set! mutated v 'too-early))]
              [(delayed-mutated-state? state)
               (cond
                 [ids

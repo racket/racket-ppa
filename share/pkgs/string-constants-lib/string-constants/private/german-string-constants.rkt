@@ -119,6 +119,8 @@
  (cs-rename-var-to "„~a“ umbenennen nach:")
  (cs-name-duplication-error "Der neugewählte Name, ~s, ist hier schon gebunden.")
  (cs-rename-anyway "Trotzdem umbenennen")
+ (cs-add-require-prefix "Require-Präfix hinzufügen")
+ (cs-remove-unused-requires "Unbenutzte Requires entfernen")
  (cs-status-init "Syntaxprüfung: Umgebung für den User-Code initialisieren")
  (cs-status-coloring-program "Syntaxprüfung: Ausdruck einfärben")
  (cs-status-eval-compile-time "Syntaxprüfung: Compile-Time-Code ausführen")
@@ -290,6 +292,7 @@
  ;; Help Desk
  (help "Hilfe")
  (racket-documentation "Dokumentation für Racket")
+ (x-documentation "Dokumentation für ~a") ;; ~a is filled with a language family name, eg Racket, Rhombus, or HtDP
  (help-desk "Hilfezentrum")
  (plt:hd:search "Suchen")
  (plt:hd:feeling-lucky "Auf gut Glück")
@@ -480,6 +483,11 @@
 
  (online-coloring-active "Syntax interaktiv einfärben")
  (open-files-in-tabs "Dateien in separaten Tabs öffnen (nicht separaten Fenstern)")
+ (restore-open-files-from-previous-session? "Offene Dateien aus der vorigen Sitzung wiederherstellen?")
+ (startup-open-files "Dateien beim Start")
+ (restore-open-files-from-previous-session "Offene Dateien aus der vorigen Sitzung")
+ (ask-me-each-time "Jedes Mal nachfragen")
+ (open-a-blank-window "Leeres Fenster öffnen")
  (show-interactions-on-execute "Interaktionen beim Programmstart automatisch öffnen")
  (switch-to-module-language-automatically "Automatisch in die `module'-Sprache wechseln, wenn ein Modul geöffnet wird")
  (interactions-beside-definitions "Interaktionen neben den Definitionen anzeigen") ;; in preferences, below the checkbox one line above this one
@@ -488,6 +496,8 @@
  (hide-line-numbers/menu "Zeilen&nummern ausblenden")
 
  (show-line-numbers-in-definitions "Alle Zeilennummern in Definitionen einblenden") ;; shows up in the popup menu item in the bottom of the drracket window; controls the line numbers on each line in the definitions; used in a checkable menu item
+ (show-indent-guides/menu "Einrückungs-Hilfe einblenden")
+ (hide-indent-guides/menu "Einrückungs-Hilfe ausblenden")
  (reflow-paragraph-maximum-width "Maximalbreite beim Umbruch von Absätzen")
  (maximum-char-width-guide-pref-check-box "Richtschnur für maximale Zeichenbreite")
  (hide-column-width-guide "Richtschnur für Spaltenbreite für Dateien mit ~a Spalten einblenden")
@@ -507,6 +517,19 @@
  ; drracket additions to the color scheme dialog; two buttons
  (design-your-own-color-schemes "Farbschemata selbst machen") ; pointer to (english-only) docs
  (style-and-color-names "Stil && Farbnamen")
+ ;(dark-mode-color-scheme "Farbschema für Dark Mode") ; no longer has "Mode" in English
+ ;(light-mode-color-scheme "Farbschema für Light Mode") ; no longer has "Mode" in English
+  (revert-colors-to-color-scheme-defaults "Farben zurücksetzen zu Standardfarben des Farbschemas")
+  (color-mode "Color Mode")
+  ;; on macos and linux, racket can detect the OS's dark/light mode so
+  ;; the control will have the next three strings in it.
+  (use-os-dark-mode-selection "Eingebauten Light oder Dark Mode benutzen")
+  (always-light-mode "Immer Light Mode benutzen")
+  (always-dark-mode "Immer Dark Mode benutzen")
+  ;; under windows, racket cannot detect the OS's dark/light mode, so
+  ;; the control will have just two options, which needs slightly different wording
+  (light-mode "Light Mode")
+  (dark-mode "Dark Mode")
 
  (add-spacing-between-lines "Ein Pixel Extra-Platz zwischen den Zeilen")
 
@@ -1002,6 +1025,7 @@
  (print-interactions "Interaktionen drucken…")
  (new-tab "Neuer Tab")
  (close-tab "Tab schließen")
+ (reopen-closed-tab "Geschlossenen Tab wieder öffnen")
 
  (close-tab-amp "Tab &schließen") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
  
@@ -1042,6 +1066,12 @@
  (reindent-menu-item-label "&Einrücken")
  (reindent-all-menu-item-label "&Alles einrücken")
  (semicolon-comment-out-menu-item-label "Mit &Semikolon auskommentieren")
+ ;; the ~a is filled with the characters that'll be used to comment out a line,
+ ;; inserted at the start of the line
+ (comment-out-with-line-start "&Auskommentieren mit “~a”")
+ ;; the two '~a's are filled with the characters that'll be used to comment out
+ ;; the start and end of a region
+ (comment-out-with-region "&Auskommentieren mit “~a” und “~a”")
  (box-comment-out-menu-item-label "Mit &Kommentar-Kasten auskommentieren")
  (uncomment-menu-item-label "Einkommentieren")
 
@@ -1099,7 +1129,8 @@
   "Servlet lassen sich nicht aus einem Programm in der Sprache „~a“ erzeugen.")
   
  ;;; buttons
- (execute-button-label "Start") 
+ (execute-button-label "Start")
+ (execute-button-configure-label "Start konfigurieren")
  (save-button-label "Speichern")
  (break-button-label "Stop")
  (break-button-kill-label "Abbrechen")
@@ -1212,17 +1243,11 @@
  (please-select-a-language "Sprache auswählen")
  
  ;;; languages
- (beginning-student "Anfänger")
  (beginning-one-line-summary "define, cond, Strukturen, Konstanten und Primitiva")
- (beginning-student/abbrev "Anfänger mit Listen-Abkürzungen")
  (beginning/abbrev-one-line-summary "Anfänger, wobei Listen mit „list“ in der REPL ausgedruckt werden")
- (intermediate-student "Zwischenstufe")
  (intermediate-one-line-summary "Anfänger plus lexikalische Bindung")
- (intermediate-student/lambda "Zwischenstufe mit lambda")
  (intermediate/lambda-one-line-summary "Zwischenstufe plus Prozeduren höherer Ordnung")
- (advanced-student "Fortgeschritten")
  (advanced-one-line-summary "Zwischenstufe plus lambda und Mutation")
- (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one…
  (pretty-big-scheme "Kombo")
  (pretty-big-scheme-one-line-summary "Macht Syntax and Prozeduren der HtDP-Sprachen verfügbar")
  (r5rs-language-name "R5RS")
@@ -1445,6 +1470,12 @@
  (module-browser-name-long "Lang")
  (module-browser-name-very-long "Lang mit Phasen")  ;; like 'Long' but shows the phases where this file is loaded
  (module-browser-open-all "Alle hier angezeigten Dateien öffnen")
+ (module-browser-main-collects "Haupt-Collections")
+ (module-browser-unknown-pkg "Unbekanntes Paket")
+ (module-browser-visible-pkgs "Sichtbare Pakete")
+ (module-browser-visible-submodules "Sichtbare Submodule")
+ (module-browser-top-level-module "Top-Level-Module") ; in the "which submodules?" filter; this is used for when there are no submodules
+
 
  (happy-birthday-matthias "Happy Birthday, Matthias!")
  (happy-birthday-matthew "Happy Birthday, Matthew!")
@@ -1646,6 +1677,14 @@
   (test-engine-unknown "(unbekannt)")
   (test-engine-trace-error "Trace-Fehler")
 
+  (test-engine-check-range-encountered-error
+   "check-range ist der folgende Fehler passiert statt eines Werts in [~F, ~F]. ~n   :: ~a")
+  (test-engine-check-member-of-encountered-error
+   "check-member-of ist der folgende Fehler passiert anstatt eines Werts in ~L.~n   :: ~a")
+  ; obsolete version of this
+  (test-engine-check-*-encountered-error
+   "~a ist der folgende Fehler passiert anstatt dem erwartetetn Wert ~F. ~n   :: ~a")
+  ;; deprecated
   (test-engine-check-encountered-error
    "check-expect bekam den folgenden Fehler statt des erwarteten Werts, ~F. ~n   :: ~a")
   (test-engine-check-error-cause
@@ -1847,11 +1886,13 @@
   (install-pkg-install "Installieren")
   (install-pkg-update "Aktualisieren")
   (install-pkg-setup "Konfigurieren") ; for button
+  (install-pkg-update+setup "Aktualisieren und Konfigurieren") ; for button
   (install-pkg-setup-long "Aktuelle Installation konfigurieren") ; for menu
   (install-pkg-remove "Entfernen")
   (install-pkg-do-not-remove "Nicht entfernen")
   (install-pkg-action-inferred-to-be-update "Maßnahme als Aktualisierung inferiert")
   (install-pkg-action-inferred-to-be-install "Maßnahme als Installation inferiert")
+  (install-pkg-action-inferred-to-be-update+setup "Maßnahme als Aktualisierung and Konfiguration inferiert")
   (install-pkg-default "Standard")
   (install-pkg-scope-label "Paket-Einzugsbereich")
   (install-pkg-default-scope-label "Standard-Paket-Einzugsbereich") ; for picking the scope to be default
@@ -1893,6 +1934,7 @@
   (install-pkg-abort-setup "Konfiguration abbrechen")
   (install-pkg-abort-setup "Setup abbrechen")
   (install-pkg-abort-generic-action "Aktion abbrechen")
+  (install-pkg-continue-generic-action "Aktion fortführen")
   (install-pkg-close-terminal-output "Anzeige schließen")
   (install-pkg-show-all-options "Alle Optionen anzeigen")
   (install-pkg-migrate-available-installations "Verfügbare Installationen")
@@ -1936,6 +1978,9 @@
 
   (install-pkg-not-rentrant "Installation und Aktualisierung können nicht gleichzeitig laufen."
                             " Brechen Sie entweder den laufenden Prozess ab oder warten Sie, bis er fertig ist.")
+  (install-pkg-generic-action-in-progress "Eine Paketverwaltungs-Aktion läuft noch.."
+                                          " Sind Sie sicher, dass sie das Fenster schlueßen und die Aktion abbrechen wollen,"
+                                          " was Ihre Installation in einem inkonsistenten Zustand hinterlassen könnte?")
 
   ;; open a file via a collection path (new "Open" menu item in DrRacket)
   (open-require-path "Require-Pfad öffnen…")
@@ -1976,5 +2021,72 @@
    " fügen Sie\n\n  ~a\n\n"
    " hinzu.")
   (add-racket/bin-to-path "Kommandozeile für Racket konfigurieren…") ;; menu item label
+
+    ;; quickscript messages
+  (qs-my-first-script "Mein erstes Skript")
+  (qs-script-library "Skript-Library")
+  (qs-directories "Verzeichnisse")
+  (qs-add "&Hinzufügen")
+  (qs-remove "&Entfernen")
+  (qs-scripts "Skripte")
+  (qs-disable "&Aktivieren")
+  (qs-enable "&Deaktivieren&")
+  (qs-shadow "&Shadow")
+  (qs-recompiling  "Quickscripts recompilieren…")
+  (qs-recompiling-wait "Recompiliere Quickscripts, bitte warten…")
+  (qs-scripts "&Skripte")
+  (qs-manage "&Verwalten")
+  (qs-compilation-error "Quickscript: Fehler beim Compilieren")
+  (qs-caught-exception  "Quickscript hat Exception abgefangen")
+  (qs-recompiling-library "Library recompilieren")
+  (qs-my-script "Mein fantastisches Skript")
+  (qs-script-help "Der Hilfetext des Skripts.")
+  (qs-compiling-scripts "Compiliere Skripte")
+  ;; ~a is a script file including its path
+  (qs-compiling "Compiliere ~a")
+  ;; ~a is a script file including its path
+  (qs-file-not-found "Datei nicht gefunden: ~a")
+  (qs-invalid-hook "Unzulässiger Hook-Name.\n Zulässige Namen:\n")
+  ;; the  three `qs-error-detail-*` string constants are put into the same message
+  (qs-error-detail-overview "~a Fehler wurden abgefangen.") ; the ~a is number of errors
+  (qs-error-detail-summary "Zusammenfassung:")
+  (qs-error-detail-details "Details:")
+  (qs-script-name "Skript-Name")
+  (qs-script-name-enter "Namen für das neue Skript eingeben:")
+  (qs-open-script "Skript öffnen")
+  ;; ~a is the name of a script file
+  (qs-error-run "Run: Fehler in Skript-Datei ~s:\n" )
+  (qs-output "Ausgabve") ;; not repl-out-color where it means color of the output
+  (qs-load-script-menu "Lade Skripte-Menü")
+  (qs-loading-file "Lade Datei ")
+  ;; ~a is the name of a skript file
+  (qs-script-file "Skript-Dateei ~s:")
+  (qs-build-menu "Baue Skript-Menü")
+  ;; ~a is number of rebuilds
+  (qs-menu-rebuild "Skript-Menü-Aktualisierung #~a...")
+  (qs-delete-menu "Lösche Menüpunkte")
+  ;; ~a is a a script entry in menu
+  (qs-delete-menu-item "Lösche Menüpunkt ~a... ")
+  (qs-new-script "&Neues Skript…")
+  (qs-open-script "&Skript öffnen…")
+  (qs-disable-scripts "&Skripte deaktivieren…")
+  (qs-library "&Library…")
+  (qs-reload-menu "&Menü neu laden")
+  (qs-compile-scripts "Skripte &compilieren")
+  (qs-stop-scripts "Persistente Skripte &anhalten")
+  (qs-report-issue "Problem &miteilen")
+  (qs-error-load "Quickscript: Fehler beim Laden von Skript-Properties")
+  ;; macro stepper
+  ; used in the button label and menu item and title for some dialog boxes
+  (macro-stepper "Makro-Stepper")
+
+  ; these next three are in the same dialog; first a message and then two button labels
+  (macro-stepper-warning-message
+   "Makroexpansion benötigt verdächtig viele Schritte.\n\n"
+   " Stop drücken, um die Makroexpansion zu stoppen und die bisherigen"
+   "  Schritte zu sehen oder Weiter drücken, um ihn ein wenig länger laufen zu lassen.")
+  (macro-stepper-continue "Weiter")
+  (macro-stepper-stop "Stop")
+
   )
 

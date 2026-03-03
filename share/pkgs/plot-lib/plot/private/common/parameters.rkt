@@ -68,6 +68,7 @@
 (defparam2 plot-foreground-alpha alpha Real Nonnegative-Real 1 (unit-ivl 'plot-foreground-alpha))
 (defparam2 plot-background-alpha alpha Real Nonnegative-Real 1 (unit-ivl 'plot-background-alpha))
 (defparam2 plot-line-width width Real Nonnegative-Real 1 (nonnegative-rational 'plot-line-width))
+(defparam plot-line-cap Plot-Pen-Cap 'round)
 (defparam2 plot-tick-size size Real Nonnegative-Real 10 (nonnegative-rational 'plot-tick-size))
 (defparam2 plot-font-size size Real Nonnegative-Real 11 (nonnegative-rational 'plot-font-size))
 (defparam plot-font-face face (U String #f) #f)
@@ -78,6 +79,13 @@
 (defparam plot-legend-anchor anchor Legend-Anchor 'top-left)
 (defparam plot-legend-layout layout Legend-Layout '(columns 1 equal-size))
 (defparam2 plot-legend-box-alpha alpha Real Nonnegative-Real 2/3 (unit-ivl 'plot-legend-box-alpha))
+(defparam plot-legend-padding
+  (U
+   ;; A single padding value for all sides
+   Nonnegative-Real
+   ;; Separate left, right, top, and bottom padding values
+   (List Nonnegative-Real Nonnegative-Real Nonnegative-Real Nonnegative-Real))
+  0.0)
 (defparam plot-animating? Boolean #f)
 
 (defparam plot-x-axis? Boolean #t)
@@ -107,7 +115,13 @@
 (defparam plot-y-far-tick-label-anchor anchor Anchor 'left)
 
 (defparam plot-decorations? Boolean #t)
-
+(defparam plot-inset
+  (U
+   ;; A single inset value for all sides
+   Nonnegative-Real
+   ;; Separate left, right, top, and bottom inset values
+   (List Nonnegative-Real Nonnegative-Real Nonnegative-Real Nonnegative-Real))
+  0.0)
 (defparam plot-pen-color-map (U Symbol #f) #f)
 (defparam plot-brush-color-map (U Symbol #f) #f)
 
@@ -179,6 +193,7 @@
 (defparam line-color Plot-Color 1)
 (defparam2 line-width Real Nonnegative-Real 1 (nonnegative-rational 'line-width))
 (defparam line-style Plot-Pen-Style 'solid)
+(defparam line-cap Plot-Pen-Cap 'round)
 (defparam2 line-alpha Real Nonnegative-Real 1 (unit-ivl 'line-alpha))
 
 ;; Intervals
@@ -197,9 +212,9 @@
 
 (defparam point-sym Point-Sym 'circle)
 (defparam point-color Plot-Color 0)
-(defparam point-x-jitter Real 0)
-(defparam point-y-jitter Real 0)
-(defparam point-z-jitter Real 0)
+(defparam point-x-jitter Nonnegative-Real 0)
+(defparam point-y-jitter Nonnegative-Real 0)
+(defparam point-z-jitter Nonnegative-Real 0)
 (defparam2 point-size Real Nonnegative-Real 6 (nonnegative-rational 'point-size))
 (defparam2 point-line-width Real Nonnegative-Real 1 (nonnegative-rational 'point-line-width))
 (defparam2 point-alpha Real Nonnegative-Real 1 (unit-ivl 'point-alpha))

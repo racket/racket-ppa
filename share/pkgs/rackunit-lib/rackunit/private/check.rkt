@@ -21,7 +21,7 @@
   [plain-check-around (-> (-> void?) void?)]))
 
 (provide check-around
-         
+
          define-check
          define-binary-check
          define-simple-check
@@ -45,6 +45,7 @@
          fail)
 
 (define current-check-handler (make-parameter display-test-failure/error))
+(define (not-break-exn? x) (not (exn:break? x)))
 
 ;; Like default-check-around, except without test logging. This used to be used
 ;; by test-case, and is currently undocumented. Typed Racket's wrapper around
@@ -53,7 +54,7 @@
 ;; plain-check-around.
 (define (check-around thunk)
   (define handler (current-check-handler))
-  (with-handlers ([(λ (_) #t) handler]) (thunk)))
+  (with-handlers ([not-break-exn? handler]) (thunk)))
 
 ;; Evaluates a check just like a normal function, with no calls to test-log!
 ;; or the current check handler. Check failures are raised as plain exceptions.
@@ -67,7 +68,7 @@
   ;; Nested checks should be evaluated as normal functions, to avoid double
   ;; counting test results.
   (parameterize ([current-check-around plain-check-around])
-    (with-handlers ([(λ (_) #t) log-and-handle!])
+    (with-handlers ([not-break-exn? log-and-handle!])
       (chk-thunk)
       (test-log! #t))))
 
@@ -90,46 +91,68 @@
 
 (define (list/if . vs) (filter values vs))
 
-(define-simple-macro (make-check-func (name:id formal:id ...) #:public-name pub:id body:expr ...)
-  (λ (#:location [location (list 'unknown #f #f #f #f)]
-      #:expression [expression 'unknown]
-      #:check-around [check-around current-check-around])
+(begin-for-syntax
+  (require racket/syntax)
+  ;; xform is the actual macro transformer procedure
+  ;; impl-name is an identifier naming the `check-impl` procedure
+  (struct check-transformer (xform impl)
+    #:property prop:procedure 0)
+  (provide check-transformer-impl-name check-transformer?)
+  (define (check-transformer-impl-name s)
+    (unless (check-transformer? s)
+      (raise-argument-error
+       'check-transformer-impl-name "check-transformer?" s))
+    (check-transformer-impl s))
+  (define-syntax-class check-name
+    (pattern i:id
+             #:with impl-name (format-id #f "~a-impl" #'i))))
+
+(define-simple-macro (define-check-func (name:id formal:id ...) #:public-name pub:id body:expr ...)
+  (define (name #:location [location (list 'unknown #f #f #f #f)]
+                #:expression [expression 'unknown]
+                #:check-around [check-around current-check-around])
     (procedure-rename
       (λ (formal ... [message #f])
-          (define infos
-            (list/if (make-check-name 'pub)
-                     (make-check-location location)
-                     (make-check-expression expression)
-                     (make-check-params (list formal ...))
-                     (and message (make-check-message message))))
-          (with-default-check-info* infos
-            (λ () ((check-around) (λ () body ... (void))))))
+        (when (and message (not (string? message)))
+          (raise-argument-error 'pub "(or/c #f string?)" message))
+        (define infos
+          (list/if (make-check-name 'pub)
+                   (make-check-location location)
+                   (make-check-expression expression)
+                   (make-check-params (list formal ...))
+                   (and message (make-check-message message))))
+        (with-default-check-info* infos
+          (λ () ((check-around) (λ () body ... (void))))))
       'pub)))
-                                      
 
-(define-simple-macro (define-check (name:id formal:id ...) body:expr ...)
+(define-simple-macro (define-check (name:check-name formal:id ...) body:expr ...)
   (begin
-    (define check-impl (make-check-func (check-impl formal ...) #:public-name name body ...))
-    (define-syntax (name stx)
-      (with-syntax ([loc (datum->syntax #f 'loc stx)])
-        (syntax-parse stx
-          [(chk . args)
-           #`(let ([location (syntax->location #'loc)])
-               (with-default-check-info*
-                (list (make-check-name 'name)
-                      (make-check-location location)
-                      (make-check-expression '(chk . args)))
-                #,(syntax/loc #'loc
-                    (λ ()
-                      ((current-check-around)
-                       (λ ()
-                         ((check-impl #:location location
-                                      #:expression '(chk . args)
-                                      #:check-around (λ () (λ (f) (f))))
-                          . args)))))))]
-          [chk:id
-           #'(check-impl #:location (syntax->location #'loc)
-                         #:expression 'chk)])))))
+    (define-check-func (name.impl-name formal ...) #:public-name name body ...)
+    ;; (define check-impl (make-check-func (name.impl-name formal ...) #:public-name name body ...))
+    (define-syntax name
+      (check-transformer
+       (lambda (stx)
+         (with-syntax ([loc (datum->syntax #f 'loc stx)])
+           (syntax-parse stx
+             [(chk . args)
+              #`(let ([location (syntax->location #'loc)])
+                  (with-default-check-info*
+                    (list (make-check-name 'name)
+                          (make-check-location location)
+                          (make-check-expression '(chk . args)))
+                    #,(syntax/loc #'loc
+                        (λ ()
+                          ((current-check-around)
+                           (λ ()
+                             ((name.impl-name #:location location
+                                              #:expression '(chk . args)
+                                              #:check-around (λ () (λ (f) (f))))
+                              . args)))))))]
+             [chk:id
+              #'(name.impl-name #:location (syntax->location #'loc)
+                                #:expression 'chk)])))
+       #'name.impl-name))))
+
 
 (define-syntax-rule (define-simple-check (name param ...) body ...)
   (define-check (name param ...)
@@ -190,7 +213,7 @@
   (raise-error-if-not-thunk 'check-not-exn thunk)
   (with-handlers
       ([exn:test:check? refail-check]
-       [exn?
+       [(and/c exn? not-break-exn?)
         (lambda (exn)
           (with-default-check-info*
            (list
@@ -206,8 +229,6 @@
 (define-simple-check-values
   [(check operator expr1 expr2) (operator expr1 expr2)]
   [(check-pred predicate expr) (predicate expr)]
-  [(check-= expr1 expr2 epsilon)
-   (<= (magnitude (- expr1 expr2)) epsilon)]
   [(check-true expr) (eq? expr #t)]
   [(check-false expr) (eq? expr #f)]
   [(check-not-false expr) expr]
@@ -216,10 +237,20 @@
   [(check-not-equal? expr1 expr2) (not (equal? expr1 expr2))]
   [(fail) #f])
 
+(define-check (check-= expr1 expr2 epsilon)
+  (with-check-info*
+   (list (make-check-actual expr1)
+         (make-check-expected expr2)
+         (make-check-tolerance epsilon))
+   (lambda ()
+     (unless (<= (magnitude (- expr1 expr2)) epsilon)
+       (fail-check)))))
+
 (define-check (check-within expr1 expr2 epsilon)
   (with-check-info*
    (list (make-check-actual expr1)
-         (make-check-expected expr2))
+         (make-check-expected expr2)
+         (make-check-tolerance epsilon))
    (lambda ()
      (unless (equal?/within expr1 expr2 epsilon)
        (fail-check)))))
@@ -241,7 +272,9 @@
                 (syntax->location (quote-syntax #,(datum->syntax #f 'loc stx))))
               (make-check-expression '#,(syntax->datum stx))
               (make-check-actual actual-val)
-              (make-check-expected 'expected))
+              (make-check-info 'pattern 'expected)
+              #,@(cond [(eq? (syntax-e #'pred) #t) '()]
+                       [else #'((make-check-info 'condition 'pred))]))
         (lambda ()
          (check-true (match actual-val
                        [expected pred]

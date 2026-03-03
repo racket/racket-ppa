@@ -36,20 +36,20 @@ Low-level Memory management strategy:
 #include "sort.h"
 #include <sys/types.h>
 
-static void out_of_memory PROTO((void));
-static void initialize_seginfo PROTO((seginfo *si, thread_gc *creator, ISPC s, IGEN g));
-static seginfo *allocate_segments PROTO((uptr nreq, IBOOL for_code));
-static void expand_segment_table PROTO((uptr base, uptr end, seginfo *si));
-static void contract_segment_table PROTO((uptr base, uptr end));
-static void add_to_chunk_list PROTO((chunkinfo *chunk, chunkinfo **pchunk_list));
-static seginfo *sort_seginfo PROTO((seginfo *si, uptr n));
-static seginfo *merge_seginfo PROTO((seginfo *si1, seginfo *si2));
+static void out_of_memory(void);
+static void initialize_seginfo(seginfo *si, thread_gc *creator, ISPC s, IGEN g);
+static seginfo *allocate_segments(uptr nreq, IBOOL for_code);
+static void expand_segment_table(uptr base, uptr end, seginfo *si);
+static void contract_segment_table(uptr base, uptr end);
+static void add_to_chunk_list(chunkinfo *chunk, chunkinfo **pchunk_list);
+static seginfo *sort_seginfo(seginfo *si, uptr n);
+static seginfo *merge_seginfo(seginfo *si1, seginfo *si2);
 
 #if defined(WRITE_XOR_EXECUTE_CODE)
-static void enable_code_write PROTO((ptr tc, IGEN maxg, IBOOL on, IBOOL current, void *hint, uptr hint_len));
+static void enable_code_write(ptr tc, IGEN maxg, IBOOL on, IBOOL current, void *hint, uptr hint_len);
 #endif
 
-void S_segment_init() {
+void S_segment_init(void) {
   IGEN g; ISPC s; int i;
 
   if (!S_boot_time) return;
@@ -152,7 +152,11 @@ void S_freemem(void *addr, iptr bytes, UNUSED IBOOL for_code) {
 #if defined(USE_MMAP)
 #include <sys/mman.h>
 #ifndef MAP_ANONYMOUS
-#define MAP_ANONYMOUS MAP_ANON
+# define MAP_ANONYMOUS MAP_ANON
+#endif
+#ifdef PORTABLE_BYTECODE
+# undef S_PROT_CODE
+# define S_PROT_CODE (PROT_WRITE | PROT_READ)
 #endif
 void *S_getmem(iptr bytes, IBOOL zerofill, IBOOL for_code) {
   void *addr;
@@ -243,7 +247,7 @@ static void sort_chunk_unused_segments(chunkinfo *chunk) {
 }
 
 static INT find_index(iptr n) {
-  INT index = (INT)((n >> 2) + 1);
+  UINT index = (UINT)(((uptr)n >> 2) + 1);
 
   return (index < PARTIAL_CHUNK_POOLS-1) ? index : PARTIAL_CHUNK_POOLS-1;
 }
@@ -283,7 +287,7 @@ static void initialize_seginfo(seginfo *si, NO_THREADS_UNUSED thread_gc *creator
 }
 
 /* allocation mutex must be held */
-iptr S_find_segments(creator, s, g, n) thread_gc *creator; ISPC s; IGEN g; iptr n; {
+iptr S_find_segments(thread_gc *creator, ISPC s, IGEN g, iptr n) {
   chunkinfo *chunk, *nextchunk, **chunks;
   seginfo *si, *nextsi, **prevsi;
   iptr nunused_segs, j;
@@ -580,7 +584,7 @@ static void contract_segment_table(uptr base, uptr end) {
 }
 
 /* Bracket all writes to `space_code` memory with calls to
-   `S_thread_start_code_write` and `S_thread_start_code_write'.
+   `S_thread_start_code_write` and `S_thread_end_code_write'.
 
    On a platform where a page cannot be both writable and executable
    at the same time (a.k.a. W^X), AND assuming that the disposition is

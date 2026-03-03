@@ -311,7 +311,8 @@
          family/c
          string? ;; could be more specific, I guess.
          (cons/c string? family/c)
-         (cons/c (or/c 'bold 'italic 'superscript 'subscript
+         (cons/c (or/c 'bold (cons/c 'weight font-weight/c)
+                       'italic 'superscript 'subscript
                        'large-script
                        'combine 'no-combine 'caps
                        'outline 'aligned 'unaligned
@@ -346,38 +347,53 @@
   (values (+ (* tsx dx) (* tsxy dy) tdx)
           (+ (* tsy dy) (* tsyx dx) tdy)))
 
-(define (single-pict-offset pict subbox dx dy)
+(define (single-pict-offset who pict subbox dx dy nth)
   (let floop ([box pict]
+              [nth nth]
               [found values]
-              [not-found (lambda () (error 'find-XX
-                                           "sub-pict: ~a not found in: ~a" 
-                                           subbox pict))])
+              [not-found (lambda (nth)
+                           (error who
+                                  "sub-pict not found\n  sub-pict: ~.v\n  in: ~.v"
+                                  subbox pict))])
     (if (pict-path-element=? subbox box)
-        (found dx dy)
-        (let loop ([c (pict-children box)])
+        (if (or (not nth) (zero? nth))
+            (found dx dy)
+            (not-found (and nth (sub1 nth))))
+        (let loop ([c (pict-children box)] [nth nth] [fx #f] [fy #f])
           (if (null? c)
-              (not-found)
-              (floop (child-pict (car c))
-                     (lambda (dx dy)
-                       (let ([c (car c)])
-                         (let-values ([(dx dy)
-                                       (transform
-                                        dx dy
-                                        (child-dx c) (child-dy c)
-                                        (child-sx c) (child-sy c)
-                                        (child-sxy c) (child-syx c))])
-                           (found dx dy))))
-                     (lambda ()
-                       (loop (cdr c)))))))))
+              (if fx
+                  (found fx fy)
+                  (not-found nth))
+              (let ([rst (cdr c)])
+                (floop (child-pict (car c))
+                       nth
+                       (lambda (dx dy)
+                         (let ([c (car c)])
+                           (let-values ([(dx dy)
+                                         (transform
+                                          dx dy
+                                          (child-dx c) (child-dy c)
+                                          (child-sx c) (child-sy c)
+                                          (child-sxy c) (child-syx c))])
+                             (cond
+                               [nth (found dx dy)]
+                               [(not fx) (loop rst #f dx dy)]
+                               [(and (= fx dx) (= fy dy)) (loop rst #f dx dy)]
+                               [else (error who
+                                            "sub-pict location is ambiguous\n  sub-pict: ~.v\n  in: ~.v"
+                                            subbox pict)]))))
+                       (lambda (nth)
+                         (loop rst nth fx fy)))))))))
 
-(define (find-lbx pict subbox-path dx dy)
+(define (find-lbx who pict subbox-path dx dy nth)
   (if (pict-convertible? subbox-path)
-      (single-pict-offset pict subbox-path dx dy)
+      (single-pict-offset who pict subbox-path dx dy nth)
       (let loop ([l (cons pict subbox-path)])
         (if (null? (cdr l))
             (values dx dy)
             (let-values ([(dx dy) (loop (cdr l))])
-              (single-pict-offset (car l) (cadr l) dx dy))))))
+              (single-pict-offset who (car l) (cadr l) dx dy
+                                  (if (null? (cddr l)) nth 0)))))))
 
 (define-values (find-lt
                 find-lc
@@ -393,44 +409,9 @@
                 find-rc
                 find-rb
                 find-rtl
-                find-rbl)
-  (let ([lb (lambda (x sx w d a) x)]
-        [c (lambda (x sx w d a) (+ x (* sx (/ w 2))))]
-        [rt (lambda (x sx w d a) (+ x (* sx w)))]
-        [tline (lambda (x sx w d a) (+ x (* sx (- w a))))]
-        [bline (lambda (x sx w d a) (+ x (* sx d)))]
-        [find (lambda (get-x get-y)
-                (lambda (pict pict-path)
-                  (let ([p (let loop ([path pict-path])
-                             (cond
-                               [(pict? path) path]
-                               [(pict-convertible? path) (pict-convert path)]
-                               [(null? (cdr path)) (loop (car path))]
-                               [else (loop (cdr path))]))])
-                    (let ([w (pict-width p)]
-                          [h (pict-height p)]
-                          [d (pict-descent p)]
-                          [a (pict-ascent p)])
-                      (find-lbx pict pict-path
-                                (get-x 0 1 w 0 0)
-                                (get-y 0 1 h d a))))))])
-    (values (find lb rt)
-            (find lb c)
-            (find lb lb)
-            (find lb tline)
-            (find lb bline)
-            (find c rt)
-            (find c c)
-            (find c lb)
-            (find c tline)
-            (find c bline)
-            (find rt rt)
-            (find rt c)
-            (find rt lb)
-            (find rt tline)
-            (find rt bline))))
+                find-rbl
 
-(define-values (lt-find
+                lt-find
                 lc-find
                 lb-find
                 ltl-find
@@ -445,25 +426,66 @@
                 rb-find
                 rtl-find
                 rbl-find)
-  (let ([flip (lambda (orig)
-                (lambda (pict pict-path)
-                  (let-values ([(x y) (orig pict pict-path)])
-                    (values x (- (pict-height pict) y)))))])
-    (values (flip find-lt)
-            (flip find-lc)
-            (flip find-lb)
-            (flip find-ltl)
-            (flip find-lbl)
-            (flip find-ct)
-            (flip find-cc)
-            (flip find-cb)
-            (flip find-ctl)
-            (flip find-cbl)
-            (flip find-rt)
-            (flip find-rc)
-            (flip find-rb)
-            (flip find-rtl)
-            (flip find-rbl))))
+  (let ([lb (lambda (x sx w d a) x)]
+        [c (lambda (x sx w d a) (+ x (* sx (/ w 2))))]
+        [rt (lambda (x sx w d a) (+ x (* sx w)))]
+        [tline (lambda (x sx w d a) (+ x (* sx (- w a))))]
+        [bline (lambda (x sx w d a) (+ x (* sx d)))]
+        [find (lambda (who get-x get-y flip?)
+                (procedure-rename
+                 (lambda (pict pict-path #:nth [nth 0])
+                   (let ([p (let loop ([path pict-path])
+                              (cond
+                                [(pict? path) path]
+                                [(pict-convertible? path) (pict-convert path)]
+                                [(null? (cdr path)) (loop (car path))]
+                                [else (loop (cdr path))]))])
+                     (let ([w (pict-width p)]
+                           [h (pict-height p)]
+                           [d (pict-descent p)]
+                           [a (pict-ascent p)])
+                       (define-values (x y)
+                         (find-lbx who pict pict-path
+                                   (get-x 0 1 w 0 0)
+                                   (get-y 0 1 h d a)
+                                   (if (eq? nth 'unique)
+                                       #f
+                                       nth)))
+                       (if flip?
+                           (values x (- (pict-height pict) y))
+                           (values x y)))))
+                 who))])
+    (values (find 'find-lt lb rt #f)
+            (find 'find-lc lb c #f)
+            (find 'find-lb lb lb #f)
+            (find 'find-ltl lb tline #f)
+            (find 'find-lbl lb bline #f)
+            (find 'find-ct c rt #f)
+            (find 'find-cc c c #f)
+            (find 'find-cb c lb #f)
+            (find 'find-ctl c tline #f)
+            (find 'find-cbl c bline #f)
+            (find 'find-rt rt rt #f)
+            (find 'find-rc rt c #f)
+            (find 'find-rb rt lb #f)
+            (find 'find-rtl rt tline #f)
+            (find 'find-rbl rt bline #f)
+
+            (find 'lt-find lb rt #t)
+            (find 'lc-find lb c #t)
+            (find 'lb-find lb lb #t)
+            (find 'ltl-find lb tline #t)
+            (find 'lbl-find lb bline #t)
+            (find 'ct-find c rt #t)
+            (find 'cc-find c c #t)
+            (find 'cb-find c lb #t)
+            (find 'ctl-find c tline #t)
+            (find 'cbl-find c bline #t)
+            (find 'rt-find rt rt #t)
+            (find 'rc-find rt c #t)
+            (find 'rb-find rt lb #t)
+            (find 'rtl-find rt tline #t)
+            (find 'rbl-find rt bline #t))))
 
 (define (launder box*)
   ;; we might be given a pict-convertable
@@ -1536,12 +1558,14 @@
              (send the-font-list find-or-create-font
                    size (car style) (cdr style) 'normal 'normal #f 'default #t 'unaligned)]
             [(and (pair? style)
-                  (memq (car style)
-                        '(superscript 
-                          subscript
-                          large-script
-                          bold italic
-                          aligned unaligned)))
+                  (or (memq (car style)
+                            '(superscript
+                              subscript
+                              large-script
+                              bold italic
+                              aligned unaligned))
+                      (and (pair? (car style))
+                           (eq? (caar style) 'weight))))
              (let ([font (loop (cdr style))]
                    [style (car style)])
                (cond
@@ -1550,6 +1574,13 @@
                               (send font get-point-size)
                               (send font get-style)
                               'bold
+                              (send font get-hinting))]
+                [(and (pair? style)
+                      (eq? (car style) 'weight))
+                 (extend-font font
+                              (send font get-point-size)
+                              (send font get-style)
+                              (cdr style)
                               (send font get-hinting))]
                 [(eq? style 'italic)
                  (extend-font font
@@ -1907,9 +1938,10 @@
           (loop dx dy (cdr l))))))
 
 (define (make-pict-drawer p)
-  (let ([cmds (pict->command-list p)])
+  (let ([cmds (pict->command-list p)]
+        [h (pict-height p)])
     (lambda (dc dx dy)
-      (render dc (+ (pict-height p) dy)
+      (render dc (+ h dy)
               cmds
               dx 0))))
 

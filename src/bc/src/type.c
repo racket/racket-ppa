@@ -163,10 +163,12 @@ scheme_init_type ()
   set_name(scheme_hash_tree_type, "<hash>");
   set_name(scheme_eq_hash_tree_type, "<hash>");
   set_name(scheme_eqv_hash_tree_type, "<hash>");
+  set_name(scheme_equal_always_hash_tree_type, "<hash>");
   set_name(scheme_hash_tree_indirection_type, "<hash>");
   set_name(scheme_hash_tree_subtree_type, "<hash-node>");
   set_name(scheme_hash_tree_collision_type, "<hash-node>");
   set_name(scheme_bucket_table_type, "<hash>");
+  set_name(scheme_stencil_vector_type, "<stencil-vector>");
   set_name(scheme_case_closure_type, "<procedure>");
   set_name(scheme_placeholder_type, "<placeholder>");
   set_name(scheme_table_placeholder_type, "<hash-table-placeholder>");
@@ -230,10 +232,13 @@ scheme_init_type ()
   set_name(scheme_thread_resume_type, "<thread-resume-evt>");
   set_name(scheme_thread_suspend_type, "<thread-suspend-evt>");
   set_name(scheme_thread_dead_type, "<thread-dead-evt>");
+  set_name(scheme_thread_running_type, "<thread-running-evt>");
 
   set_name(scheme_thread_set_type, "<thread-set>");
   set_name(scheme_thread_cell_type, "<thread-cell>");
   set_name(scheme_thread_cell_values_type, "<thread-cell-values>");
+
+  set_name(scheme_parallel_pool_type, "<parallel-thread-pool>");
 
   set_name(scheme_prompt_tag_type, "<continuation-prompt-tag>");
   set_name(scheme_continuation_mark_key_type, "<continuation-mark-key>");
@@ -271,6 +276,8 @@ scheme_init_type ()
   set_name(scheme_unquoted_printing_string_type, "<unquoted-printing-string>");
 
   set_name(scheme_thunk_for_continue_type, "<thunk-for-continue>");
+
+  set_name(scheme_parallel_pool_type, "<parallel-pool>");
 
 #ifdef MZ_PRECISE_GC
   set_name(scheme_rt_runstack, "<runstack>");
@@ -592,6 +599,7 @@ void scheme_register_traversers(void)
 #endif
   GC_REG_TRAV(scheme_fxvector_type, fxvector_obj);
   GC_REG_TRAV(scheme_cpointer_type, cpointer_obj);
+  GC_REG_TRAV(scheme_stencil_vector_type, stencil_vector_obj);
 
   GC_REG_TRAV(scheme_bucket_type, bucket_obj);
 
@@ -613,7 +621,8 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_semaphore_repost_type, small_object);
   GC_REG_TRAV(scheme_thread_suspend_type, twoptr_obj);
   GC_REG_TRAV(scheme_thread_resume_type, twoptr_obj);
-  GC_REG_TRAV(scheme_thread_dead_type, small_object);
+  GC_REG_TRAV(scheme_thread_dead_type, twoptr_obj);
+  GC_REG_TRAV(scheme_thread_running_type, small_object);
   GC_REG_TRAV(scheme_hash_table_type, hash_table_val);
   GC_REG_TRAV(scheme_bucket_table_type, bucket_table_val);
   GC_REG_TRAV(scheme_env_type, env_val);
@@ -673,6 +682,8 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_plumber_handle_type, twoptr_obj);
 
   GC_REG_TRAV(scheme_unquoted_printing_string_type, small_object);
+
+  GC_REG_TRAV(scheme_parallel_pool_type, small_atomic_obj);
 }
 
 END_XFORM_SKIP;

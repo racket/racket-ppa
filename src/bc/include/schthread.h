@@ -96,6 +96,7 @@ MZ_EXTERN void scheme_init_os_thread(void);
 #define BIGNUM_CACHE_SIZE 16
 #define STACK_CACHE_SIZE 32
 #define NUM_MORE_CONSTANT_STXES 24
+#define CONFIG_CALLBACK_CACHE_LEN 4
 
   /* The number of cached scope sets should be a power of 2: */
 #define NUM_RECENT_SCOPE_SETS 8
@@ -193,6 +194,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Object *scheme_orig_stderr_port_;
   struct Scheme_Object *scheme_orig_stdin_port_;
   struct rktio_ltps_t *scheme_semaphore_fd_set_;
+  double last_sema_poll_msecs_;
   struct Scheme_Object *fs_change_props_;
   struct Scheme_Custodian *new_port_cust_;
   char *read_string_byte_buffer_;
@@ -362,13 +364,15 @@ typedef struct Thread_Local_Variables {
   void *on_atomic_timeout_data_;
   int atomic_timeout_auto_suspend_;
   int atomic_timeout_atomic_level_;
-  struct Scheme_Object *configuration_callback_cache_[2];
+  struct Scheme_Hash_Table *accessible_dead_events_;
+  struct Scheme_Object *configuration_callback_cache_[CONFIG_CALLBACK_CACHE_LEN];
   struct FFI_Orig_Place_Call *cached_orig_place_todo_;
   struct Scheme_Hash_Table *ffi_lock_ht_;
   struct Scheme_Object *is_syntax_proc_;
   struct Scheme_Object *expander_syntax_to_datum_proc_;
   struct Scheme_Hash_Table *local_primitive_tables_;
   struct Scheme_Object *current_linklet_native_lambdas_;
+  struct Scheme_Hash_Table *interned_char_table_;
 } Thread_Local_Variables;
 
 #if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS)
@@ -580,6 +584,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define scheme_orig_stderr_port XOA (scheme_get_thread_local_variables()->scheme_orig_stderr_port_)
 #define scheme_orig_stdin_port XOA (scheme_get_thread_local_variables()->scheme_orig_stdin_port_)
 #define scheme_semaphore_fd_set XOA (scheme_get_thread_local_variables()->scheme_semaphore_fd_set_)
+#define last_sema_poll_msecs XOA (scheme_get_thread_local_variables()->last_sema_poll_msecs_)
 #define fs_change_props XOA (scheme_get_thread_local_variables()->fs_change_props_)
 #define new_port_cust XOA (scheme_get_thread_local_variables()->new_port_cust_)
 #define read_string_byte_buffer XOA (scheme_get_thread_local_variables()->read_string_byte_buffer_)
@@ -750,6 +755,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define on_atomic_timeout_data XOA (scheme_get_thread_local_variables()->on_atomic_timeout_data_)
 #define atomic_timeout_auto_suspend XOA (scheme_get_thread_local_variables()->atomic_timeout_auto_suspend_)
 #define atomic_timeout_atomic_level XOA (scheme_get_thread_local_variables()->atomic_timeout_atomic_level_)
+#define accessible_dead_events XOA (scheme_get_thread_local_variables()->accessible_dead_events_)
 #define configuration_callback_cache XOA (scheme_get_thread_local_variables()->configuration_callback_cache_)
 #define cached_orig_place_todo XOA (scheme_get_thread_local_variables()->cached_orig_place_todo_)
 #define ffi_lock_ht XOA (scheme_get_thread_local_variables()->ffi_lock_ht_)
@@ -757,6 +763,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define expander_syntax_to_datum_proc XOA (scheme_get_thread_local_variables()->expander_syntax_to_datum_proc_)
 #define local_primitive_tables XOA (scheme_get_thread_local_variables()->local_primitive_tables_)
 #define current_linklet_native_lambdas XOA (scheme_get_thread_local_variables()->current_linklet_native_lambdas_)
+#define interned_char_table XOA (scheme_get_thread_local_variables()->interned_char_table_)
 
 /* **************************************** */
 

@@ -27,20 +27,20 @@
          in-weak-set
          set-implements/c
 
-         set seteq seteqv
-         weak-set weak-seteq weak-seteqv
-         mutable-set mutable-seteq mutable-seteqv
-         list->set list->seteq list->seteqv
-         list->weak-set list->weak-seteq list->weak-seteqv
-         list->mutable-set list->mutable-seteq list->mutable-seteqv
-         set-eq? set-eqv? set-equal?
+         set seteq seteqv setalw
+         weak-set weak-seteq weak-seteqv weak-setalw
+         mutable-set mutable-seteq mutable-seteqv mutable-setalw
+         list->set list->seteq list->seteqv list->setalw
+         list->weak-set list->weak-seteq list->weak-seteqv list->weak-setalw
+         list->mutable-set list->mutable-seteq list->mutable-seteqv list->mutable-setalw
+         set-eq? set-eqv? set-equal? set-equal-always?
          set-weak? set-mutable? set?
-         for/set for/seteq for/seteqv
-         for*/set for*/seteq for*/seteqv
-         for/weak-set for/weak-seteq for/weak-seteqv
-         for*/weak-set for*/weak-seteq for*/weak-seteqv
-         for/mutable-set for/mutable-seteq for/mutable-seteqv
-         for*/mutable-set for*/mutable-seteq for*/mutable-seteqv
+         for/set for/seteq for/seteqv for/setalw
+         for*/set for*/seteq for*/seteqv for*/setalw
+         for/weak-set for/weak-seteq for/weak-seteqv for/weak-setalw
+         for*/weak-set for*/weak-seteq for*/weak-seteqv for*/weak-setalw
+         for/mutable-set for/mutable-seteq for/mutable-seteqv for/mutable-setalw
+         for*/mutable-set for*/mutable-seteq for*/mutable-seteqv for*/mutable-setalw
 
          define-custom-set-types
          make-custom-set-types
@@ -66,6 +66,7 @@
     (case cmp
       [(dont-care) any/c]
       [(equal) set-equal?]
+      [(equal-always) set-equal-always?]
       [(eqv) set-eqv?]
       [(eq) set-eq?]
       [else (raise-arguments-error 'set/c
@@ -133,6 +134,7 @@
     (case cmp
       [(dont-care) (lambda (x) #t)]
       [(equal) set-equal?]
+      [(equal-always) set-equal-always?]
       [(eqv) set-eqv?]
       [(eq) set-eq?]))
   (define kind?
@@ -147,30 +149,33 @@
 
 (define (set-contract-check cmp kind b neg-party x)
   (unless (generic-set? x)
-    (raise-blame-error b #:missing-party neg-party x "expected a set"))
+    (raise-blame-error b #:missing-party neg-party x '(expected: "a set" given: "~e") x))
   (case cmp
     [(equal)
      (unless (set-equal? x)
-       (raise-blame-error b #:missing-party neg-party x "expected an equal?-based set"))]
+       (raise-blame-error b #:missing-party neg-party x '(expected: "an equal?-based set" given: "~e") x))]
+    [(equal-always)
+     (unless (set-equal-always? x)
+       (raise-blame-error b #:missing-party neg-party x '(expected: "an equal-always?-based set" given: "~e") x))]
     [(eqv)
      (unless (set-eqv? x)
-       (raise-blame-error b #:missing-party neg-party x "expected an eqv?-based set"))]
+       (raise-blame-error b #:missing-party neg-party x '(expected: "an eqv?-based set" given: "~e") x))]
     [(eq)
      (unless (set-eq? x)
-       (raise-blame-error b #:missing-party neg-party x "expected an eq?-based set"))])
+       (raise-blame-error b #:missing-party neg-party x '(expected: "an eq?-based set" given: "~e") x))])
   (case kind
     [(mutable-or-weak)
      (unless (or (set-mutable? x) (set-weak? x))
-       (raise-blame-error b #:missing-party neg-party x "expected a mutable or weak set"))]
+       (raise-blame-error b #:missing-party neg-party x '(expected: "a mutable or weak set" given: "~e") x))]
     [(mutable)
      (unless (set-mutable? x)
-       (raise-blame-error b #:missing-party neg-party x "expected a mutable set"))]
+       (raise-blame-error b #:missing-party neg-party x '(expected: "a mutable set" given: "~e") x))]
     [(weak)
      (unless (set-weak? x)
-       (raise-blame-error b #:missing-party neg-party x "expected a weak set"))]
+       (raise-blame-error b #:missing-party neg-party x '(expected: "a weak set" given: "~e") x))]
     [(immutable)
      (unless (set? x)
-       (raise-blame-error b #:missing-party neg-party x "expected an immutable set"))]))
+       (raise-blame-error b #:missing-party neg-party x '(expected: "an immutable set" given: "~e") x))]))
 
 (define (set-contract-late-neg-projection chaperone-ctc?)
   (lambda (ctc)
@@ -405,6 +410,11 @@
        [mutable? mutable-seteq]
        [weak? weak-seteq]
        [else seteq])]
+    [(eq? cmp 'equal-always)
+     (cond
+       [mutable? mutable-setalw]
+       [weak? weak-setalw]
+       [else setalw])]
     [else
      (cond
        [mutable? mutable-set]

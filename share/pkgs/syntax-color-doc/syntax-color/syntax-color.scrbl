@@ -20,16 +20,7 @@ structures and some helpful utilities for the @racket[color:text<%>]
 class of @racketmodname[framework].
 
 @table-of-contents[]
-
-@; ----------------------------------------------------------------------
-
-@section{Parenthesis Matching}
-
-@defmodule[syntax-color/paren-tree]
-
-@defclass[paren-tree% object% ()]
-
-Parenthesis matching code built on top of @racket[token-tree%].
+@include-section["paren-tree.scrbl"]
 
 @; ----------------------------------------------------------------------
 
@@ -47,7 +38,14 @@ Parenthesis matching code built on top of @racket[token-tree%].
   Checks to be sure a lexing function is well-behaved. For more
   details, see @xmethod[color:text<%> start-colorer].
 
+  It also supplies a few random arguments to the lexer and checks the results,
+  using @racket[option/c]'s @racket[#:tester] argument.
+
  @history[#:added "1.2"]}
+
+@defthing[lexer*/c-without-random-testing contract?]{
+ The same contract as @racket[lexer*/c], except without the random testing.
+}
 
 @defstruct*[dont-stop ([val any/c])]{
   A structure type used to indicate to the lexer that it should not
@@ -80,8 +78,9 @@ Parenthesis matching code built on top of @racket[token-tree%].
  This function raises an error unless the following boolean
  expression is true:
  @racketblock[(or (equal? type 'eof)
-                  (and (<= pos-before new-token-start pos-after)
-                       (<= pos-before new-token-end pos-after)))]
+                  (and (= pos-before new-token-start)
+                       (< new-token-start new-token-end)
+                       (= new-token-end pos-after)))]
  but it checks the individual parts of the expression to
  raise a more meaningful error message when some part is not
  true.
@@ -138,8 +137,12 @@ The @racket[racket-lexer] function returns 5 values:
 
 Like @racket[racket-lexer], but uses the extended lexer protocol to
 track and report regions that are commented out with @litchar{#;}.
+It also uses @racket[current-lexeme->semantic-type-guess] to potentially add
+@racket['semantic-type-guess] to the second result.
 
-@history[#:added "1.2"]}
+
+@history[#:added "1.2"
+         #:changed "1.7" @elem{Added use of @racket[current-lexeme->semantic-type-guess].}]}
 
 @defproc[(racket-lexer/status [in input-port?]) 
          (values (or/c string? eof-object?) 
@@ -168,10 +171,11 @@ as whitespace) on a datum.}
                  any/c
                  (or/c 'datum 'open 'close 'continue))]{
 
-Like @racket[racket-lexer/status], but with comment tracking like
-@racket[racket-lexer*].
+Like @racket[racket-lexer/status], but with comment tracking and
+@racket['semantic-type-guess] addition like @racket[racket-lexer*].
 
-@history[#:added "1.2"]}
+@history[#:added "1.2"
+         #:changed "1.7" @elem{Added use of @racket[current-lexeme->semantic-type-guess].}]}
 
 @defproc[(racket-nobar-lexer/status [in input-port?]) 
          (values (or/c string? eof-object?) 
@@ -198,10 +202,21 @@ This function is used by @racket[scribble-lexer].}
                  any/c
                  (or/c 'datum 'open 'close 'continue))]{
 
-Like @racket[racket-nobar-lexer/status], but with comment tracking like
-@racket[racket-lexer*].
+Like @racket[racket-nobar-lexer/status], but with comment tracking and
+@racket['semantic-type-guess] addition like @racket[racket-lexer*].
 
-@history[#:added "1.2"]}
+@history[#:added "1.2"
+         #:changed "1.7" @elem{Added use of @racket[current-lexeme->semantic-type-guess].}]}
+
+@defparam[current-lexeme->semantic-type-guess proc (string . -> . (or/c #f symbol?))]{
+
+A parameter to determine when a @racket['semantic-type-guess] attribute should
+be added to a token result of type @racket['symbol] by @racket[racket-lexer*]
+and similar functions. An attribute is added whenever the @racket[proc] value
+of the parameter returns a symbol (instead of @racket[#f]).
+
+@history[#:added "1.7"]
+}
 
 @section{Default Lexer}
 @defmodule[syntax-color/default-lexer]
@@ -240,17 +255,30 @@ A lexer that only identifies @litchar{(}, @litchar{)}, @litchar{[},
 @defproc[(module-lexer [in input-port?]
                        [offset exact-nonnegative-integer?]
                        [mode (or/c #f
-                                   (-> input-port? any)
-                                   (cons/c (-> input-port? any/c any) any/c))])
-         (values (or/c string? eof-object?) 
+                                   (-> input-port? exact-nonnegative-integer?any)
+                                   (cons/c (-> input-port?
+                                               exact-nonnegative-integer?
+                                               any/c
+                                               any)
+                                           any/c))])
+         (values (or/c string? eof-object?)
                  symbol?
-                 (or/c symbol? #f) 
-                 (or/c number? #f) 
+                 (or/c symbol? #f)
+                 (or/c number? #f)
                  (or/c number? #f)
                  exact-nonnegative-integer?
-                 (or/c #f 
+                 (or/c #f
                        (-> input-port? any)
-                       (cons/c (-> input-port? any/c any) any/c)))]{
+                       (cons/c (-> input-port? exact-nonnegative-integer?
+                                   any/c
+                                   any)
+                               any/c)
+                       (struct/c dont-stop
+                                 ((cons/c (-> input-port?
+                                              exact-nonnegative-integer?
+                                              any/c
+                                              any)
+                                          any/c)))))]{
 
 Like @racket[racket-lexer], but with several differences:
 
@@ -300,7 +328,11 @@ Like @racket[racket-lexer], but with several differences:
                         [offset exact-nonnegative-integer?]
                         [mode (or/c #f
                                     (-> input-port? any)
-                                    (cons/c (-> input-port? any/c any) any/c))])
+                                    (cons/c (-> input-port?
+                                                exact-nonnegative-integer?
+                                                any/c
+                                                any)
+                                            any/c))])
          (values (or/c string? eof-object?) 
                  (or/c symbol?
                        (and/c (hash/c symbol? any/c) immutable?))
@@ -308,9 +340,19 @@ Like @racket[racket-lexer], but with several differences:
                  (or/c number? #f) 
                  (or/c number? #f)
                  exact-nonnegative-integer?
-                 (or/c #f 
+                 (or/c #f
                        (-> input-port? any)
-                       (cons/c (-> input-port? any/c any) any/c)))]{
+                       (cons/c (-> input-port?
+                                   exact-nonnegative-integer?
+                                   any/c
+                                   any)
+                               any/c)
+                       (struct/c dont-stop
+                                 ((cons/c (-> input-port?
+                                              exact-nonnegative-integer?
+                                              any/c
+                                              any)
+                                          any/c)))))]{
 
 Like @racket[module-lexer], except that the attribute result
 propagated from a language-specific lexer can be a hash table.

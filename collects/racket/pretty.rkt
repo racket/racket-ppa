@@ -12,7 +12,9 @@
 #lang racket/base
 (require racket/private/port
          racket/flonum
-         racket/fixnum)
+         racket/fixnum
+         racket/treelist
+         racket/mutable-treelist)
 
 (provide pretty-print
          pretty-write
@@ -414,6 +416,9 @@
            (vector-set! v 0 d)
            #t))))
 
+(define (*treelist? obj) (or (treelist? obj) (mutable-treelist? obj)))
+(define (*treelist->list obj) (if (treelist? obj) (treelist->list obj) (mutable-treelist->list obj)))
+
 (define-struct unquoted (val))
 (define struct-ellipses (string->uninterned-symbol "..."))
 
@@ -512,7 +517,8 @@
                      (vloop (or (loop (vector-ref obj i) mode) esc?) 
                             (add1 i))))))]
            [(or (flvector? obj)
-                (fxvector? obj))
+                (fxvector? obj)
+                (*treelist? obj))
             ;; always unquoted:
             #t]
            [(pair? obj)
@@ -583,6 +589,16 @@
                                 (loop k mode))
                            esc?))
                      (escapes! obj mode)))])]
+           [(stencil-vector? obj)
+            (start-compound! obj)
+            (let stencil-loop ([i 0])
+              (unless (= i (stencil-vector-length obj))
+                (loop (stencil-vector-ref obj i) (and mode #t))
+                (stencil-loop (add1 i))))
+            (end-compound!
+             obj
+             ;; always quoted:
+             #f)]
            [else #f])]))
     (when (or found-cycle? print-graph?)
       ;; Remove unwanted table entries:
@@ -692,10 +708,23 @@
                      'hasheq
                      (if (hash-eqv? obj)
                          'hasheqv
-                         'hash)))
+                         (if (hash-equal-always? obj)
+                             'hashalw
+                             'hash))))
                 (apply append l))
           l)))
-  
+
+  (define (convert-stencil-vector obj)
+    (let loop ([i 0])
+      (if (= i (stencil-vector-length obj))
+          '()
+          (cons (stencil-vector-ref obj i)
+                (loop (add1 i))))))
+
+  (define (stencil-opener obj)
+    (define mask (stencil-vector-mask obj))
+    (format "#<stencil ~a~a" mask (if (zero? mask) "" ": ")))
+
   ;; ------------------------------------------------------------
   ;; wr: write on a single line
   (define (wr* pport obj depth display? qd)
@@ -869,6 +898,19 @@
                    (begin
                      (out "#&") 
                      (wr (unbox obj) (dsub1 depth) qd))))))]
+         [(*treelist? obj)
+          (check-expr-found
+           obj pport #t
+           #f #f
+           (lambda ()
+             (if (and qd (zero? qd))
+                 (wr-lst (cons (make-unquoted (if (treelist? obj) 'treelist 'mutable-treelist))
+                               (*treelist->list obj))
+                         #f depth pair? car cdr "(" ")" qd)
+                 (begin
+                   (out (if (treelist? obj) "#<treelist: " "#<mutable-treelist: "))
+                   (wr-lst (*treelist->list obj)
+                           #f depth pair? car cdr "" ">" qd)))))]
          [(and (custom-write? obj) 
                (not (struct-type? obj)))
           (check-expr-found
@@ -933,12 +975,22 @@
                               "#hasheq"
                               (if (hash-eqv? obj)
                                   "#hasheqv"
-                                  "#hash"))))
+                                  (if (hash-equal-always? obj)
+                                      "#hashalw"
+                                      "#hash")))))
                    (wr-lst (convert-hash obj expr?)
                            #f depth
                            pair? car cdr "(" ")" qd))))
               (parameterize ([print-hash-table #f])
                 ((if display? orig-display orig-write) obj pport)))]
+         [(stencil-vector? obj)
+          (check-expr-found
+           obj pport #t
+           #f #f
+           (lambda ()
+             (wr-lst (convert-stencil-vector obj)
+                     #f depth
+                     pair? car cdr (stencil-opener obj) ">" (and qd 1))))]
          [(boolean? obj)
           (out (if long-bools?
                    (if obj "#true" "#false")
@@ -1000,12 +1052,14 @@
                                  (mpair? obj)
                                  (vector? obj) 
                                  (flvector? obj) 
-                                 (fxvector? obj) 
+                                 (fxvector? obj)
+                                 (*treelist? obj) 
                                  (and (box? obj) print-box?)
                                  (and (custom-write? obj)
                                       (not (struct-type? obj)))
                                  (and (struct? obj) print-struct?)
-                                 (and (hash? obj) print-hash-table?)))]
+                                 (and (hash? obj) print-hash-table?)
+                                 (stencil-vector? obj)))]
              [graph-ref (if can-multi
                             (and found (hash-ref found obj #f))
                             #f)]
@@ -1099,6 +1153,19 @@
                                        extra pp-expr #f depth
                                        pair? car cdr pair-open pair-close
                                        qd)))]
+                       [(*treelist? obj)
+                        (if (and qd (zero? qd))
+                            (pp-list (cons (make-unquoted (if (treelist? obj) 'treelist 'mutable-treelist))
+                                           (*treelist->list obj))
+                                     extra pp-expr #f depth
+                                     pair? car cdr pair-open pair-close
+                                     qd)
+                            (begin
+                              (out (if (treelist? obj) "#<treelist: " "#<mutable-treelist: "))
+                              (pp-list (*treelist->list obj)
+                                       extra pp-expr #f depth
+                                       pair? car cdr "" ">"
+                                       qd)))]
                        [(and (custom-write? obj)
                              (not (struct-type? obj)))
                         (let ([qd (let ([kind (if (custom-print-quotable? obj)
@@ -1141,10 +1208,16 @@
                                      "#hasheq"
                                      (if (hash-eqv? obj)
                                          "#hasheqv"
-                                         "#hash"))))
+                                         (if (hash-equal-always? obj)
+                                             "#hashalw"
+                                             "#hash")))))
                           (pp-list (convert-hash obj expr?) extra pp-expr #f depth
                                    pair? car cdr pair-open pair-close
                                    qd))]
+                       [(stencil-vector? obj)
+                        (pp-list (convert-stencil-vector obj) extra pp-expr #f depth
+                                 pair? car cdr (stencil-opener obj) ">"
+                                 (and qd 1))]
                        [(and (box? obj) print-box?)
                         (let ([qd (to-quoted out qd obj)])
                           (if (and qd (zero? qd))

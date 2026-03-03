@@ -10,13 +10,15 @@
          "private/distributions/normal-dist.rkt"
          "private/distributions/exponential-dist.rkt"
          "private/distributions/gamma-dist.rkt"
+         "private/distributions/weibull-dist.rkt"
          "private/distributions/beta-dist.rkt"
          "private/distributions/truncated-dist.rkt"
          "private/distributions/geometric-dist.rkt"
          "private/distributions/binomial-dist.rkt"
          "private/distributions/bernoulli-dist.rkt"
          "private/distributions/poisson-dist.rkt"
-         "private/distributions/discrete-dist.rkt")
+         "private/distributions/discrete-dist.rkt"
+         "private/distributions/student-t-dist.rkt")
 
 (provide (all-from-out
           "private/distributions/dist-struct.rkt"
@@ -29,10 +31,12 @@
           "private/distributions/normal-dist.rkt"
           "private/distributions/exponential-dist.rkt"
           "private/distributions/gamma-dist.rkt"
+          "private/distributions/weibull-dist.rkt"
           "private/distributions/beta-dist.rkt"
           "private/distributions/truncated-dist.rkt"
           "private/distributions/geometric-dist.rkt"
           "private/distributions/binomial-dist.rkt"
           "private/distributions/bernoulli-dist.rkt"
           "private/distributions/poisson-dist.rkt"
-          "private/distributions/discrete-dist.rkt"))
+          "private/distributions/discrete-dist.rkt"
+          "private/distributions/student-t-dist.rkt"))

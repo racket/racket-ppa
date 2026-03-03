@@ -304,6 +304,7 @@
   ;; Help Desk
   (help "帮助")
   (racket-documentation "Racket文档")
+  (x-documentation "~a文档") ;; ~a is filled with a language family name, eg Racket, Rhombus, or HtDP
   (help-desk "帮助台")
   (plt:hd:search "搜索")
   (plt:hd:feeling-lucky "手气不错")
@@ -1160,17 +1161,11 @@
   
   
   ;;; languages
-  (beginning-student "初级")
   (beginning-one-line-summary "define、cond、结构体、常量和基本运算")
-  (beginning-student/abbrev "初级+缩写的表")
   (beginning/abbrev-one-line-summary "在初级的基础上，用缩写形式输出表")
-  (intermediate-student "中级")
   (intermediate-one-line-summary "在初级的基础上增加词法作用域")
-  (intermediate-student/lambda "中级+lambda")
   (intermediate/lambda-one-line-summary "在中级的基础上，增加高阶函数")
-  (advanced-student "高级")
   (advanced-one-line-summary "在中级的基础上，增加lambda和赋值")
-  (how-to-design-programs "程序设计方法/How to Design Programs") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "大")
   (pretty-big-scheme-one-line-summary "MzScheme/MrEd加HtDP(程序设计方法)语言")
   (r5rs-lang-name "R5RS")

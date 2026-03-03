@@ -13,6 +13,15 @@
 ;;; See the License for the specific language governing permissions and
 ;;; limitations under the License.
 
+(mat fixnum?
+   (fixnum? (bitwise-and (- (random 1) 1) 7))
+   (fixnum? (bitwise-and (- (random 1) 1) (most-positive-fixnum)))
+   (not (fixnum? (bitwise-and (- (random 1) 1) (add1 (most-positive-fixnum)))))
+   (fixnum? (bitwise-ior -7 (random 1)))
+   (fixnum? (bitwise-ior (most-negative-fixnum) (random 1)))
+   (not (fixnum? (bitwise-ior (sub1 (most-negative-fixnum)) (random 1))))
+ )
+
 (mat fx=
    (not (fx= 3 4))
    (not (fx= 4 3))
@@ -555,7 +564,9 @@
 (mat fx-/wraparound
    (eqv? (fx-/wraparound 3 0) 3)
    (eqv? (fx-/wraparound 3 1) 2)
+   (eqv? (fx-/wraparound 0 3) -3)
    (eqv? (fx-/wraparound -3 4) -7)
+   (eqv? (fx-/wraparound 3) -3)
    (error? (fx-/wraparound '(a . b) 0))
    (error? (fx- (add1 (most-positive-fixnum)) 1))
    (error? (fx- 1 (add1 (most-positive-fixnum))))
@@ -599,6 +610,16 @@
    (test-cp0-expansion eqv? '(fx*) 1)
    (test-cp0-expansion eqv? '(fx* 3) 3)
    (test-cp0-expansion eqv? '(fx* 3 4 5) 60)
+
+   ;; regression test for stack overflow checking and `raw` wrapper
+   (equal? 0
+           (call/cc
+            (lambda (esc)
+              (let loop ([i 100000])
+                (if (fx= i 0)
+                    (esc 0)
+                    (fx* i (loop (fx- i 1))))))))
+
  )
 
 (mat r6rs:fx*
@@ -2542,6 +2563,12 @@
     (map (lambda (x) (let-values ([ls (fxdiv-and-mod x 64)]) ls))
       '(0 -5 -31 -32 -33 -63 -64 -65 -127 -128 -129))
     '((0 0) (-1 59) (-1 33) (-1 32) (-1 31) (-1 1) (-1 0) (-2 63) (-2 1) (-2 0) (-3 63)))
+  (test-cp0-expansion
+   '(#3%fxdiv-and-mod x 1000)
+   '(#3%fxdiv-and-mod x 1000))
+  (test-cp0-expansion
+   '(#3%fxdiv-and-mod x 1024)
+   '(let ([t x]) (#3%values (#3%fxdiv t 1024) (#3%fxmod t 1024))))
 )
 
 (mat fxdiv0-and-mod0

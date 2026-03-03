@@ -6,10 +6,10 @@
          (prefix-in c: (contract-req))
          "../rep/type-rep.rkt"
          "../rep/type-constr.rkt"
-         "struct-type-constr.rkt"
          "../rep/free-variance.rkt"
          "../rep/values-rep.rkt"
          "../private/parse-type.rkt"
+         "../private/user-defined-type-constr.rkt"
          "../private/syntax-properties.rkt"
          "../types/base-abbrev.rkt"
          "../types/abbrev.rkt"
@@ -44,8 +44,9 @@
 (provide tc/struct
          tc/struct-prop-values
          tc/make-struct-type-property
-         name-of-struct d-s
-         refine-struct-variance!
+         name-of-struct
+         names-referred-in-struct
+         d-s
          register-parsed-struct-sty!
          register-parsed-struct-bindings!)
 
@@ -59,7 +60,7 @@
 ;; desc : struct-desc
 ;; struct-info : struct-info?
 ;; type-only : Boolean
-(struct parsed-struct (sty names desc struct-info type-only) #:transparent)
+(struct parsed-struct (sty names desc struct-info) #:transparent)
 
 ;; struct-name : Id  (the identifier for the static struct info,
 ;;                    usually the same as the type-name)
@@ -91,13 +92,20 @@
   (syntax-parse stx
     [t:typed-struct #'t.type-name]))
 
-;; [base struct type name] ->  Listof[its sub struct type name]
-(define inheritance-tbl (make-free-id-table))
+(define (names-referred-in-struct stx)
+  (define-values (tvars field-types)
+    (syntax-parse stx
+      [t:typed-struct (values (attribute t.tvars)
+                              (attribute t.types))]))
+  (define name (name-of-struct stx))
 
-(define struct-def-at-top-level? (make-parameter #f))
-
-;; [struct type name] ->  Listof[its constructor name]
-(define constructor-tbl (make-free-id-table))
+  (cond
+    [(null? tvars) null]
+    [else
+     (append-map (lambda (t)
+                   (define-values (r _ __) (parse-for-effects name (cons tvars t)))
+                   r)
+                 field-types)]))
 
 ;; a simple wrapper to get proc from a polymorphic or monomorhpic structure
 (define/cond-contract (get-struct-proc sty)
@@ -105,59 +113,6 @@
   (Struct-proc (match sty
                  [(? Struct?) sty]
                  [(Poly: names (? Struct? sty)) sty])))
-
-;; If the a struct has a base struct defined in the enclose module, record the
-;; substructuring relation in the inheritance table.
-(define/cond-contract (register-substructuring! maybe-base-name-rep maybe-base-struct-rep substruct-type-name substruct-set-procedural?)
-  (c:-> (c:or/c identifier? #f) (c:or/c #f Struct? Poly?) identifier? boolean? void?)
-  ;; given where register-substructuring! is called currently,
-  ;; maybe-base-name-rep and maybe-base-struct-rep should be #f or non-false
-  ;; value at the same time
-  (when (and maybe-base-name-rep (not substruct-set-procedural?))
-    (define name-id maybe-base-name-rep)
-    ;; if a base struct rep's proc is already set, it means the base struct is
-    ;; imported and the type checker doesn't need to deal with its properties in
-    ;; pass 2, thus there is no need to put it in the table.
-    (unless (get-struct-proc maybe-base-struct-rep)
-      (free-id-table-update! inheritance-tbl
-                             name-id
-                             (lambda (substruct-type-names)
-                               (cons substruct-type-name substruct-type-names))
-                             null))))
-
-;; make a struct and its substructs procedural
-(define/cond-contract (mk-substructs-procedural! base-tname base-sty new-ty)
-  (c:-> identifier? Struct? Fun? void?)
-  (define substuct-tnames (free-id-table-ref inheritance-tbl base-tname null))
-  (for ([stn (in-list substuct-tnames)])
-    (define sty (lookup-type-name stn))
-    (mk-substructs-procedural! stn sty new-ty))
-  (mk-struct-procedural! base-tname base-sty new-ty))
-
-
-(define/cond-contract (mk-struct-procedural! stname sty new-ty)
-  (c:-> identifier? Struct? Fun? void?)
-
-  (define (get-struct-type type)
-    (match type
-      [(Intersection: ts _)
-       (for/first ([ty (in-list ts)]
-                   #:when (Struct? (resolve ty)))
-         ty)]
-      [(and (? Name?) (app resolve (? Struct?))) type]))
-
-  (Struct-update-proc! sty new-ty)
-  (for ([constr-name (in-list (free-id-table-ref constructor-tbl stname))])
-    (match (single-value constr-name)
-      [(tc-result1: (Fun: (list (and (Arrow: _ _ _ (Values: (list (Result: (and (app get-struct-type st-type-name))
-                                                                           prop obj)))) arr))))
-       (register-type constr-name
-                      (make-Fun (list (Arrow-update arr rng
-                                                    (lambda (val)
-                                                      (Values-update val results
-                                                                     (lambda (res)
-                                                                       (list (make-Result (intersect st-type-name new-ty) prop obj)))))))))])))
-
 
 (define/cond-contract (tc/struct-prop-values st-tname pnames pvals)
   (c:-> identifier? (c:listof identifier?) (c:listof syntax?) void?)
@@ -167,51 +122,17 @@
           [pval (in-list pvals)])
       (parameterize ([current-orig-stx pval])
         (cond
-          [(equal? (syntax-e p) 'prop:procedure)
+          [(free-identifier=? p #'prop:procedure)
            (syntax-parse pval
-             [(quote proc-fld:exact-nonnegative-integer)
-              (define flds (Struct-subflds sty))
-              (define idx (syntax->datum #'proc-fld))
-              (cond
-                [(<= (length flds) idx)
-                 (tc-error/fields "index too large"
-                                  "index" idx
-                                  "maximum allowed index" (sub1 (length flds)))]
-                [else
-                 (define fld (list-ref flds idx))
-                 (define fld-ty (fld-t fld))
-                 (cond
-                   [(Fun? fld-ty)
-                    (mk-substructs-procedural! st-tname sty fld-ty)]
-                   [else
-                    (tc-error/fields "type mismatch in the field for prop:procedure"
-                                     "expected" "Procedure"
-                                     "given" fld-ty)])])]
+             #:literals (quote)
+             [(quote _:exact-nonnegative-integer)
+              (void)]
              [_
-              (match (single-value pval)
-                [(tc-result1: (Fun: (list (and (Arrow: (list dom-mes domss ...) _ _ _) arr-li) ...)))
-                 (define maybe-new-ty (for/fold ([ok? #t]
-                                                 [new-arr-li null]
-                                                 #:result (if ok? (make-Fun (reverse new-arr-li))
-                                                              #f))
-                                                ([me (in-list dom-mes)]
-                                                 [rst-doms (in-list domss)]
-                                                 [arr (in-list arr-li)])
-                                        (cond
-                                          [(not (type-equiv? me sty))
-                                           (tc-error/fields "type mismatch in the domain of the value for prop:procedure"
-                                                            "expected" sty
-                                                            "got" me)
-                                           (values #f new-arr-li)]
-                                          [else
-                                           (values ok?
-                                                   (cons (Arrow-update arr dom (lambda _ rst-doms))
-                                                         new-arr-li))])))
-                 (cond
-                   [maybe-new-ty
-                    (mk-substructs-procedural! st-tname sty maybe-new-ty)]
-                   [else (void)])]
-                [(tc-result1: ty) (expected-but-got "Procedure or nonnegative integer literal" ty)])])]
+              (extend-tvars
+               (match sty
+                 [(Poly-names: tvars sty) tvars]
+                 [_ null])
+               (tc-expr pval))])]
           [else
            (match (single-value p)
              [(tc-result1: (Struct-Property: ty _))
@@ -272,10 +193,10 @@
       (if (null? l)
           (values (reverse getters) (reverse setters))
           (loop (cddr l) (cons (car l) getters) (cons (cadr l) setters)))))
-  (match (build-struct-names nm flds #f #f nm #:constructor-name maker*)
-    [(list sty maker pred getters/setters ...)
-     (let-values ([(getters setters) (split getters/setters)])
-       (struct-names nm type-name sty maker extra-maker pred getters setters))]))
+  (match-define (list sty maker pred getters/setters ...)
+    (build-struct-names nm flds #f #f nm #:constructor-name maker*))
+  (define-values (getters setters) (split getters/setters))
+  (struct-names nm type-name sty maker extra-maker pred getters setters))
 
 ;; gets the fields of the parent type, if they exist
 ;; Option[Struct-Ty] -> Listof[Type]
@@ -288,8 +209,8 @@
 
 ;; Constructs the Struct value for a structure type
 ;; The returned value has free type variables
-(define/cond-contract (mk/inner-struct-type names desc parent [property-names empty])
-  (c:->* (struct-names? struct-desc? (c:or/c Struct? #f)) ((c:listof identifier?)) Struct?)
+(define/cond-contract (mk/inner-struct-type names desc parent [property-names empty] [proc-ty #f])
+  (c:->* (struct-names? struct-desc? (c:or/c Struct? #f)) ((c:listof identifier?) (c:or/c Type? #f)) Struct?)
 
   (let* ([this-flds (for/list ([t (in-list (struct-desc-self-fields desc))]
                                [g (in-list (struct-names-getters names))])
@@ -298,7 +219,7 @@
     (make-Struct (struct-names-struct-name names)
                  parent
                  flds
-                 (and parent (Struct-proc parent))
+                 (or proc-ty (and parent (Struct-proc parent)))
                  (not (null? (struct-desc-tvars desc)))
                  (struct-names-predicate names)
                  (immutable-free-id-set property-names))))
@@ -326,10 +247,12 @@
   ;; a type constructor to create the monomophic structure types of foo. e.g (foo Integer)
   (register-type-name type-name
                       (make-Poly (struct-desc-tvars desc) sty))
-  (define sty^ (make-Poly (struct-desc-tvars desc) sty))
   (unless (empty? (struct-desc-tvars desc))
-    (define ty-op (make-type-constr (struct-type-op sty^)
-                                (length (struct-desc-tvars desc))))
+    (define variances (map (lambda _ variance:const) (struct-desc-tvars desc)))
+    (define ty-op (make-type-constr (user-defined-type-op (struct-desc-tvars desc) sty #f)
+                                    (length (struct-desc-tvars desc))
+                                    #:variances
+                                    variances))
     (register-type-constructor! type-name ty-op)))
 
 ;; Register the appropriate types, return a list of struct bindings
@@ -341,21 +264,19 @@
 
 ;; a helper predicate function for values created by mk-type-alias
 (define (type-alias? a)
-  (or (Name? a) (App? a) (Intersection? a)))
+  (or (Name? a) (App? a)))
 
 ;; Generates an alias of the (struct) type that the `type-name` references.  The
 ;; alias is mainly used to help create the types of the constructor, field
 ;; accessors and mutators etc.  If the original (struct) type is monomorphic,
 ;; i.e. `tvars` is null, the alias is a `Name`. Otherwise, it is an `App`
 ;; to encode (StructTypeName tvar ...)
-(define/cond-contract (mk-type-alias type-name tvars maybe-proc-ty)
-  (c:-> identifier? (c:listof symbol?) (c:or/c #f Fun?) type-alias?)
+(define/cond-contract (mk-type-alias type-name tvars)
+  (c:-> identifier? (c:listof symbol?) type-alias?)
   (define name-type (make-Name type-name (length tvars) #t))
-  (define alias^ (if (null? tvars)
-                     name-type
-                     (make-App name-type (map make-F tvars))))
-  (if maybe-proc-ty (intersect alias^ maybe-proc-ty)
-      alias^))
+  (if (null? tvars)
+      name-type
+      (make-App name-type (map make-F tvars))))
 
 (define/cond-contract (register-prefab-bindings! pty names desc si)
   (c:-> Prefab? struct-names? struct-desc? (c:or/c #f struct-info?) (c:listof binding?))
@@ -402,11 +323,10 @@
 
   ;; is this structure covariant in *all* arguments?
   (define (covariant-for? fields mutable)
-    (for*/and ([var (in-list tvars)]
-               [t (in-list fields)])
-      (let ([variance (hash-ref (free-vars-hash (free-vars* t)) var variance:const)])
-        (or (variance:const? variance)
-            (and (not mutable) (variance:co? variance))))))
+    (for*/and ([t (in-list fields)]
+               [variance (in-list (variances-in-type t tvars))])
+      (or (variance:const? variance)
+          (and (not mutable) (variance:co? variance)))))
 
   (define covariant?
     (and (covariant-for? self-fields mutable)
@@ -457,7 +377,7 @@
 ;; field getter/setter.
 (define/cond-contract (mk-bindings! sty names desc si mk-pred-ty mk-getter-vals mk-setter-vals)
   (c:-> (c:or/c Struct? Prefab?) struct-names? struct-desc? (c:or/c #f struct-info?)
-        (c:-> type-alias? Type?)
+        (c:-> (c:or/c type-alias? Intersection?) Type?)
         (c:-> identifier? Type? exact-nonnegative-integer? type-alias?
               (values (c:list/c Type? exact-nonnegative-integer? boolean? boolean?)
                       Type?))
@@ -476,10 +396,14 @@
   (define all-fields (struct-desc-all-fields desc))
   (define parent-count (struct-desc-parent-count desc))
 
+
   ;; the alias, with free type variables
-  (define st-type-alias (let ([maybe-proc-ty (and (or (Poly? sty) (Struct? sty))
-                                                  (get-struct-proc sty))])
-                          (mk-type-alias type-name tvars maybe-proc-ty)))
+  (define st-type-alias (mk-type-alias type-name tvars))
+  (define st-type-alias-maybe-with-proc
+    (let ([maybe-proc-ty (and (or (Poly? sty) (Struct? sty))
+                              (get-struct-proc sty))])
+      (if maybe-proc-ty (intersect st-type-alias maybe-proc-ty)
+          st-type-alias)) )
 
   ;; simple abstraction for handling field getters or setters
   ;; operators - names of field getters or getters
@@ -489,19 +413,19 @@
     (for/list ([opname (in-list operators)]
                [self-fld (in-list self-fields)]
                [idx-parent-cnt (in-naturals parent-count)])
-      (let-values ([(fn-args poly-ty) (mk-vals opname self-fld idx-parent-cnt st-type-alias)])
-        (apply add-struct-operator-fn! opname fn-args)
-        (make-def-binding opname poly-ty))))
+      (define-values (fn-args poly-ty) (mk-vals opname self-fld idx-parent-cnt st-type-alias))
+      (apply add-struct-operator-fn! opname fn-args)
+      (make-def-binding opname poly-ty)))
 
   (define bindings
     (list* (make-def-binding struct-type (make-StructType sty))
            (make-def-binding predicate
-                             (make-pred-ty (mk-pred-ty st-type-alias)))
+                             (unsafe-shallow:make-pred-ty (mk-pred-ty st-type-alias-maybe-with-proc)))
            (append*
             (mk-operator-bindings! getters add-struct-accessor-fn! mk-getter-vals)
             (maybe-cons (and self-mutable (mk-operator-bindings! setters add-struct-mutator-fn! mk-setter-vals))))))
 
-  (define constructor-type (make-Poly tvars (->* all-fields st-type-alias)))
+  (define constructor-type (make-Poly tvars (->* all-fields st-type-alias-maybe-with-proc)))
 
   (define struct-binding (make-def-struct-stx-binding struct-name
                                                       struct-name
@@ -513,8 +437,6 @@
   (define def-bindings
     (maybe-cons (and extra-constructor (make-def-binding extra-constructor constructor-type))
                 bindings))
-
-  (free-id-table-set! constructor-tbl type-name (maybe-cons extra-constructor (list constructor-name)))
 
   (define constructor-binding (make-def-binding constructor-name constructor-type))
   (for ([b (in-list (cons constructor-binding def-bindings))])
@@ -536,26 +458,92 @@
                            def-bindings))))
 
 (define (register-parsed-struct-sty! ps)
-  (match ps
-    ((parsed-struct sty names desc si type-only)
-     (register-sty! sty names desc))))
+  (match-define (parsed-struct sty names desc si) ps)
+  (register-sty! sty names desc))
 
 (define (register-parsed-struct-bindings! ps)
-  (match ps
-    ((parsed-struct sty names desc si type-only)
-     (if type-only
-         null
-         (register-struct-bindings! sty names desc si)))))
+  (match-define (parsed-struct sty names desc si) ps)
+  (register-struct-bindings! sty names desc si))
 
-;; Listof<Parsed-Struct> -> Void
-;; Refines the variance of struct types in the name environment
-(define (refine-struct-variance! parsed-structs)
-  (define stys (map parsed-struct-sty parsed-structs))
-  (define tvarss (map (compose struct-desc-tvars parsed-struct-desc) parsed-structs))
-  (define names
-    (for/list ([parsed-struct (in-list parsed-structs)])
-      (struct-names-type-name (parsed-struct-names parsed-struct))))
-  (refine-variance! names stys tvarss))
+;; extract the type annotation of prop:procedure value
+(define/cond-contract (extract-proc-ty proc-ty-stx desc fld-names st-name)
+  (c:-> (c:listof syntax?) struct-desc? (c:listof identifier?) identifier? Type?)
+
+  (unless (equal? (length proc-ty-stx) 1)
+    (tc-error "prop:procedure can only have one value assigned to it"))
+
+  (let ([proc-ty-stx (car proc-ty-stx)])
+    (syntax-parse proc-ty-stx
+      #:literals (struct-field-index)
+      ;; a field index is provided
+      [n_:exact-nonnegative-integer
+       (define n (syntax-e #'n_))
+       (define max-idx (sub1 (length (struct-desc-self-fields desc))))
+       (unless (<= n max-idx)
+         (tc-error/fields
+          "index too large"
+          "index"
+          n
+          "maximum allowed index"
+          max-idx
+          #:stx proc-ty-stx))
+       (define ty (list-ref (struct-desc-self-fields desc) n))
+       (unless (Fun? ty)
+         (tc-error/fields
+          (format "field ~a is not a function" (syntax-e (list-ref fld-names n)))
+          "expected"
+          "Procedure"
+          "given"
+          ty
+          #:stx proc-ty-stx))
+       ty]
+
+      ;; a field name is provided (via struct-field-index)
+      [(struct-field-index fld-nm:id)
+       (define idx (index-of fld-names #'fld-nm
+                             free-identifier=?))
+       ;; fld-nm must be valid, because invalid field names have been reported by
+       ;; struct-field-index at this point
+       (list-ref (struct-desc-self-fields desc) idx)]
+
+      [ty-stx:st-proc-ty^
+       #:do [(define ty (parse-type #'ty-stx))]
+       (match ty
+         [(Fun: (list arrs ...))
+          (make-Fun
+           (for/list ([arr (in-list arrs)])
+             (Arrow-update
+              arr
+              dom
+              (lambda (doms)
+                (match (car doms)
+                  [(Name/simple: n)
+                   #:when (free-identifier=? n st-name)
+                   (void)]
+                  [(App: (Name/simple: rator) vars)
+                   #:when (free-identifier=? rator st-name)
+                   (void)]
+                  [(Univ:) (void)]
+                  [(or (Name/simple: (app syntax-e n)) n)
+                   (tc-error/fields
+                    "type mismatch in the first parameter of the function for prop:procedure"
+                    "expected"
+                    (syntax-e st-name)
+                    "got"
+                    n
+                    #:stx (st-proc-ty-property #'ty-stx))])
+           
+                (cdr doms)))))]
+         [_
+          (tc-error/fields "type mismatch"
+                           "expected"
+                           "Procedure"
+                           "given"
+                           ty
+                           #:stx #'ty-stx)])]
+      [_
+       (tc-error/stx proc-ty-stx
+                     "expected: a nonnegative integer literal or an annotated lambda")])))
 
 ;; check and register types for a define struct
 ;; tc/struct : Listof[identifier] (U identifier (list identifier identifier))
@@ -565,9 +553,10 @@
                    #:maker [maker #f]
                    #:extra-maker [extra-maker #f]
                    #:mutable [mutable #f]
-                   #:type-only [type-only #f]
                    #:prefab? [prefab? #f]
+                   #:proc-ty-stx [proc-ty-stx #f]
                    #:properties [properties empty])
+
   (define-values (nm parent-name parent^) (parse-parent nm/par prefab?))
   ;; create type variables for the new type parameters
   (define tvars (map syntax-e vars))
@@ -585,11 +574,6 @@
                    [else
                     parent^]))
 
-  (unless prefab?
-    (register-substructuring! parent-name parent type-name
-                              (ormap (lambda (prop)
-                                       (equal? (syntax-e prop) 'prop:procedure))
-                                     properties)))
   ;; parse the types
   (define types
     ;; add the type parameters of this structure to the tvar env
@@ -634,7 +618,7 @@
          (define desc
            (struct-desc parent-fields types tvars mutable parent-mutable))
          (parsed-struct (make-Prefab key (append parent-fields types))
-                        names desc (struct-info-property nm/par) #f)]
+                        names desc (struct-info-property nm/par))]
         [else
          (define parent-mutable
            ;; Only valid as long as typed structs must be
@@ -646,9 +630,13 @@
                                    types tvars
                                    mutable parent-mutable))
 
-         (define sty (mk/inner-struct-type names desc concrete-parent properties))
+         (define sty (mk/inner-struct-type names desc concrete-parent properties
+                                           (and proc-ty-stx
+                                                (not (null? proc-ty-stx))
+                                                (extend-tvars tvars
+                                                              (extract-proc-ty proc-ty-stx desc fld-names type-name)))))
 
-         (parsed-struct sty names desc (struct-info-property nm/par) type-only)]))
+         (parsed-struct sty names desc (struct-info-property nm/par))]))
 
 ;; register a struct type
 ;; convenience function for built-in structs

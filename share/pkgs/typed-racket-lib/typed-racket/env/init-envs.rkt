@@ -12,7 +12,6 @@
          "signature-env.rkt"
          "struct-name-env.rkt"
          "../private/user-defined-type-constr.rkt"
-         "../typecheck/struct-type-constr.rkt"
          "../rep/core-rep.rkt"
          "../rep/type-rep.rkt"
          "../rep/type-constr.rkt"
@@ -26,7 +25,7 @@
          "../types/struct-table.rkt"
          "../types/utils.rkt"
          data/queue
-         racket/private/dict racket/list racket/promise
+         racket/private/dict racket/list racket/promise racket/stxparam
          racket/match
          syntax/private/id-table
          syntax/id-set)
@@ -42,9 +41,11 @@
 
 (define-syntax (define-initial-env stx)
   (syntax-parse stx
-    [(_ initialize-env [id-expr ty] ...)
+    [(_ initialize-env #:default-T+ T+ [id-expr ty] ...)
      #`(begin
-         (define initial-env (make-env [id-expr (λ () ty)] ... ))
+         (define initial-env
+           (syntax-parameterize ([default-rng-shallow-safe? T+])
+             (make-env [id-expr (λ () ty)] ... )))
          (define (initialize-env) (initialize-type-env initial-env))
          (provide initialize-env))]))
 
@@ -52,7 +53,10 @@
   (for-each (lambda (nm/ty) (register-resolved-type-alias (car nm/ty) (cadr nm/ty))) initial-type-names))
 
 (define (initialize-type-env initial-env)
-  (for-each (lambda (nm/ty) (register-type-if-undefined (car nm/ty) (cadr nm/ty))) initial-env))
+  (define (init nm/ty/sh)
+    (define id (car nm/ty/sh))
+    (register-type-if-undefined id (cadr nm/ty/sh)))
+  (for-each init initial-env))
 
 ;; stores definition syntaxes for lifting out common expressions
 (define type-definitions (make-queue))
@@ -151,6 +155,8 @@
      `(-CustodianBox ,(type->sexp ty))]
     [(Set: ty)
      `(make-Set ,(type->sexp ty))]
+    [(TreeList: ty)
+     `(make-TreeList ,(type->sexp ty))]
     [(Evt: ty)
      `(make-Evt ,(type->sexp ty))]
     [(Future: ty)
@@ -185,8 +191,8 @@
                            (Result: t
                                     (PropSet: (TrueProp:)
                                               (TrueProp:))
-                                    (Empty:)))))))
-     `(simple-> (list ,@(map type->sexp dom)) ,(type->sexp t))]
+                                    (Empty:)))) rng-T+)))
+     `(simple-> (list ,@(map type->sexp dom)) ,(type->sexp t) #:T+ ,rng-T+)]
     [(Fun: (list (Arrow: dom #f'()
                          (Values:
                           (list
@@ -194,11 +200,12 @@
                                     (PropSet:
                                      (TypeProp: pth ft)
                                      (NotTypeProp: pth ft))
-                                    (Empty:)))))))
+                                    (Empty:)))) rng-T+)))
      `(make-pred-ty (list ,@(map type->sexp dom))
                     ,(type->sexp t)
                     ,(type->sexp ft)
-                    ,(object->sexp pth))]
+                    ,(object->sexp pth)
+                    ,rng-T+)]
     [(Fun: (list (Arrow: dom #f '()
                          (Values:
                           (list
@@ -208,10 +215,11 @@
                                                    (== -False))
                                      (TypeProp: (Path: pth (cons 0 0))
                                                 (== -False)))
-                                    (Path: pth (cons 0 0))))))))
+                                    (Path: pth (cons 0 0))))) rng-T+)))
      `(->acc (list ,@(map type->sexp dom))
              ,(type->sexp t)
-             (list ,@(map path-elem->sexp pth)))]
+             (list ,@(map path-elem->sexp pth))
+             #:T+ ,rng-T+)]
     [(Fun: (? has-optional-args? arrs))
      (match-define (Arrow: fdoms _ kws rng) (first arrs))
      (match-define (Arrow: ldoms rst _ _) (last arrs))
@@ -221,7 +229,8 @@
        (list ,@(map type->sexp opts))
        ,(type->sexp rng)
        ,@(if rst `(#:rest ,(type->sexp rst)) '())
-       ,@(if (null? kws) '() `(#:kws (list ,@(map type->sexp kws)))))]
+       ,@(if (null? kws) '() `(#:kws (list ,@(map type->sexp kws))))
+       #:T+ ,(andmap Arrow-rng-shallow-safe? arrs))]
     [(Fun: arrs) `(make-Fun (list ,@(map type->sexp arrs)))]
     [(DepFun: dom pre rng)
      `(make-DepFun (list ,@(map type->sexp dom))
@@ -322,11 +331,10 @@
     [(Instance: ty) `(make-Instance ,(type->sexp ty))]
     [(Signature: name extends mapping)
      (define (serialize-mapping m)
-       (map (lambda (id/ty)
-              (define id (car id/ty))
-              (define ty (force (cdr id/ty)))
-              `(cons (quote-syntax ,id) ,(type->sexp ty)))
-            m))
+       (for/list ([id/ty (in-list m)])
+         (define id (car id/ty))
+         (define ty (force (cdr id/ty)))
+         `(cons (quote-syntax ,id) ,(type->sexp ty))))
      (define serialized-extends (and extends `(quote-syntax ,extends)))
      `(make-Signature (quote-syntax ,name)
                       ,serialized-extends
@@ -339,18 +347,21 @@
     [(Arrow: dom #f '()
              (Values: (list (Result: t (PropSet: (TrueProp:)
                                                  (TrueProp:))
-                                     (Empty:)))))
+                                     (Empty:)))) rng-T+)
      `(-Arrow (list ,@(map type->sexp dom))
-              ,(type->sexp t))]
-    [(Arrow: dom #f '() rng)
+              ,(type->sexp t)
+              #:T+ ,rng-T+)]
+    [(Arrow: dom #f '() rng rng-T+)
      `(-Arrow (list ,@(map type->sexp dom))
-              ,(type->sexp rng))]
-    [(Arrow: dom rest kws rng)
+              ,(type->sexp rng)
+              #:T+ ,rng-T+)]
+    [(Arrow: dom rest kws rng rng-T+)
      `(make-Arrow
        (list ,@(map type->sexp dom))
        ,(and rest (type->sexp rest))
        (list ,@(map type->sexp kws))
-       ,(type->sexp rng))]
+       ,(type->sexp rng)
+       ,rng-T+)]
     [(Rest: tys )
      `(make-Rest (list ,@(map type->sexp tys)))]
     [(RestDots: ty db)
@@ -364,9 +375,11 @@
     ;; Most Top types are in the predefined table, the ones here
     ;; are not
     [(StructTop: name) `(make-StructTop ,(type->sexp name))]
-    [(TypeConstructor constr arity kind*? productive?)
+    [(TypeConstructor constr arity kind*? productive? variances)
      (define constr^ (gen-serialize-type-rep constr type->sexp))
-     `(make-type-constr ,constr^ ,arity ,productive? #:kind*? ,kind*?)]))
+     `(make-type-constr ,constr^ ,arity ,productive? #:kind*? ,kind*?
+                        #:variances
+                        (list #,@(map variance->binding variances)))]))
 
 ;; Helper for class/row clauses
 (define (convert-row-clause members [inits? #f])
@@ -423,11 +436,11 @@
      `(make-PrefabPE (quote ,key) ,idx)]))
 
 (define (bound-in-this-module id)
-  (let ([binding (identifier-binding id)])
-    (if (and (list? binding) (module-path-index? (car binding)))
-        (let-values ([(mp base) (module-path-index-split (car binding))])
-          (not mp))
-        #f)))
+  (define binding (identifier-binding id))
+  (if (and (list? binding) (module-path-index? (car binding)))
+      (let-values ([(mp base) (module-path-index-split (car binding))])
+        (not mp))
+      #f))
 
 (define (make-init-code map f)
   (define (bound-f id v)
@@ -457,12 +470,14 @@
 (define (tname-env-init-code)
   (make-init-code
     type-name-env-map
-    (λ (id ty) #`(register-type-name #'#,id #,(quote-type ty)))))
+    make-register-type-name-code))
 
-(define (tvariance-env-init-code)
-  (make-init-code
-    type-variance-env-map
-    (λ (id var) #`(register-type-variance! #'#,id (list #,@(map variance->binding var))))))
+(define (make-register-type-code id ty)
+  #`(register-type #'#,id #,(quote-type ty)))
+
+(define (make-register-type-name-code id ty)
+  #`(register-type-name #'#,id #,(quote-type ty)))
+
 
 (define (talias-env-init-code)
   (make-init-code
@@ -472,7 +487,7 @@
 (define (env-init-code)
   (make-init-code
     type-env-map
-    (λ (id ty) #`(register-type #'#,id #,(quote-type ty)))))
+    make-register-type-code))
 
 (define (struct-name-env-init)
   (make-init-code
@@ -489,10 +504,11 @@
    kind-env-map
    (lambda (id v)
      ;; TODO: turn this into a function
-     (match-define (TypeConstructor constr arity kind*? productive?) v)
+     (match-define (TypeConstructor constr arity kind*? productive? variances) v)
      (define constr^ (gen-serialize-type-rep constr type->sexp))
      #`(register-type-constructor! #'#,id
-                                   (make-type-constr #,constr^ #,arity #,productive? #:kind*? #,kind*?)))))
+                                   (make-type-constr #,constr^ #,arity #,productive? #:kind*? #,kind*?
+                                                     #:variances (list #,@(map variance->binding variances)))))))
 
 ;; see 'finalize-signatures!' in 'env/signature-env.rkt',
 ;; which forces these delays after all the signatures are parsed
@@ -519,7 +535,6 @@
     (list (env-init-code)
           (talias-env-init-code)
           (tname-env-init-code)
-          (tvariance-env-init-code)
           (mvar-env-init-code mvar-env)
           (signature-env-init-code)
           (make-struct-table-code)

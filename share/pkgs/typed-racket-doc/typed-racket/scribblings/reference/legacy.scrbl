@@ -17,31 +17,32 @@
 The following forms are provided by Typed Racket for backwards
 compatibility.
 
-@defform/subs[(lambda: formals . body)
-              ([formals ([v : t] ...)
+@defform/subs[(lambda: formals maybe-ret . body)
+              ([maybe-ret (code:line)
+                          (code:line : type)]
+               [formals ([v : t] ...)
                         ([v : t] ... v : t *)
                         ([v : t] ... v : t ooo bound)])]{
 A function of the formal arguments @racket[v], where each formal
 argument has the associated type.  If a rest argument is present, then
 it has type @racket[(Listof t)].}
 
-@defform[(λ: formals . body)]{
-An alias for the same form using @racket[lambda:].}
+@defalias[λ: lambda: "syntax"]
 
-@defform*[[(plambda: (a ...) formals . body)
-           (plambda: (a ... b ooo) formals . body)]]{
+@defform*[[(plambda: (a ...) formals maybe-ret . body)
+           (plambda: (a ... b ooo) formals maybe-ret . body)]]{
 A polymorphic function, abstracted over the type variables
 @racket[a]. The type variables @racket[a] are bound in both the types
 of the formal, and in any type expressions in the @racket[body].}
 
-@defform/subs[(opt-lambda: formals . body)
+@defform/subs[(opt-lambda: formals maybe-ret . body)
 ([formals ([v : t] ... [v : t default] ...)
           ([v : t] ... [v : t default] ... v : t *)
           ([v : t] ... [v : t default] ... v : t ooo bound)])]{
 A function with optional arguments.}
 
-@defform*[[(popt-lambda: (a ...) formals . body)
-           (popt-lambda: (a ... a ooo) formals . body)]]{
+@defform*[[(popt-lambda: (a ...) formals maybe-ret . body)
+           (popt-lambda: (a ... a ooo) formals maybe-ret . body)]]{
 A polymorphic function with optional arguments.}
 
 @defalias[case-lambda: case-lambda "syntax"]
@@ -80,7 +81,7 @@ result of @racket[_loop] (and thus the result of the entire
               [(even? (car lst)) (loop (cons (car lst) accum) (cdr lst))]
               [else              (loop accum (cdr lst))])))
     (filter-even-loop (list 1 2 3 4))]}
-@defform[(plet: (a ...) ([v : t e] ...) . body)]{
+@defform[(plet: (a ...) ([v : t e] ...) : t0 . body)]{
 A polymorphic version of @racket[let:], abstracted over the type variables
 @racket[a]. The type variables @racket[a] are bound in both the types
 of the formal, and in any type expressions in the @racket[body].
@@ -159,6 +160,7 @@ type @racket[proc-t].
               @defidform[for*/hash:]
               @defidform[for*/hasheq:]
               @defidform[for*/hasheqv:]
+              @defidform[for*/hashalw:]
               @defidform[for*/last:]
               @defidform[for*/list:]
               @defidform[for*/lists:]
@@ -177,6 +179,7 @@ type @racket[proc-t].
               @defidform[for/hash:]
               @defidform[for/hasheq:]
               @defidform[for/hasheqv:]
+              @defidform[for/hashalw:]
               @defidform[for/last:]
               @defidform[for/list:]
               @defidform[for/lists:]
