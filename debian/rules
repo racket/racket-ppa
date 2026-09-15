@@ -15,3 +15,6 @@ CONFIG_ARGS_sparc64 :=$(PB64B)
 
 override_dh_auto_configure:
 	dh_auto_configure --sourcedir=src -- $(CONFIG_ARGS_$(DEB_HOST_ARCH))
+
+override_dh_compress:
+	dh_compress  -X.rkt -X.rktd -X.scrbl -X.sxref -X.sqlite
