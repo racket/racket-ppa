@@ -1,25 +1,40 @@
 Source: racket
 Section: lisp
 Priority: optional
-Maintainer: Asumu Takikawa <asumu@racket-lang.org>
+Maintainer: David Bremner <bremner@debian.org>
 Standards-Version: 4.1.1
-Build-Depends: cdbs, debhelper (>= 10), patchutils, libffi-dev,
- libfreetype-dev, libjpeg-dev, libpango1.0-dev, libpng-dev, libssl-dev,
- libxaw7-dev, xbitmaps, libxft-dev, libgl-dev,
- libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev,
- sqlite3, zlib1g-dev, liblz4-dev, libncurses-dev
-Vcs-Git: https://github.com/takikawa/racket-ppa
-Vcs-Browser: https://github.com/takikawa/racket-ppa
+Build-Depends: cdbs,
+               debhelper (>= 10),
+               libcairo2-dev,
+               libffi-dev,
+               libfreetype6-dev,
+               libgl1-mesa-dev | libgl-dev,
+               libglu1-mesa-dev | libglu-dev,
+               libjpeg-dev,
+               liblz4-dev,
+               libpango1.0-dev,
+               libpng-dev,
+               libssl-dev,
+               libx11-dev,
+               libxaw7-dev,
+               libxft-dev,
+               libxrender-dev,
+               patchutils,
+               sqlite3,
+               xbitmaps,
+               zlib1g-dev
+Vcs-Git: https://salsa.debian.org/bremner/racket
+Vcs-Browser: https://salsa.debian.org/bremner/racket
 Homepage: https://www.racket-lang.org/
 
 Package: racket
 Architecture: any
 Depends: ${misc:Depends}, ${shlibs:Depends}, racket-common (= ${source:Version})
 Recommends: racket-doc (>= ${source:Upstream-Version}),
-            libglib2.0-0, libpangocairo-1.0-0, libjpeg-turbo8, libpng16-16,
+            libglib2.0-0, libpangocairo-1.0-0, libjpeg62-turbo, libpng16-16,
             libgtk2.0-0, libgdk-pixbuf2.0-0, libssl3
-Breaks: racket-common (<<9.2~)
-Replaces: racket-common (<<9.2~)
+Breaks: racket-common (<<8.6~)
+Replaces: racket-common (<<8.0~)
 Description: extensible programming language in the Scheme family
  Racket (previously PLT Scheme) is a programming language suitable for
  scripting and application development, including GUIs and web
@@ -36,8 +51,8 @@ Description: extensible programming language in the Scheme family
 
 Package: racket-common
 Architecture: all
-Breaks: racket (<<9.2~)
-Replaces: racket (<<9.2~)
+Breaks: racket (<< 8.6~)
+Replaces: racket (<< 8.6~)
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Recommends: racket (>= ${source:Upstream-Version})
             , racket-doc (>= ${source:Upstream-Version})
