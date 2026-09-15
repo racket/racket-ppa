@@ -11,6 +11,7 @@ CONFIG_ARGS_ppc64   :=$(PB64B)
 CONFIG_ARGS_powerpc :=$(PB32B)
 CONFIG_ARGS_s390x   :=$(PB64B)
 CONFIG_ARGS_sparc64 :=$(PB64B)
+CONFIG_ARGS_armel   :=--enable-bc --disable-docs
 
 %:
 	dh $@ --builddir=build
