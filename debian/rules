@@ -1,7 +1,17 @@
 #!/usr/bin/make -f
 
+include /usr/share/dpkg/architecture.mk
+
+PB64L:=--enable-pb --enable-mach=tpb64l
+PB64B:=--enable-pb --enable-mach=tpb64b
+CONFIG_ARGS_mips64el:=$(PB64L)
+CONFIG_ARGS_ppc64el :=$(PB64L)
+CONFIG_ARGS_ppc64   :=$(PB64B)
+CONFIG_ARGS_s390x   :=$(PB64B)
+CONFIG_ARGS_sparc64 :=$(PB64B)
+
 %:
 	dh $@ --builddir=build
 
 override_dh_auto_configure:
-	dh_auto_configure --sourcedir=src
+	dh_auto_configure --sourcedir=src -- $(CONFIG_ARGS_$(DEB_HOST_ARCH))
