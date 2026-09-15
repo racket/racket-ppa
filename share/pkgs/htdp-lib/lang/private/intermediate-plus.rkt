@@ -134,8 +134,12 @@
   )
   
  ("Posn"
-  @defproc[(posn) signature]{Signature for posns.})
-
+  @defthing[Posn signature]{Signature for posns.}
+  @defproc[(PosnOf [x-sig signature] [y-sig signature]) signature]{
+ Creates a parametric signature for posns from signatures for its fields.}
+  @defthing[posn struct]{Name for using @racket[match] with posns.}
+  )
+ 
  ("Lists"
   @defproc[((intermediate-append append) [l (listof any)] ...) (listof any)]{
  Creates a single list from several, by concatenation of the items.

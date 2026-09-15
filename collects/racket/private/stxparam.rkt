@@ -1,9 +1,9 @@
 
 (module stxparam '#%kernel
-  (#%require "define.rkt"
+  (#%require "core-syntax.rkt"
              (for-syntax '#%kernel 
                          "stx.rkt" "stxcase-scheme.rkt" 
-                         "define-et-al.rkt" "qq-and-or.rkt"
+                         "core-syntax.rkt"
                          "stxloc.rkt" "stxparamkey.rkt"))
 
   (#%provide (for-syntax do-syntax-parameterize)
@@ -34,13 +34,7 @@
                               (and (rename-transformer-parameter? sp)
                                    #'-syntax-parameterize))))
                          ids)])
-	   (let ([dup (check-duplicate-identifier ids)])
-	     (when dup
-	       (raise-syntax-error
-		#f
-		"duplicate binding"
-		stx
-		dup)))
+           (raise-if-duplicate-identifiers "duplicate binding" stx ids)
            (if finish-k
                (finish-k #'(id ...)
                          #'(gen-id ...)

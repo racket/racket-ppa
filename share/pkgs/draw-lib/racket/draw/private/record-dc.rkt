@@ -757,7 +757,8 @@
 (define record-dc-backend%
   (class default-dc-backend%
     (init [[-width width] 640]
-          [[-height height] 480])
+          [[-height height] 480]
+          [record-ink? #f])
 
     (define-values (width height)
       (case-args 
@@ -769,13 +770,30 @@
 
     (define/override (ok?) #t)
 
-    ;; We need a cair context and surface to measure text:
-    (define c (cairo_create (cairo_image_surface_create CAIRO_FORMAT_ARGB32 1 1)))
+    ;; We need a cairo context and surface to measure text, at least.
+    ;; To measure ink extends, make an recording surface, even though we
+    ;; never replay the surface.
+    (define recording-surface
+      (and record-ink?
+           (cairo_recording_surface_create CAIRO_CONTENT_COLOR_ALPHA #f)))
+    (define c (cairo_create
+               (or recording-surface
+                   (cairo_image_surface_create CAIRO_FORMAT_ARGB32 1 1))))
+
     (define/override (get-cr) c)
 
     (def/override (get-size)
       (values (exact->inexact width)
               (exact->inexact height)))
+
+    (define/public (get-ink-extent)
+      (define who '|get-ink-extent in record-dc<%>|)
+      (if recording-surface
+          (let-values ([(x y w h) (cairo_recording_surface_ink_extents recording-surface)])
+            (if x
+                (values x y w h)
+                (error who "ink extent is unavailable")))
+          (error who "drawing context was not created with ink recording enabled")))
 
     (super-new)))
 

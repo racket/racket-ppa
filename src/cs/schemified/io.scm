@@ -2820,6 +2820,8 @@
 (define RKTIO_NO_INHERIT_INPUT 1)
 (define RKTIO_NO_INHERIT_OUTPUT 2)
 (define RKTIO_FAMILY_ANY -1)
+(define RKTIO_LISTEN_REUSE 1)
+(define RKTIO_LISTEN_RETRY_ADDRINUSE 2)
 (define RKTIO_SHUTDOWN_READ 0)
 (define RKTIO_SHUTDOWN_WRITE 1)
 (define RKTIO_ADD_MEMBERSHIP 0)
@@ -2868,9 +2870,9 @@
 (define RKTIO_PATH_INIT_DIR 8)
 (define RKTIO_PATH_INIT_FILE 9)
 (define RKTIO_PATH_CACHE_DIR 10)
-(define RKTIO_OS_SIGNAL_NONE -1)
 (define RKTIO_OS_SIGNAL_TERM 1)
 (define RKTIO_OS_SIGNAL_HUP 2)
+(define RKTIO_OS_SIGNAL_NONE -1)
 (define RKTIO_SW_HIDE 0)
 (define RKTIO_SW_MAXIMIZE 1)
 (define RKTIO_SW_MINIMIZE 2)
@@ -2927,9 +2929,9 @@
 (define rktio_fd_is_terminal (hash-ref rktio-table 'rktio_fd_is_terminal))
 (define rktio_fd_is_text_converted
   (hash-ref rktio-table 'rktio_fd_is_text_converted))
+(define rktio_fd_modes (hash-ref rktio-table 'rktio_fd_modes))
 (define rktio_fd_is_pending_open
   (hash-ref rktio-table 'rktio_fd_is_pending_open))
-(define rktio_fd_modes (hash-ref rktio-table 'rktio_fd_modes))
 (define rktio_open (hash-ref rktio-table 'rktio_open))
 (define rktio_open_with_create_permissions
   (hash-ref rktio-table 'rktio_open_with_create_permissions))
@@ -2947,9 +2949,9 @@
 (define rktio_read_converted_in
   (hash-ref rktio-table 'rktio_read_converted_in))
 (define rktio_read_in_r (hash-ref rktio-table 'rktio_read_in_r))
+(define rktio_write_in_r (hash-ref rktio-table 'rktio_write_in_r))
 (define rktio_read_converted_in_r
   (hash-ref rktio-table 'rktio_read_converted_in_r))
-(define rktio_write_in_r (hash-ref rktio-table 'rktio_write_in_r))
 (define rktio_buffered_byte_count
   (hash-ref rktio-table 'rktio_buffered_byte_count))
 (define rktio_poll_read_ready (hash-ref rktio-table 'rktio_poll_read_ready))
@@ -2986,6 +2988,7 @@
 (define rktio_addrinfo_lookup_stop
   (hash-ref rktio-table 'rktio_addrinfo_lookup_stop))
 (define rktio_addrinfo_free (hash-ref rktio-table 'rktio_addrinfo_free))
+(define rktio_listen_opt (hash-ref rktio-table 'rktio_listen_opt))
 (define rktio_listen (hash-ref rktio-table 'rktio_listen))
 (define rktio_listen_stop (hash-ref rktio-table 'rktio_listen_stop))
 (define rktio_poll_accept_ready
@@ -3001,9 +3004,9 @@
 (define rktio_tcp_nodelay (hash-ref rktio-table 'rktio_tcp_nodelay))
 (define rktio_tcp_keepalive (hash-ref rktio-table 'rktio_tcp_keepalive))
 (define rktio_udp_open (hash-ref rktio-table 'rktio_udp_open))
-(define rktio_udp_disconnect (hash-ref rktio-table 'rktio_udp_disconnect))
-(define rktio_udp_bind (hash-ref rktio-table 'rktio_udp_bind))
 (define rktio_udp_connect (hash-ref rktio-table 'rktio_udp_connect))
+(define rktio_udp_bind (hash-ref rktio-table 'rktio_udp_bind))
+(define rktio_udp_disconnect (hash-ref rktio-table 'rktio_udp_disconnect))
 (define rktio_udp_sendto (hash-ref rktio-table 'rktio_udp_sendto))
 (define rktio_udp_sendto_in (hash-ref rktio-table 'rktio_udp_sendto_in))
 (define rktio_udp_sendto_addr_bytes
@@ -3014,8 +3017,8 @@
   (hash-ref rktio-table 'rktio_udp_recvfrom_addr_bytes))
 (define rktio_udp_set_receive_buffer_size
   (hash-ref rktio-table 'rktio_udp_set_receive_buffer_size))
-(define rktio_udp_set_ttl (hash-ref rktio-table 'rktio_udp_set_ttl))
 (define rktio_udp_get_ttl (hash-ref rktio-table 'rktio_udp_get_ttl))
+(define rktio_udp_set_ttl (hash-ref rktio-table 'rktio_udp_set_ttl))
 (define rktio_udp_get_multicast_loopback
   (hash-ref rktio-table 'rktio_udp_get_multicast_loopback))
 (define rktio_udp_set_multicast_loopback
@@ -3091,10 +3094,10 @@
 (define rktio_ltps_open (hash-ref rktio-table 'rktio_ltps_open))
 (define rktio_ltps_close (hash-ref rktio-table 'rktio_ltps_close))
 (define rktio_ltps_add (hash-ref rktio-table 'rktio_ltps_add))
-(define rktio_ltps_handle_set_data
-  (hash-ref rktio-table 'rktio_ltps_handle_set_data))
 (define rktio_ltps_handle_get_data
   (hash-ref rktio-table 'rktio_ltps_handle_get_data))
+(define rktio_ltps_handle_set_data
+  (hash-ref rktio-table 'rktio_ltps_handle_set_data))
 (define rktio_ltps_remove_all (hash-ref rktio-table 'rktio_ltps_remove_all))
 (define rktio_ltps_poll (hash-ref rktio-table 'rktio_ltps_poll))
 (define rktio_ltps_get_signaled_handle
@@ -15556,7 +15559,7 @@
         (void)
         (raise-argument-error
          'guard-for-prop:custom-write
-         "(procedure-arity-includes?/c 3)"
+         "(procedure-arity-includes/c 3)"
          v_0))
       v_0))))
 (define-values
@@ -22364,7 +22367,8 @@
                               (let ((or-part_5 (box? v_0)))
                                 (if or-part_5
                                   or-part_5
-                                  (let ((or-part_6 (hash? v_0)))
+                                  (let ((or-part_6
+                                         (printing-hash? v_0 config_0)))
                                     (if or-part_6
                                       or-part_6
                                       (let ((or-part_7
@@ -22586,11 +22590,7 @@
                                          o_0
                                          max-length_0)))
                                     (if (hash? v_0)
-                                      (if (if (config-get
-                                               config_0
-                                               1/print-hash-table)
-                                            (not (hash-weak? v_0))
-                                            #f)
+                                      (if (printing-hash? v_0 config_0)
                                         (if (eq? mode_0 0)
                                           (let ((l_0
                                                  (apply
@@ -22855,6 +22855,15 @@
     (if (if (eq? mode_0 #t) (not (config-get config_0 1/print-unreadable)) #f)
       (fail-unreadable who_0 v_0)
       (void))))
+(define printing-hash?
+  (lambda (v_0 config_0)
+    (if (hash? v_0)
+      (if (not
+           (let ((or-part_0 (hash-weak? v_0)))
+             (if or-part_0 or-part_0 (hash-ephemeron? v_0))))
+        (config-get config_0 1/print-hash-table)
+        #f)
+      #f)))
 (define struct-dots (unquoted-printing-string "..."))
 (define do-printf
   (lambda (who_0 o_0 fmt_0 all-args_0)
@@ -31263,7 +31272,9 @@
                             (|#%app| rktio_to_bytes v_0)
                             (|#%app| rktio_free v_0))
                           #f)))
-                   (begin (end-rktio) s_0))))
+                   (begin
+                     (end-rktio)
+                     (if s_0 (unsafe-bytes->immutable-bytes! s_0) #f)))))
              (cdr (hash-ref ht_0 (normalize-key k_0) '(#f . #f))))))))))
 (define none (gensym 'none))
 (define 1/environment-variables-set!
@@ -37487,14 +37498,22 @@
                                                       (let ((app_0
                                                              (unsafe-place-local-ref
                                                               cell.1)))
-                                                        (|#%app|
-                                                         rktio_listen
-                                                         app_0
-                                                         addr_0
-                                                         (min
-                                                          max-allow-wait2_0
-                                                          10000)
-                                                         reuse?3_0))))
+                                                        (let ((app_1
+                                                               (min
+                                                                max-allow-wait2_0
+                                                                10000)))
+                                                          (|#%app|
+                                                           rktio_listen_opt
+                                                           app_0
+                                                           addr_0
+                                                           app_1
+                                                           (bitwise-ior
+                                                            (if reuse?3_0 1 0)
+                                                            (if (eqv?
+                                                                 port-no5_0
+                                                                 0)
+                                                              2
+                                                              0)))))))
                                                  (begin
                                                    (end-rktio)
                                                    (if (vector? lnr_0)

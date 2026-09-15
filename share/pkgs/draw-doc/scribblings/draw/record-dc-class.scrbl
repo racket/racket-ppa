@@ -23,12 +23,19 @@ are as before the replay.
 
 
 @defconstructor[([width (>=/c 0) 640]
-                 [height (>=/c 0) 480])]{
+                 [height (>=/c 0) 480]
+                 [record-ink? any/c #f])]{
 
 Creates a new recording DC. The optional @racket[width] and
  @racket[height] arguments determine the result of @method[dc<%>
  get-size] on the recording DC; the @racket[width] and
- @racket[height] arguments do not clip drawing.}
+ @racket[height] arguments do not clip drawing.
+
+If @racket[record-ink?] is true, then the
+@method[record-dc% get-ink-extent] method can report the bounds
+of a recorded drawing.
+
+@history[#:changed "1.24" @elem{Added the @racket[record-ink?] argument.}]}
 
 
 @defmethod[(get-recorded-datum) any/c]{
@@ -46,4 +53,20 @@ another DC to replay the drawing commands to the given DC.
 
 The @method[record-dc% get-recorded-procedure] method can be more
 efficient than composing @method[record-dc% get-recorded-datum] and
-@racket[recorded-datum->procedure].}}
+@racket[recorded-datum->procedure].}
+
+
+@defmethod[(get-ink-extent) (values real? real? real? real?)]{
+
+Returns a rectangle as left, top, width, and height that bounds all
+drawing into the given DC, as long as ink recording was enabled
+through the @racket[record-ink?] initialization argument. Bounding
+drawing ``ink'' takes into account the visible effect of drawing with
+different pen widths and the shape of drawn text, as opposed to just
+collecting path coordinates and nominal text extents.
+
+If ink record is not enabled, the @racket[exn:fail] exception is raised.
+
+@history[#:added "1.24"]}
+
+}

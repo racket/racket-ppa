@@ -99,8 +99,11 @@
 
         [(and tick? (not (in-code?)))
           (displayln "```racket")
+          (indent)
           (parameterize ([in-code? #t])
             (render-table i part ht inline?))
+          (unless (null? flowss)
+            (indent))
           (displayln "```")]
 
         [else

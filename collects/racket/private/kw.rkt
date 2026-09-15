@@ -1,8 +1,5 @@
 (module kw '#%kernel
-  (#%require "define.rkt"
-             "qq-and-or.rkt"
-             "cond.rkt"
-             "define-et-al.rkt"
+  (#%require "core-syntax.rkt"
              "more-scheme.rkt"
              (only '#%unsafe
                    unsafe-chaperone-procedure
@@ -12,9 +9,7 @@
                          '#%unsafe
                          "procedure-alias.rkt"
                          "stx.rkt"
-                         "qq-and-or.rkt"
-                         "define-et-al.rkt"
-                         "cond.rkt"
+                         "core-syntax.rkt"
                          "stxcase-scheme.rkt"
                          "name.rkt"
                          "norm-define.rkt"
@@ -23,8 +18,7 @@
                          "kw-prop-key.rkt"
                          "immediate-default.rkt")
              (for-meta 2 '#%kernel
-                       "qq-and-or.rkt"
-                       "cond.rkt"
+                       "core-syntax.rkt"
                        "stxcase-scheme.rkt"
                        "qqstx.rkt"))
 
@@ -687,13 +681,9 @@
                            need-kw
                            rest)
                           (parse-formals stx #'args)])
-             (let ([dup-id (check-duplicate-identifier (syntax->list #'(id ... . rest)))])
-               (when dup-id
-                 (raise-syntax-error
-                  #f
-                  "duplicate argument identifier"
-                  stx
-                  dup-id)))
+             (raise-if-duplicate-identifiers "duplicate argument identifier"
+                                             stx
+                                             (syntax->list #'(id ... . rest)))
              (let* ([kws (syntax->list #'(kw ...))]
                     [opts (syntax->list #'(opt-id ...))]
                     [ids (syntax->list #'(id ...))]

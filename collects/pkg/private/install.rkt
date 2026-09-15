@@ -33,7 +33,8 @@
          "info-to-desc.rkt"
          "git.rkt"
          "check-will-exist.rkt"
-         "prefetch.rkt")
+         "prefetch.rkt"
+         "adjacent-dep.rkt")
 
 (provide pkg-install
          pkg-update)
@@ -170,6 +171,7 @@
          #:clone-info clone-info
          #:pull-behavior pull-behavior
          #:dry-run? dry-run?
+         #:destdir destdir
          descs)
   (define download-printf (if quiet? void printf/flush))
   (define check-sums? (not ignore-checksums?))
@@ -179,9 +181,9 @@
   (define (install-package/outer desc info
                                  all-infos simultaneous-installs
                                  descs infos) ; these two are delays
-    (match-define (pkg-desc pkg type orig-name given-checksum auto? pkg-extra-path) desc)
+    (match-define (pkg-desc pkg type orig-name given-checksum auto? pkg-extra-path adjacent-deps?/desc) desc)
     (match-define
-     (install-info pkg-name orig-pkg pkg-dir git-dir clean? checksum module-paths additional-installs)
+     (install-info pkg-name orig-pkg pkg-dir git-dir clean? checksum checksum-file module-paths additional-installs adjacent-deps?)
      info)
     (define name? (eq? 'catalog (first orig-pkg)))
     (define this-dep-behavior (or dep-behavior
@@ -205,9 +207,7 @@
                                   (if auto? "automatically " "")
                                   (if update? "updated" "installed"))
                           "")
-                      (if update?
-                          (format-deps unique-deps)
-                          (format-list unique-deps)))))
+                      (format-deps unique-deps))))
 
     (when (and (pair? orig-pkg)
                (or (eq? (car orig-pkg) 'link)
@@ -226,15 +226,17 @@
       [(and (not updating?)
             (hash-ref all-db pkg-name #f)
             ;; Already installed, but can force if the install is for
-            ;; a wider scope:
-            (not (and (not (hash-ref current-scope-db pkg-name #f))
+            ;; a wider scope or destdir:
+            (not (and (or destdir
+                          (not (hash-ref current-scope-db pkg-name #f)))
                       force?)))
        (define existing-pkg-info (hash-ref all-db pkg-name #f))
        (cond
         [(and (pkg-info-auto? existing-pkg-info)
               (not (pkg-desc-auto? desc))
               ;; Don't confuse a promotion request with a different-source install:
-              (same-orig-pkg? (pkg-info-orig-pkg existing-pkg-info) orig-pkg)
+              (or skip-installed? ; => requesting promotion only (because no-promote mode filters auto-installed, too)
+                  (same-orig-pkg? (pkg-info-orig-pkg existing-pkg-info) orig-pkg))
               ;; Also, make sure it's installed in the scope that we're changing:
               (hash-ref current-scope-db pkg-name #f))
          ;; promote an auto-installed package to a normally installed one
@@ -242,6 +244,7 @@
           #f ; no repo change
           ;; The `do-it` thunk:
           (lambda (fail-repos)
+            (when destdir (destdir-error "cannot promote from auto-installed to explicitly installed" pkg-name))
             (unless quiet?
               (download-printf "Promoting ~a from auto-installed to explicitly installed~a\n"
                                pkg-name
@@ -393,6 +396,11 @@
                unsatisfied-deps)))
        =>
        (λ (unsatisfied-deps)
+         (define (unsatisfied-descs)
+           (if adjacent-deps?
+               (for/list ([dep (in-list unsatisfied-deps)])
+                 (find-adjacent-dependency dep desc destdir link-dirs?))
+               unsatisfied-deps))
           (match this-dep-behavior
            ['fail
             (clean!)
@@ -409,16 +417,16 @@
                        (format-list unsatisfied-deps))]
            ['search-auto
             ;; (show-dependencies unsatisfied-deps #f #t)
-            (raise (vector updating? (force infos) (force descs) pkg-name unsatisfied-deps void 'always-yes clone-info))]
+            (raise (vector updating? (force infos) (force descs) pkg-name (unsatisfied-descs) void 'always-yes clone-info))]
            ['search-ask
             (show-dependencies unsatisfied-deps #f #f)
             (case (if (eq? conversation 'always-yes)
                       'always-yes
                       (ask "Would you like to install these dependencies?"))
               [(yes)
-               (raise (vector updating? (force infos) (force descs) pkg-name unsatisfied-deps void 'again clone-info))]
+               (raise (vector updating? (force infos) (force descs) pkg-name (unsatisfied-descs) void 'again clone-info))]
               [(always-yes)
-               (raise (vector updating? (force infos) (force descs) pkg-name unsatisfied-deps void 'always-yes clone-info))]
+               (raise (vector updating? (force infos) (force descs) pkg-name (unsatisfied-descs) void 'always-yes clone-info))]
               [(cancel)
                (clean!)
                (pkg-error "canceled")]
@@ -468,6 +476,7 @@
           (and (not (empty? update-pkgs))
                update-pkgs
                (let ()
+                 (when destdir (destdir-error "cannot update package" pkg-name))
                  (define (continue conversation)
                    (raise (vector #t (force infos) (force descs) pkg-name update-pkgs
                                   (λ () (for-each (compose (remove-package #t quiet? use-trash? dry-run?) pkg-desc-name) update-pkgs))
@@ -574,7 +583,9 @@
                                                                   #:use-cache? use-cache?
                                                                   #:from-command-line? from-command-line?
                                                                   #:link-dirs? link-dirs?)])
-                                 (for ([pkg (in-list update-pkgs)]) (updater #:prefetch? #t pkg))
+                                 (for ([pkg (in-list update-pkgs)])
+                                   (when destdir (destdir-error "cannot update package" pkg))
+                                   (updater #:prefetch? #t pkg))
                                  (append-map updater update-pkgs))])
                 (λ () (for-each (compose (remove-package #t quiet? use-trash? dry-run?) pkg-desc-name) to-update))))
             (match this-dep-behavior
@@ -615,7 +626,7 @@
              [clean?
               (define final-pkg-dir (or git-dir
                                         (select-package-directory
-                                         (build-path (pkg-installed-dir) pkg-name)
+                                         (build-path (or destdir (pkg-installed-dir)) pkg-name)
                                          dry-run?)))
               (unless dry-run?
                 (unless git-dir
@@ -625,6 +636,9 @@
               final-pkg-dir]
              [else
               pkg-dir]))
+          (unless dry-run?
+            (when checksum-file
+              (delete-directory/files checksum-file)))
           (define single-collect (pkg-single-collection final-pkg-dir
                                                         #:name pkg-name
                                                         #:namespace post-metadata-ns))
@@ -632,7 +646,7 @@
                          (if single-collect "single-collection " "") 
                          final-pkg-dir)
           (define scope (current-pkg-scope))
-          (unless dry-run?
+          (unless (or dry-run? destdir)
             (links final-pkg-dir
                    #:name single-collect
                    #:user? (not (or (eq? 'installation scope)
@@ -653,10 +667,16 @@
                 ;; of the state of this package:
                 #f
                 checksum))
+          (when (and destdir new-checksum)
+            (call-with-output-file*
+             (let-values ([(base name dir?) (split-path final-pkg-dir)])
+               (build-path base (path-replace-suffix name ".CHECKSUM")))
+             #:exists 'truncate
+             (lambda (o) (display checksum o))))
           (define this-pkg-info
             (make-pkg-info orig-pkg new-checksum auto? single-collect alt-dir-name))
           (log-pkg-debug "updating db with ~e to ~e" pkg-name this-pkg-info)
-          (unless dry-run?
+          (unless (or dry-run? destdir)
             (update-pkg-db! pkg-name this-pkg-info))))]))
   (define metadata-ns (make-metadata-namespace))
   (define infos
@@ -671,7 +691,9 @@
                           #:remote-checksum-cache remote-checksum-cache
                           #:strip strip-mode
                           #:force-strip? force-strip?
-                          #:link-dirs? link-dirs?)))
+                          #:link-dirs? link-dirs?
+                          #:destdir destdir
+                          #:adjacent-deps? (pkg-desc-adjacent-deps? v))))
   ;; For the top-level call, we need to double-check that all provided packages
   ;; were distinct:
   (for/fold ([ht (hash)]) ([i (in-list infos)]
@@ -815,7 +837,8 @@
   (cond
    [(or (null? repo+do-its)
         (and (not updating-any?) (andmap is-promote? all-infos))
-        dry-run?)
+        dry-run?
+        destdir)
     ;; No actions, so no setup:
     'skip]
    [else
@@ -913,7 +936,8 @@
                                                    (if quiet? void printf/flush))]
                      #:pull-behavior [pull-behavior 'ff-only]
                      #:convert-to-non-clone? [convert-to-non-clone? #f]
-                     #:dry-run? [dry-run? #f])
+                     #:dry-run? [dry-run? #f]
+                     #:destdir [destdir #f])
   (define download-printf (if quiet? void printf/flush))
   
   (define descs
@@ -987,10 +1011,11 @@
                          #:repo-descs (vector-ref clone-info 1)
                          #:pull-behavior pull-behavior
                          #:dry-run? dry-run?
+                         #:destdir destdir
                          (for/list ([dep (in-list deps)])
                            (if (pkg-desc? dep)
                                dep
-                               (pkg-desc dep #f #f #f #t #f))))])])
+                               (pkg-desc dep #f #f #f #t #f #f))))])])
       (begin0
        (install-packages
         #:old-infos done-infos
@@ -1027,6 +1052,7 @@
                              repo-descs)
         #:pull-behavior pull-behavior
         #:dry-run? dry-run?
+        #:destdir destdir
         new-descs)
        (unless (empty? summary-deps)
          (unless quiet?
@@ -1040,9 +1066,7 @@
                             (match-define (vector n ds) p*ds)
                             (format "\n dependencies of ~a:~a"
                                     n
-                                    (if updating?
-                                        (format-deps ds)
-                                        (format-list ds)))))))))))))
+                                    (format-deps ds))))))))))))
 
 ;; Determine packages to update, starting with `pkg-name'. If `pkg-name'
 ;; needs to be updated, return it in a list. Otherwise, if `deps?',
@@ -1099,7 +1123,7 @@
       ;; Check that the package is installed, and get current checksum:
       (define info (package-info name #:db db (not skip-uninstalled?)))
       (cond
-       [(not info)
+       [(not info)<
         ;; Not installed, and we're skipping uninstalled
         null]
        [else
@@ -1149,7 +1173,8 @@
                                 (pkg-desc-auto? pkg-name)
                                 (or (pkg-desc-extra-path pkg-name)
                                     (and (eq? type 'clone)
-                                         (current-directory))))))
+                                         (current-directory)))
+                                (pkg-desc-adjacent-deps? pkg-name))))
               ;; No update needed, but maybe check dependencies:
               (if (or deps?
                       implies?)
@@ -1289,7 +1314,7 @@
                       ;; the catalog server:
                       (clear-checksums-in-cache! update-cache)
                       (list (pkg-desc orig-pkg-source orig-pkg-type pkg-name #f auto?
-                                      orig-pkg-dir))]))
+                                      orig-pkg-dir #f))]))
                ;; Continue with dependencies, maybe
                (check-missing-dependencies update-dependencies))]))]
      [else null])))
@@ -1479,3 +1504,10 @@
                        #:when (string? v))
               k))
   (for ([k (in-list l)]) (hash-remove! update-cache k)))
+
+;; ----------------------------------------
+
+(define (destdir-error cannot-msg pkg-name)
+  (pkg-error (~a cannot-msg " in DESTDIR mode\n"
+                 "  package: ~a")
+             pkg-name))

@@ -1,4 +1,4 @@
-;; Bulgarian translation of Racket string constants file, version: 1.56
+;; Bulgarian translation of Racket string constants file, version: 1.57
 ;; This file is distributed under the same terms as Racket
 ;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2024, 2025, 2026.
 
@@ -1312,6 +1312,7 @@
   (debugging "Трасиране")
   (debugging-and-profiling "Трасиране и профилиране")
   (test-coverage "Покритие на тестовете на синтаксиса")
+  (use-hash-langs-instrumentation "Стандартни вградени инструменти за указаното с „#lang“")
   (show-details-button-label "Показване на подробностите")
   (hide-details-button-label "Скриване на подробностите")
   (choose-language-menu-item-label "Избор на език…")
@@ -2200,7 +2201,7 @@
   (qs-build-menu "Изграждане на менюто със скриптове")
   ;; ~a is number of rebuilds
   (qs-menu-rebuild "Менюто със скриптове се изгради  #~a… път")
-  (qs-delete-menu "Deleting menu items")
+  (qs-delete-menu "Изтриване на елементи от меню")
   ;; ~a is a a script entry in menu
   (qs-delete-menu-item "Изтриване на елемент от меню „~a“…  ")
   (qs-new-script "&Нов скрипт…")
