@@ -1,0 +1,6 @@
+# Files this repository owns that are not part of the upstream tarball.
+# Without this, dpkg-source reports them as unexpected upstream changes
+# and refuses to build a source package.  local-options (rather than
+# options) keeps this out of the generated source package, where these
+# files do not appear at all.
+extend-diff-ignore = "^(NOTES|UPDATING\.md|update-ppa\.sh)$"
