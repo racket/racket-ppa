@@ -2,13 +2,13 @@
 
 include /usr/share/dpkg/architecture.mk
 
-PB32B:=--enable-pb --enable-mach-tpb32b
-PB32L:=--enable-pb --enable-mach-tpb32l
+PB32B:=--enable-pb --enable-mach=tpb32b
+PB32L:=--enable-pb --enable-mach=tpb32l
 PB64B:=--enable-pb --enable-mach=tpb64b
 PB64L:=--enable-pb --enable-mach=tpb64l
 CONFIG_ARGS_alpha   :=$(PB64L)
 CONFIG_ARGS_armel   :=--enable-bc --disable-docs
-CONFIG_ARGS_hppa    :=$(PB64B)
+CONFIG_ARGS_hppa    :=$(PB32B)
 CONFIG_ARGS_mips64el:=--enable-bc
 CONFIG_ARGS_powerpc :=$(PB32B)
 CONFIG_ARGS_ppc64   :=$(PB64B)
