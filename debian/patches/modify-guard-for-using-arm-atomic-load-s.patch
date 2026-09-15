@@ -1,0 +1,24 @@
+From: David Bremner <bremner@debian.org>
+Date: Thu, 21 Mar 2024 13:30:21 -0300
+X-Dgit-Generated: 8.12+dfsg1-7 4076136d15895ebc816203a88bace58f9ece20f7
+Subject: modify guard for using arm atomic load stores
+
+following a suggestion of Mathew Flatt in
+
+          id:racket/racket/issues/4955/2012169866@github.com
+
+---
+
+diff --git a/src/ChezScheme/c/atomic.h b/src/ChezScheme/c/atomic.h
+index 6736be2d43..ded6c877af 100644
+--- a/src/ChezScheme/c/atomic.h
++++ b/src/ChezScheme/c/atomic.h
+@@ -89,7 +89,7 @@ FORCEINLINE int CAS_STORE_RELEASE(volatile void *addr, void *old_val, void *new_
+                         : "cc", "memory", "x12", "x7");
+   return ret;
+ }
+-#elif defined(__arm__)
++#elif defined(__arm__) && ((arm_isa_version >= 6) || (__ARM_ARCH >= 6))
+ FORCEINLINE int S_cas_any_fence(int load_acquire, volatile void *addr, void *old_val, void *new_val) {
+   int ret;
+   if (load_acquire)
