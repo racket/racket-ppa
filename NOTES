@@ -216,3 +216,101 @@ As of March 2026:
 - `9.1+ppa1-1~jammy1` for Jammy
 - The `~release1` suffix ensures proper version ordering
 
+---
+
+# Racket PPA Update to 9.3 - Notes
+
+## Starting State (2026-09-15)
+- Current PPA version: 9.1+ppa1-1 (jammy, noble, questing), uploaded March 2026
+- Available upstream: 9.2 (May 2026) and 9.3 (August 2026)
+- Repository: https://github.com/racket/racket-ppa (moved from takikawa/racket-ppa)
+
+## What was uploaded
+9.3 only. A PPA publishes one version per series, so uploading 9.2 first
+would have left it Superseded the moment 9.3 published — and uploading
+both back to back would have got the 9.2 builds cancelled mid-flight.
+9.2 is in the repository as its own commits (source import, packaging,
+tag `upstream/9.2+ppa1`) and as a changelog entry, so the history and
+the package changelog record it; only the upload was skipped.
+
+## Ubuntu 26.04 forced a build-system change
+The old `debian/rules` was cdbs-based and included
+`/usr/share/cdbs/1/class/autotools.mk`. cdbs 0.4.182, which Ubuntu 26.04
+(resolute) ships, deleted that file as unused:
+
+    debian/rules:4: /usr/share/cdbs/1/class/autotools.mk: No such file or directory
+
+jammy (cdbs 0.4.163) and noble (0.4.166) still have it, so this only
+broke the newest target. Vendoring the deleted cdbs files into `debian/`
+worked as a stopgap, but Debian had already migrated their racket
+package off cdbs to dh, so the packaging now follows Debian instead.
+
+## debian/ now tracks Debian
+`debian/` was already a fork of Debian's racket packaging. Rather than
+porting their work by hand, the commits where Debian changed `debian/`
+are cherry-picked, 26 of them, covering everything from the fork point
+(their "debian: move man pages to racket common") through
+`8.16+dfsg1-3`. `update-ppa.sh` records the last one adopted in
+`DEBIAN_SYNC_COMMIT` and picks up new ones on every update; see
+UPDATING.md Step 3b.
+
+Only `debian/` is taken. A merge was tried first and rejected: Debian's
+branch carries their own, older copy of the Racket source tree, so
+merging conflicts on hundreds of source files and drags 1601 commits of
+Debian and upstream history into this repository. Their
+`debian/changelog` is left behind too — it records their uploads, not
+ours.
+
+What came across from Debian:
+- dh-based `debian/rules` (`dh $@ --builddir=build`)
+- executable `debian/*.install` scripts, which put compiled `.zo`/`.dep`
+  files in the architecture-dependent `racket` package instead of in
+  `racket-common`
+- `/etc/racket/config.rktd` moved from `racket-common` to `racket`, with
+  `debian/racket-common.maintscript` handling the upgrade
+- per-architecture configure flags for the pb Chez backend
+
+Kept local, and deliberately kept small so that future picks stay cheap
+(see "Adapt Debian packaging for the PPA"):
+- `Maintainer`/`Vcs-*` pointing at the PPA
+- Ubuntu package names where Debian's differ: `libjpeg-turbo8` rather
+  than `libjpeg62-turbo` (which does not exist on 26.04), and
+  `libfreetype-dev`/`libgl-dev` rather than the transitional names
+- `drracket.1` under `share/pkgs/drracket-core-lib`, its 9.x location
+- no `debian/patches`: Debian's two patches are an upstream cherry-pick
+  and its revert, so the series is a no-op and neither applies to 9.x
+
+## Bugs found in update-ppa.sh
+- Its stale-file check deleted every tracked file that was absent from
+  the upstream tarball, which meant NOTES, UPDATING.md and the script
+  itself. It now compares the previous upstream import against the new
+  one. The 9.1 run predated those files, which is why it went unnoticed.
+- `debuild -- clean` passes `clean` to lintian, not to `debian/rules`,
+  so the test build's artifacts survived into the source package build.
+- The Build-Depends check skipped the first line of `Build-Depends:`.
+- The tarball-exists preflight accepted the 302 that
+  download.racket-lang.org returns for versions that do not exist.
+
+`debian/source/local-options` was added so that dpkg-source stops
+treating this repo's own files (NOTES, UPDATING.md, update-ppa.sh) as
+unexpected upstream changes; the stale-file bug had been hiding that by
+deleting them.
+
+## Ubuntu releases targeted
+- jammy (22.04 LTS) — standard support ends April 2027
+- noble (24.04 LTS) — standard support ends April 2029
+- resolute (26.04 LTS) — current stable release
+
+questing (25.10) went end of life in July 2026 and was dropped. There is
+no current non-LTS release: stonking (26.10) is still in development.
+
+## Verification
+Racket 9.3 was built from the source package in clean Ubuntu 26.04 and
+22.04 containers — 26.04 being the build the cdbs packaging could not do
+— and the resulting packages install and run:
+
+    Welcome to Racket v9.3 [cs].
+
+The package split from Debian works as intended: 6135 `.zo` files land
+in the architecture-dependent `racket` package and none in
+`racket-common`, which keeps the 5290 `.rkt` sources.
