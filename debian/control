@@ -3,8 +3,7 @@ Section: lisp
 Priority: optional
 Maintainer: David Bremner <bremner@debian.org>
 Standards-Version: 4.1.1
-Build-Depends: cdbs,
-               debhelper (>= 10),
+Build-Depends: debhelper (>= 10),
                libcairo2-dev,
                libffi-dev,
                libfreetype6-dev,

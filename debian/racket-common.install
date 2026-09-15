@@ -1,9 +1,9 @@
-usr/include
-usr/share/racket/collects
-usr/share/racket/pkgs
-usr/share/racket/links.rktd
-usr/share/racket/shares.rktd
-usr/share/racket/info-cache.rktd
-usr/share/man
-etc/racket
-usr/share/doc/racket/release
+#!/bin/sh
+echo "usr/include"
+find debian/tmp/usr/share/racket/collects -type f -not -name "*.zo" -not -name "*.dep"
+find debian/tmp/usr/share/racket/pkgs -type f -not -name "*.zo" -not -name "*.dep"
+echo "usr/share/racket/links.rktd"
+echo "usr/share/racket/shares.rktd"
+echo "usr/share/racket/info-cache.rktd"
+echo "usr/share/man"
+echo "etc/racket"
