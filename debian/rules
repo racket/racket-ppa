@@ -7,7 +7,7 @@ PB32L:=--enable-pb --enable-mach=tpb32l
 PB64B:=--enable-pb --enable-mach=tpb64b
 PB64L:=--enable-pb --enable-mach=tpb64l
 CONFIG_ARGS_alpha   :=$(PB64L)
-CONFIG_ARGS_armel   :=--enable-bc --disable-docs
+CONFIG_ARGS_armel   :=--enable-bconly --enable-bcdefault --disable-docs
 CONFIG_ARGS_hppa    :=$(PB32B)
 CONFIG_ARGS_mips64el:=$(PB64L)
 CONFIG_ARGS_powerpc :=$(PB32B)
