@@ -493,7 +493,14 @@ log "Updating debian packaging"
 
 # 4a: debian/changelog
 FULL_VERSION="${VERSION}+ppa${PPA_ITERATION}-1~${PRIMARY}1"
-dch -v "$FULL_VERSION" -D "$PRIMARY" "New upstream release (Racket ${VERSION})"
+CURRENT_VERSION=$(dpkg-parsechangelog -S Version)
+if [[ "$CURRENT_VERSION" == "$FULL_VERSION" ]]; then
+    # Re-run after an earlier failure: dch refuses to add an entry that
+    # is not newer than the current one.
+    log "Changelog already at $FULL_VERSION"
+else
+    dch -v "$FULL_VERSION" -D "$PRIMARY" "New upstream release (Racket ${VERSION})"
+fi
 
 # 4b: debian/control — update the Breaks/Replaces that cover files moved
 # from racket-common into racket.  racket-common's own Breaks/Replaces on
@@ -609,7 +616,7 @@ log "Orig tarball: $ORIG_TARBALL ($(du -h "$ORIG_TARBALL" | cut -f1))"
 ###############################################################################
 
 log "Building unsigned source package (validation)"
-debuild -S -us -uc
+debuild -S -d -us -uc
 
 if ! $SKIP_BINARY_BUILD; then
     if confirm "Run full binary test build? (30-40 minutes)"; then
@@ -633,7 +640,7 @@ for release in $RELEASES; do
     sed -i "1s/~${PRIMARY}1/~${release}1/" debian/changelog
     sed -i "1s/) ${PRIMARY};/) ${release};/" debian/changelog
 
-    debuild -S -k"$GPG_KEY"
+    debuild -S -d -k"$GPG_KEY"
 
     sed -i "1s/~${release}1/~${PRIMARY}1/" debian/changelog
     sed -i "1s/) ${release};/) ${PRIMARY};/" debian/changelog
