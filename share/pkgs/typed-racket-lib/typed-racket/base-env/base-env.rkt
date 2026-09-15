@@ -166,6 +166,10 @@
 [string-normalize-nfc (-> -String -String)]
 [string-normalize-nfkc (-> -String -String)]
 
+;; grapheme cluster functions
+[string-grapheme-count (->opt -String [-Int -Int] -Index)]
+[string-grapheme-span (->opt -String -Int [-Int] -Index)]
+
 [string-locale=? (->* (list -String -String) -String B)]
 [string-locale<? (->* (list -String -String) -String B)]
 [string-locale>? (->* (list -String -String) -String B)]
@@ -1288,6 +1292,12 @@
 [curry (-polydots (a c b)
                   (cl->* ((->... (list a) (b b) c :T+ #f) a . -> . (->... '() (b b) c :T+ #f))
                          ((->... (list a) (b b) c :T+ #f) . -> . (a . -> . (->... '() (b b) c :T+ #f) :T+ #f))))]
+;; curryr is like curry but applies arguments from the right
+;; Note: A fully precise type for curryr would require expressing (rest... fixed) -> result
+;; which ->... doesn't support. This handles the common 2-argument case.
+[curryr (-poly (a b c)
+               (cl->* ((a b . -> . c) b . -> . (a . -> . c))
+                      ((a b . -> . c) . -> . (b . -> . (a . -> . c)))))]
 (primitive? (-> Univ B))
 (primitive-closure? (-> Univ B))
 
@@ -1311,16 +1321,16 @@
 [treelist-rest (-poly (a) (-> (-treelist a) (-treelist a)))]
 [treelist-add (-poly (a) (-> (-treelist a) a (-treelist a)))]
 [treelist-cons (-poly (a) (-> (-treelist a) a (-treelist a)))]
-[treelist-delete (-poly (a) (-> (-treelist a) -Index (-treelist a)))]
+[treelist-delete (-poly (a) (-> (-treelist a) -Int (-treelist a)))]
 [make-treelist (-poly (a) (-> -Nat a (-treelist a)))]
-[treelist-ref (-poly (a) (-> (-treelist a) -Index a :T+ #f))]
-[treelist-insert (-poly (a) (-> (-treelist a) -Index a (-treelist a)))]
-[treelist-set (-poly (a) (-> (-treelist a) -Index a (-treelist a)))]
-[treelist-take (-poly (a) (-> (-treelist a) -Index (-treelist a)))]
-[treelist-drop (-poly (a) (-> (-treelist a) -Index (-treelist a)))]
-[treelist-take-right (-poly (a) (-> (-treelist a) -Index (-treelist a)))]
-[treelist-drop-right (-poly (a) (-> (-treelist a) -Index (-treelist a)))]
-[treelist-sublist (-poly (a) (-> (-treelist a) -Index -Index (-treelist a)))]
+[treelist-ref (-poly (a) (-> (-treelist a) -Int a :T+ #f))]
+[treelist-insert (-poly (a) (-> (-treelist a) -Int a (-treelist a)))]
+[treelist-set (-poly (a) (-> (-treelist a) -Int a (-treelist a)))]
+[treelist-take (-poly (a) (-> (-treelist a) -Int (-treelist a)))]
+[treelist-drop (-poly (a) (-> (-treelist a) -Int (-treelist a)))]
+[treelist-take-right (-poly (a) (-> (-treelist a) -Int (-treelist a)))]
+[treelist-drop-right (-poly (a) (-> (-treelist a) -Int (-treelist a)))]
+[treelist-sublist (-poly (a) (-> (-treelist a) -Int -Int (-treelist a)))]
 [treelist-reverse (-poly (a) (-> (-treelist a) (-treelist a)))]
 [treelist->list (-poly (a) (-> (-treelist a) (-lst a)))]
 [list->treelist (-poly (a) (-> (-lst a) (-treelist a)))]

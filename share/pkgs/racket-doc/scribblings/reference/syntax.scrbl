@@ -385,8 +385,9 @@ module:
 
  @item{@indexed-racket[#:cross-phase-persistent] --- declares the
        module as @tech{cross-phase persistent}, and reports a syntax
-       error if the module does not meet the import or syntactic
-       constraints of a @tech{cross-phase persistent} module.}
+       error if the module does not meet the
+       @seclink["cross-phase persistent-grammar"]{constraints
+       of cross-phase persistent modules}.}
 
 @item{@indexed-racket[#:empty-namespace] --- declares that
        @racket[module->namespace] for this module should produce a
@@ -3395,3 +3396,55 @@ dependency on the runtime support module.
 }
 
 @(close-eval lazy-require-eval)
+
+@;------------------------------------------------------------------------
+@section[#:tag "foreign-inline"]{Unsafe Access to Core Compiler Forms}
+
+
+@defform[(#%foreign-inline datum maybe-mode)
+         #:grammar
+         ([maybe-mode code:blank
+                      #:effect
+                      #:pure
+                      #:pure*
+                      #:copy
+                      #:copy*])]{
+
+The @racket[#%foreign-inline] form @tech[#:key "unsafe"]{unsafely}
+inlines an expression form that is supported by the core compiler and
+runtime system that Racket runs on, which is Chez Scheme in the case
+of Racket @tech{CS}. Omitting @racket[maybe-mode] is equivalent to
+supplying @racket[#:effect].
+
+Ensuring that @racket[datum] is supported and has appropriate behavior
+(consistent with @racket[maybe-mode]) is up to the user of this form:
+
+@itemlist[
+
+ @item{The @racket[datum] must not refer to any variable that is bound
+ in the enclosing scope.}
+
+ @item{Evaluating @racket[datum] must not raise an exception or
+ otherwise inspect the current @tech{continuation}, and it must return
+ a single value.}
+
+ @item{If @racket[#:pure] or @racket[#:copy] is specified, then
+ evaluating @racket[datum] must not have any side effects or depend on
+ preceding effects.}
+
+ @item{If @racket[#:pure*] or @racket[#:copy*] is specified, then not
+ only must evaluating @racket[datum] have no side effects or
+ dependencies on preceding effects, the expression must be applied to
+ arguments where the application has no side effects or dependencies
+ on preceding effects.}
+
+ @item{If @racket[#:copy] or @racket[#:copy*] is specified, then the
+ compilation may duplicate the entire @racket[(#%foreign-inline datum
+ maybe-mode)] expression one or more times to inline its
+ implementation at different uses of its value.}
+
+]
+
+@history[#:added "9.1.0.8"]
+
+}

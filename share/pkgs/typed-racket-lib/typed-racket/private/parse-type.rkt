@@ -608,8 +608,8 @@
     [t
      (-val (syntax->datum #'t))]))
 
-(struct parsing-mode () #:transparent)
-(struct synth-mode parsing-mode (name args same-component-pred) #:transparent)
+(struct parsing-mode () #:transparent #:authentic)
+(struct synth-mode parsing-mode (name args same-component-pred) #:transparent #:authentic)
 
 ;; This mode is used to build up info about how types depend on each other --
 ;; during this parsing, we can't check certain invariant successfully (i.e. when
@@ -636,7 +636,7 @@
    ;;
    ;; interp. same as referenced-aliases
    referenced-class-parents)
-  #:transparent)
+  #:transparent #:authentic)
 
 (define INIT-LEVEL 0)
 (define ALWAYS-PRODUCTIVE-LEVEL -1)
@@ -675,7 +675,8 @@
   (make-type-constr (user-defined-type-op syms res (if (equal? (symbol->string (syntax-e name))
                                                                "Formula")
                                                        #t
-                                                       recursive?))
+                                                       recursive?)
+                                         #f) ; not a poly-struct
                     (length syms)
                     (free-id-table-ref type-op-productivity-map name #f)
                     #:variances

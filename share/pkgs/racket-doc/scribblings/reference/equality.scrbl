@@ -37,6 +37,10 @@ preferred for most uses.
    (equal? #t #t))}
 
 
+For equality on user-defined structure types, see
+@secref["trans-struct" #:doc '(lib "scribblings/guide/guide.scrbl")].
+
+
 @defproc[(equal-always? [v1 any/c] [v2 any/c]) boolean?]{
 
  Indicates whether @racket[v1] and @racket[v2] are equal and will always stay
@@ -503,7 +507,7 @@ indexing and comparison operations, especially in the implementation of
  @itemlist[
 
   @item{The three-procedure case corresponds to the procedures of
-        @racket[gen:equal-hash]:
+        @racket[gen:equal+hash]:
 
          @itemlist[
            @item{@racket[_equal-proc : (any/c any/c (any/c any/c . -> . boolean?)  . -> . any/c)]}
@@ -514,7 +518,7 @@ indexing and comparison operations, especially in the implementation of
         ]}
 
   @item{The two-procedure case corresponds to the procedures of
-  @racket[gen:equal-mode-hash]:
+  @racket[gen:equal-mode+hash]:
 
        @itemlist[
          @item{@racket[_equal-mode-proc : (any/c any/c (any/c any/c . -> . boolean?) boolean? . -> . any/c)]}

@@ -1,8 +1,6 @@
 #lang typed/racket
 #:no-optimize ;; precaution, because of unsafe-provide
 (require typed/racket/class
-         typed/private/utils
-         typed/private/rewriter
          "type-env-ext.rkt"
          (for-syntax syntax/parse syntax/srcloc racket/syntax)
          (for-syntax syntax/parse)

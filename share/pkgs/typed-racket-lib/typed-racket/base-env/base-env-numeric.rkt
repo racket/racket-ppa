@@ -609,6 +609,7 @@
   (define flreal-part-type (lambda () (-FloatComplex . -> . -Flonum)))
   (define flimag-part-type (lambda () (-FloatComplex . -> . -Flonum)))
   (define flrandom-type (lambda () (-Pseudo-Random-Generator . -> . -Flonum)))
+  (define flbit-field-type (lambda () (-Flonum -Byte -Byte . -> . -Nat)))
 
   ;; There's a repetitive pattern in the types of each comparison operator.
   ;; As explained below, this is because props don't do intersections.
@@ -1248,7 +1249,7 @@
     (varop-1+ -InexactReal)
     ;; reals
     (varop-1+ -PosReal -NonNegReal)
-    (-> -NonPosReal -NonPosReal)
+    (-> -NegReal -NonPosReal)
     (-> -NegReal -NegReal -NonNegReal) ; 0.0 is non-neg, but doesn't preserve sign
     (-> -NegReal -PosReal -NonPosReal) ; idem
     (-> -PosReal -NegReal -NonPosReal) ; idem
@@ -1739,12 +1740,9 @@
                             -FloatComplex -SingleFlonumComplex -InexactComplex N)))]
 [acos (from-cases (-One . -> . -Zero)
                   (map unop
-                       (list -Flonum -SingleFlonum -InexactReal -Real
-                             -FloatComplex -SingleFlonumComplex -InexactComplex N)))]
-[asin (from-cases (-Zero . -> . -One)
-                  (map unop
-                       (list -Flonum -SingleFlonum -InexactReal -Real
-                             -FloatComplex -SingleFlonumComplex -InexactComplex N)))]
+                       (list -FloatComplex -SingleFlonumComplex -InexactComplex N)))]
+[asin (from-cases (map unop
+                       (list -FloatComplex -SingleFlonumComplex -InexactComplex N)))]
 [atan (from-cases
        (map unop (list -Zero -Flonum -SingleFlonum -InexactReal -Real
                        -FloatComplex -SingleFlonumComplex -InexactComplex N))
@@ -1977,6 +1975,32 @@
 [unsafe-fxmin (fxmin-type)]
 [unsafe-fxmax (fxmax-type)]
 
+;; wraparound fixnum operations (don't error on overflow, wrap around instead)
+[fx+/wraparound (-Fixnum -Fixnum . -> . -Fixnum)]
+[fx-/wraparound (-Fixnum -Fixnum . -> . -Fixnum)]
+[fx*/wraparound (-Fixnum -Fixnum . -> . -Fixnum)]
+[fxlshift/wraparound (-Fixnum -Fixnum . -> . -Fixnum)]
+[unsafe-fx+/wraparound (-Fixnum -Fixnum . -> . -Fixnum)]
+[unsafe-fx-/wraparound (-Fixnum -Fixnum . -> . -Fixnum)]
+[unsafe-fx*/wraparound (-Fixnum -Fixnum . -> . -Fixnum)]
+[unsafe-fxlshift/wraparound (-Fixnum -Fixnum . -> . -Fixnum)]
+
+;; logical right shift (fills with 0s instead of sign bit)
+[fxrshift/logical (fx-from-cases (-> -Int -Int -NonNegFixnum))]
+[unsafe-fxrshift/logical (fx-from-cases (-> -Int -Int -NonNegFixnum))]
+
+;; popcount (bit counting)
+[fxpopcount (fx-from-cases (-> -Nat -Index))]
+[fxpopcount32 (fx-from-cases (-> -Nat -Index))]
+[fxpopcount16 (fx-from-cases (-> -Nat -Index))]
+[unsafe-fxpopcount (fx-from-cases (-> -Nat -Index))]
+[unsafe-fxpopcount32 (fx-from-cases (-> -Nat -Index))]
+[unsafe-fxpopcount16 (fx-from-cases (-> -Nat -Index))]
+
+;; fixnum bounds
+[most-positive-fixnum (-> -PosFixnum)]
+[most-negative-fixnum (-> -NegFixnum)]
+
 
 ;; flonum ops
 [flabs (flabs-type 'flonum)]
@@ -2012,6 +2036,7 @@
 [flreal-part (flreal-part-type)]
 [flimag-part (flimag-part-type)]
 [flrandom (flrandom-type)]
+[flbit-field (flbit-field-type)]
 
 [unsafe-flabs (flabs-type 'flonum)]
 [unsafe-fl+ (fl+-type 'flonum)]
@@ -2025,6 +2050,7 @@
 [unsafe-fl< (fl<-type 'flonum)]
 [unsafe-flmin (flmin-type 'flonum)]
 [unsafe-flmax (flmax-type 'flonum)]
+[unsafe-flbit-field (flbit-field-type)]
 
 ;These are currently the same binding as the safe versions
 ;and so are not needed. If this changes they should be

@@ -473,6 +473,15 @@
 (define rx2937 (regexp "[.]zo$"))
 (define rx2418 (regexp "[.]ss$"))
 (define kw2186 (string->keyword "local"))
+(define kws2519
+  (cons
+   (string->keyword "copy*")
+   (cons
+    (string->keyword "copy")
+    (cons
+     (string->keyword "pure*")
+     (cons (string->keyword "pure") (cons (string->keyword "effect") '()))))))
+(define kws2378 (cons (string->keyword "effect") '()))
 (define hash2390
   (hasheq
    'all-defined
@@ -505,7 +514,7 @@
    '7))
 (define kw1701 (string->keyword "realm"))
 (define kw2160 (string->keyword "flatten-requires"))
-(define kws2144
+(define kws2866
   (cons
    (string->keyword "cross-phase-persistent")
    (cons
@@ -513,71 +522,18 @@
     (cons
      (string->keyword "unsafe")
      (cons
-      (string->keyword "unlimited-require")
+      (string->keyword "unlimited-compile")
       (cons
        (string->keyword "realm")
        (cons
         (string->keyword "require=define")
         (cons (string->keyword "flatten-requires") '()))))))))
 (define kw2362 (string->keyword "require=define"))
-(define call/ec call-with-escape-continuation)
 (define qq-append
   (lambda (a_0 b_0)
     (if (list? a_0)
       (append a_0 b_0)
       (raise-argument-error 'unquote-splicing "list?" a_0))))
-(define bad-list$1
-  (|#%name|
-   bad-list
-   (lambda (who_0 orig-l_0)
-     (raise-arguments-error who_0 "not a proper list" "in" orig-l_0))))
-(define member
-  (letrec*
-   ((member_0
-     (|#%name|
-      member
-      (lambda (v_0 orig-l_0 eql?_0)
-        (letrec*
-         ((loop_0
-           (|#%name|
-            loop
-            (lambda (ls_0 turtle_0)
-              (if (null? ls_0)
-                #f
-                (if (not (pair? ls_0))
-                  (raise-arguments-error
-                   'member
-                   "not a proper list"
-                   "in"
-                   orig-l_0)
-                  (if (|#%app| eql?_0 v_0 (car ls_0))
-                    ls_0
-                    (let ((ls_1 (cdr ls_0)))
-                      (if (null? ls_1)
-                        #f
-                        (if (let ((or-part_0 (not (pair? ls_1))))
-                              (if or-part_0 or-part_0 (eq? ls_1 turtle_0)))
-                          (raise-arguments-error
-                           'member
-                           "not a proper list"
-                           "in"
-                           orig-l_0)
-                          (if (|#%app| eql?_0 v_0 (car ls_1))
-                            ls_1
-                            (let ((app_0 (cdr ls_1)))
-                              (loop_0 app_0 (cdr turtle_0))))))))))))))
-         (loop_0 orig-l_0 orig-l_0))))))
-   (case-lambda
-    ((v_0 ls_0) (member_0 v_0 ls_0 equal?))
-    ((v_0 ls_0 eql?_0)
-     (begin
-       (if (if (procedure? eql?_0) (procedure-arity-includes? eql?_0 2) #f)
-         (void)
-         (raise-argument-error
-          'member
-          "(procedure-arity-includes/c 2)"
-          eql?_0))
-       (member_0 v_0 ls_0 eql?_0))))))
 (define current-parameterization
   (lambda () (continuation-mark-set-first #f parameterization-key)))
 (define call-with-parameterization
@@ -1324,6 +1280,47 @@
          p_0)))))
 (define print-values
   (lambda vs_0 (begin (for-each (current-print) vs_0) (apply values vs_0))))
+(define bad-list$1
+  (|#%name|
+   bad-list
+   (lambda (who_0 orig-l_0)
+     (raise-arguments-error who_0 "not a proper list" "in" orig-l_0))))
+(define member-impl
+  (lambda (who_0 v_0 orig-l_0 eql?_0)
+    (letrec*
+     ((loop_0
+       (|#%name|
+        loop
+        (lambda (ls_0 turtle_0)
+          (if (null? ls_0)
+            #f
+            (if (not (pair? ls_0))
+              (raise-arguments-error who_0 "not a proper list" "in" orig-l_0)
+              (if (|#%app| eql?_0 v_0 (car ls_0))
+                ls_0
+                (let ((ls_1 (cdr ls_0)))
+                  (if (null? ls_1)
+                    #f
+                    (if (if (not (pair? ls_1)) #t (eq? ls_1 turtle_0))
+                      (raise-arguments-error
+                       who_0
+                       "not a proper list"
+                       "in"
+                       orig-l_0)
+                      (if (|#%app| eql?_0 v_0 (car ls_1))
+                        ls_1
+                        (let ((app_0 (cdr ls_1)))
+                          (loop_0 app_0 (cdr turtle_0))))))))))))))
+     (loop_0 orig-l_0 orig-l_0))))
+(define member
+  (case-lambda
+   ((v_0 ls_0) (member-impl 'member v_0 ls_0 equal?))
+   ((v_0 ls_0 eql?_0)
+    (begin
+      (if (if (procedure? eql?_0) (procedure-arity-includes? eql?_0 2) #f)
+        (void)
+        (raise-argument-error 'member "(procedure-arity-includes/c 2)" eql?_0))
+      (member-impl 'member v_0 ls_0 eql?_0)))))
 (define reverse$1
   (|#%name|
    reverse
@@ -4563,9 +4560,8 @@
                                             (loop_0
                                              accum_0
                                              (cdr path_0)))))))))))
-                             (loop_0
-                              (unsafe-place-local-ref cell.2$8)
-                              (region-path r_0)))
+                             (let ((app_0 (unsafe-place-local-ref cell.2$8)))
+                               (loop_0 app_0 (region-path r_0))))
                             (if (unsafe-place-local-ref cell.1$10)
                               (begin
                                 (let ((app_0
@@ -6355,10 +6351,8 @@
               or-part_0
               (let ((mpi_0 (module-path-index2.1 #f #f r_0 '())))
                 (begin
-                  (hash-set!
-                   (unsafe-place-local-ref cell.1$9)
-                   r_0
-                   (make-ephemeron r_0 mpi_0))
+                  (let ((app_0 (unsafe-place-local-ref cell.1$9)))
+                    (hash-set! app_0 r_0 (make-ephemeron r_0 mpi_0)))
                   mpi_0))))
           (let ((lock_0 (unsafe-place-local-ref cell.2$7)))
             (unsafe-uninterruptible-lock-release lock_0)))))))
@@ -6806,16 +6800,16 @@
   (lambda (small-ht_0 key_0 val_0)
     (set-box! small-ht_0 (hash-set (unbox small-ht_0) key_0 val_0))))
 (define small-hash-keys (lambda (small-ht_0) (hash-keys (unbox small-ht_0))))
-(define finish_2578
+(define finish_1890
   (make-struct-type-install-properties
    '(serialize-state)
-   17
+   18
    0
    #f
    (list (cons prop:authentic #t))
    (current-inspector)
    #f
-   '(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16)
+   '(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17)
    #f
    'serialize-state))
 (define struct:serialize-state
@@ -6825,8 +6819,8 @@
    (|#%nongenerative-uid| serialize-state)
    #f
    #f
-   '(17 . 0)))
-(define effect_2707 (finish_2578 struct:serialize-state))
+   '(18 . 0)))
+(define effect_2707 (finish_1890 struct:serialize-state))
 (define serialize-state1.1
   (|#%name|
    serialize-state
@@ -6842,62 +6836,66 @@
   (|#%name|
    serialize-state-implicitly-reachable-scopes
    (record-accessor struct:serialize-state 1)))
+(define serialize-state-all-reachable-scopes
+  (|#%name|
+   serialize-state-all-reachable-scopes
+   (record-accessor struct:serialize-state 2)))
 (define serialize-state-bindings-intern
   (|#%name|
    serialize-state-bindings-intern
-   (record-accessor struct:serialize-state 2)))
+   (record-accessor struct:serialize-state 3)))
 (define serialize-state-bulk-bindings-intern
   (|#%name|
    serialize-state-bulk-bindings-intern
-   (record-accessor struct:serialize-state 3)))
+   (record-accessor struct:serialize-state 4)))
 (define serialize-state-scopes
-  (|#%name| serialize-state-scopes (record-accessor struct:serialize-state 4)))
+  (|#%name| serialize-state-scopes (record-accessor struct:serialize-state 5)))
 (define serialize-state-shifted-multi-scopes
   (|#%name|
    serialize-state-shifted-multi-scopes
-   (record-accessor struct:serialize-state 5)))
+   (record-accessor struct:serialize-state 6)))
 (define serialize-state-multi-scope-tables
   (|#%name|
    serialize-state-multi-scope-tables
-   (record-accessor struct:serialize-state 6)))
+   (record-accessor struct:serialize-state 7)))
 (define serialize-state-mpi-shifts
   (|#%name|
    serialize-state-mpi-shifts
-   (record-accessor struct:serialize-state 7)))
+   (record-accessor struct:serialize-state 8)))
 (define serialize-state-drop-shifts?
   (|#%name|
    serialize-state-drop-shifts?
-   (record-accessor struct:serialize-state 8)))
+   (record-accessor struct:serialize-state 9)))
 (define serialize-state-context-triples
   (|#%name|
    serialize-state-context-triples
-   (record-accessor struct:serialize-state 9)))
+   (record-accessor struct:serialize-state 10)))
 (define serialize-state-props
-  (|#%name| serialize-state-props (record-accessor struct:serialize-state 10)))
+  (|#%name| serialize-state-props (record-accessor struct:serialize-state 11)))
 (define serialize-state-interned-props
   (|#%name|
    serialize-state-interned-props
-   (record-accessor struct:serialize-state 11)))
+   (record-accessor struct:serialize-state 12)))
 (define serialize-state-syntax-context
   (|#%name|
    serialize-state-syntax-context
-   (record-accessor struct:serialize-state 12)))
+   (record-accessor struct:serialize-state 13)))
 (define serialize-state-sharing-syntaxes
   (|#%name|
    serialize-state-sharing-syntaxes
-   (record-accessor struct:serialize-state 13)))
+   (record-accessor struct:serialize-state 14)))
 (define serialize-state-preserve-prop-keys
   (|#%name|
    serialize-state-preserve-prop-keys
-   (record-accessor struct:serialize-state 14)))
+   (record-accessor struct:serialize-state 15)))
 (define serialize-state-keep-provides?
   (|#%name|
    serialize-state-keep-provides?
-   (record-accessor struct:serialize-state 15)))
+   (record-accessor struct:serialize-state 16)))
 (define serialize-state-map-binding-symbol
   (|#%name|
    serialize-state-map-binding-symbol
-   (record-accessor struct:serialize-state 16)))
+   (record-accessor struct:serialize-state 17)))
 (define make-serialize-state
   (lambda (reachable-scopes_0
            implicitly-reachable-scopes_0
@@ -6906,34 +6904,39 @@
            drop-shifts?_0
            map-binding-symbol_0)
     (let ((state_0
-           (let ((app_0 (make-hasheq)))
+           (let ((app_0
+                  (set-union
+                   reachable-scopes_0
+                   implicitly-reachable-scopes_0)))
              (let ((app_1 (make-hasheq)))
-               (let ((app_2 (make-hash)))
+               (let ((app_2 (make-hasheq)))
                  (let ((app_3 (make-hash)))
-                   (let ((app_4 (make-hasheq)))
+                   (let ((app_4 (make-hash)))
                      (let ((app_5 (make-hasheq)))
                        (let ((app_6 (make-hasheq)))
                          (let ((app_7 (make-hasheq)))
-                           (let ((app_8 (make-hash)))
-                             (let ((app_9 (box null)))
-                               (serialize-state1.1
-                                reachable-scopes_0
-                                implicitly-reachable-scopes_0
-                                app_0
-                                app_1
-                                app_2
-                                app_3
-                                app_4
-                                app_5
-                                drop-shifts?_0
-                                app_6
-                                app_7
-                                app_8
-                                app_9
-                                (make-hasheq)
-                                preserve-prop-keys_0
-                                keep-provides?_0
-                                map-binding-symbol_0)))))))))))))
+                           (let ((app_8 (make-hasheq)))
+                             (let ((app_9 (make-hash)))
+                               (let ((app_10 (box null)))
+                                 (serialize-state1.1
+                                  reachable-scopes_0
+                                  implicitly-reachable-scopes_0
+                                  app_0
+                                  app_1
+                                  app_2
+                                  app_3
+                                  app_4
+                                  app_5
+                                  app_6
+                                  drop-shifts?_0
+                                  app_7
+                                  app_8
+                                  app_9
+                                  app_10
+                                  (make-hasheq)
+                                  preserve-prop-keys_0
+                                  keep-provides?_0
+                                  map-binding-symbol_0))))))))))))))
       (let ((empty-seteq_0 (seteq)))
         (begin
           (hash-set!
@@ -7978,78 +7981,80 @@
                            (let ((s->_0 (|#%name| s-> (lambda (s_0) s_0))))
                              (let ((known-pairs_0
                                     (unsafe-place-local-ref cell.1$8)))
-                               (let ((gf_0
+                               (let ((s->_1 s->_0) (f_1 f_0))
+                                 (let ((gf_0
+                                        (|#%name|
+                                         gf
+                                         (lambda (tail?_0 v_0)
+                                           (if (syntax?$1 v_0)
+                                             v_0
+                                             (f_1 tail?_0 v_0))))))
+                                   (letrec*
+                                    ((loop_0
                                       (|#%name|
-                                       gf
-                                       (lambda (tail?_0 v_0)
-                                         (if (syntax?$1 v_0)
-                                           v_0
-                                           (f_0 tail?_0 v_0))))))
-                                 (letrec*
-                                  ((loop_0
-                                    (|#%name|
-                                     loop
-                                     (lambda (tail?_0 s_0 prev-depth_0)
-                                       (let ((depth_0 (fx+ 1 prev-depth_0)))
-                                         (if (if disallow-cycles
-                                               (fx> depth_0 32)
-                                               #f)
-                                           (datum-map-slow
-                                            tail?_0
-                                            s_0
-                                            (lambda (tail?_1 s_1)
-                                              (gf_0 tail?_1 s_1))
-                                            disallow-cycles
-                                            known-pairs_0)
-                                           (if (null? s_0)
-                                             (f_0 tail?_0 s_0)
-                                             (if (pair? s_0)
-                                               (f_0
-                                                tail?_0
-                                                (let ((app_0
-                                                       (loop_0
-                                                        #f
-                                                        (car s_0)
-                                                        depth_0)))
-                                                  (cons
-                                                   app_0
-                                                   (loop_0
-                                                    1
-                                                    (cdr s_0)
-                                                    depth_0))))
-                                               (if (symbol? s_0)
-                                                 (f_0 #f s_0)
-                                                 (if (boolean? s_0)
-                                                   (f_0 #f s_0)
-                                                   (if (number? s_0)
-                                                     (f_0 #f s_0)
-                                                     (if (let ((or-part_0
-                                                                (vector? s_0)))
-                                                           (if or-part_0
-                                                             or-part_0
-                                                             (let ((or-part_1
-                                                                    (box?
-                                                                     s_0)))
-                                                               (if or-part_1
-                                                                 or-part_1
-                                                                 (let ((or-part_2
-                                                                        (prefab-struct-key
-                                                                         s_0)))
-                                                                   (if or-part_2
-                                                                     or-part_2
-                                                                     (hash?
-                                                                      s_0)))))))
-                                                       (datum-map-slow
-                                                        tail?_0
-                                                        s_0
-                                                        (lambda (tail?_1 s_1)
-                                                          (gf_0 tail?_1 s_1))
-                                                        disallow-cycles
-                                                        known-pairs_0)
-                                                       (gf_0
-                                                        #f
-                                                        s_0)))))))))))))
-                                  (loop_0 #f s6_0 0)))))))
+                                       loop
+                                       (lambda (tail?_0 s_0 prev-depth_0)
+                                         (let ((depth_0 (fx+ 1 prev-depth_0)))
+                                           (if (if disallow-cycles
+                                                 (fx> depth_0 32)
+                                                 #f)
+                                             (datum-map-slow
+                                              tail?_0
+                                              s_0
+                                              (lambda (tail?_1 s_1)
+                                                (gf_0 tail?_1 s_1))
+                                              disallow-cycles
+                                              known-pairs_0)
+                                             (if (null? s_0)
+                                               (f_1 tail?_0 s_0)
+                                               (if (pair? s_0)
+                                                 (f_1
+                                                  tail?_0
+                                                  (let ((app_0
+                                                         (loop_0
+                                                          #f
+                                                          (car s_0)
+                                                          depth_0)))
+                                                    (cons
+                                                     app_0
+                                                     (loop_0
+                                                      1
+                                                      (cdr s_0)
+                                                      depth_0))))
+                                                 (if (symbol? s_0)
+                                                   (f_1 #f s_0)
+                                                   (if (boolean? s_0)
+                                                     (f_1 #f s_0)
+                                                     (if (number? s_0)
+                                                       (f_1 #f s_0)
+                                                       (if (let ((or-part_0
+                                                                  (vector?
+                                                                   s_0)))
+                                                             (if or-part_0
+                                                               or-part_0
+                                                               (let ((or-part_1
+                                                                      (box?
+                                                                       s_0)))
+                                                                 (if or-part_1
+                                                                   or-part_1
+                                                                   (let ((or-part_2
+                                                                          (prefab-struct-key
+                                                                           s_0)))
+                                                                     (if or-part_2
+                                                                       or-part_2
+                                                                       (hash?
+                                                                        s_0)))))))
+                                                         (datum-map-slow
+                                                          tail?_0
+                                                          s_0
+                                                          (lambda (tail?_1 s_1)
+                                                            (gf_0 tail?_1 s_1))
+                                                          disallow-cycles
+                                                          known-pairs_0)
+                                                         (gf_0
+                                                          #f
+                                                          s_0)))))))))))))
+                                    (loop_0 #f s6_0 0))))))))
                       (if (if stx-p4_0
                             (not (eq? (syntax-props stx-p4_0) empty-props))
                             #f)
@@ -9692,7 +9697,8 @@
            (hash-ref (serialize-state-bindings-intern state_0) bt_0 #f)))
       (if or-part_0
         or-part_0
-        (let ((reachable-scopes_0 (serialize-state-reachable-scopes state_0)))
+        (let ((reachable-scopes_0
+               (serialize-state-all-reachable-scopes state_0)))
           (let ((table_0 hash2610))
             (let ((new-syms_0
                    (let ((table_1 table_0))
@@ -10518,10 +10524,8 @@
       (let ((c_0 (weak-box-value wb_0)))
         (if (not c_0)
           (begin
-            (unsafe-box*-cas!
-             (unsafe-place-local-ref cell.1$6)
-             wb_0
-             (make-weak-box (make-hasheq)))
+            (let ((app_0 (unsafe-place-local-ref cell.1$6)))
+              (unsafe-box*-cas! app_0 wb_0 (make-weak-box (make-hasheq))))
             (resolve-cache-set! sym_0 phase_0 scs_0 smss_0 b_0))
           (hash-set! c_0 sym_0 (entry1.1 scs_0 smss_0 phase_0 b_0)))))))
 (define SHIFTED-CACHE-SIZE 16)
@@ -10569,9 +10573,8 @@
           cond-val_0
           (let ((vec_0 (make-vector 16 #f)))
             (begin
-              (unsafe-set-box*!
-               (unsafe-place-local-ref cell.2$5)
-               (make-weak-box vec_0))
+              (let ((app_0 (unsafe-place-local-ref cell.2$5)))
+                (unsafe-set-box*! app_0 (make-weak-box vec_0)))
               vec_0)))))))
 (define resolve+shift-cache-get
   (lambda (s_0 phase_0)
@@ -11276,7 +11279,8 @@
 (define new-scope-id!
   (lambda ()
     (let ((c_0 (unsafe-unbox* (unsafe-place-local-ref cell.1$5))))
-      (if (unsafe-box*-cas! (unsafe-place-local-ref cell.1$5) c_0 (add1 c_0))
+      (if (let ((app_0 (unsafe-place-local-ref cell.1$5)))
+            (unsafe-box*-cas! app_0 c_0 (add1 c_0)))
         (add1 c_0)
         (new-scope-id!)))))
 (define new-deserialize-scope-id! (lambda () (- (new-scope-id!))))
@@ -19208,7 +19212,7 @@
                   (lambda (s_0) (error "bad syntax:" s_0)))))
             (lambda (t_0) v_0))))))))
 (define 1/make-set!-transformer
-  (let ((finish906
+  (let ((finish912
          (make-struct-type-install-properties
           '(set!-transformer)
           1
@@ -19228,7 +19232,7 @@
             #f
             #f
             '(1 . 0))))
-      (let ((effect907 (finish906 struct:set!-transformer_0)))
+      (let ((effect913 (finish912 struct:set!-transformer_0)))
         (let ((set!-transformer1_0
                (|#%name|
                 set!-transformer
@@ -20658,6 +20662,9 @@
                                                                                                                                             app_1
                                                                                                                                             'match?
                                                                                                                                             app_2
+                                                                                                                                            'via
+                                                                                                                                            (scope-id
+                                                                                                                                             sc_0)
                                                                                                                                             app_3
                                                                                                                                             (extract-binding_0
                                                                                                                                              b_0))))))
@@ -24043,7 +24050,7 @@
   (lambda (s_0)
     (let ((built-in-s_0 (string->symbol (format ".~s" s_0))))
       (begin (hash-set! built-in-symbols built-in-s_0 #t) built-in-s_0))))
-(define effect_2612
+(define effect_2181
   (begin
     (void
      (begin
@@ -24058,7 +24065,8 @@
            set!
            quote
            with-continuation-mark
-           |#%variable-reference|))
+           |#%variable-reference|
+           |#%foreign-inline|))
        (for-each_2009
         register-built-in-symbol!
         '(check-not-undefined
@@ -24154,7 +24162,17 @@
              ptr-set!/double
              ptr-ref/float
              ptr-set!/float
-             ffi-static-call-and-callback-core))))
+             ffi-static-call-and-callback-core
+             ffi2-ptr?-maker
+             ffi2-procedure-maker
+             ffi2-callback-maker
+             ffi2-ptr-ref-maker
+             ffi2-ptr-set!-maker
+             ffi2-malloc-maker
+             ffi2-ptr-cast-maker
+             ffi2-sizeof
+             ffi2-offsetof
+             ffi2-system-type-select))))
     (void)))
 (define phase-shift-id (make-built-in-symbol! 'phase))
 (define dest-phase-id (make-built-in-symbol! 'dest-phase))
@@ -28541,6 +28559,44 @@
   (|#%name|
    parsed-quote-syntax-datum
    (record-accessor struct:parsed-quote-syntax 0)))
+(define finish_2709
+  (make-struct-type-install-properties
+   '(parsed-foreign-inline)
+   2
+   0
+   struct:parsed
+   (list (cons prop:authentic #t))
+   (current-inspector)
+   #f
+   '(0 1)
+   #f
+   'parsed-foreign-inline))
+(define struct:parsed-foreign-inline
+  (make-record-type-descriptor
+   'parsed-foreign-inline
+   struct:parsed
+   (|#%nongenerative-uid| parsed-foreign-inline)
+   #f
+   #f
+   '(2 . 0)))
+(define effect_2571 (finish_2709 struct:parsed-foreign-inline))
+(define parsed-foreign-inline16.1
+  (|#%name|
+   parsed-foreign-inline
+   (record-constructor
+    (make-record-constructor-descriptor struct:parsed-foreign-inline #f #f))))
+(define parsed-foreign-inline?
+  (|#%name|
+   parsed-foreign-inline?
+   (record-predicate struct:parsed-foreign-inline)))
+(define parsed-foreign-inline-datum
+  (|#%name|
+   parsed-foreign-inline-datum
+   (record-accessor struct:parsed-foreign-inline 0)))
+(define parsed-foreign-inline-mode
+  (|#%name|
+   parsed-foreign-inline-mode
+   (record-accessor struct:parsed-foreign-inline 1)))
 (define finish_2373
   (make-struct-type-install-properties
    '(parsed-let_-values)
@@ -28562,7 +28618,7 @@
    #f
    '(3 . 0)))
 (define effect_2494 (finish_2373 struct:parsed-let_-values))
-(define parsed-let_-values16.1
+(define parsed-let_-values17.1
   (|#%name|
    parsed-let_-values
    (record-constructor
@@ -28602,7 +28658,7 @@
    #f
    '(0 . 0)))
 (define effect_2429 (finish_2586 struct:parsed-let-values))
-(define parsed-let-values17.1
+(define parsed-let-values18.1
   (|#%name|
    parsed-let-values
    (record-constructor
@@ -28630,7 +28686,7 @@
    #f
    '(0 . 0)))
 (define effect_2573 (finish_2434 struct:parsed-letrec-values))
-(define parsed-letrec-values18.1
+(define parsed-letrec-values19.1
   (|#%name|
    parsed-letrec-values
    (record-constructor
@@ -28660,7 +28716,7 @@
    #f
    '(3 . 0)))
 (define effect_2826 (finish_2907 struct:parsed-define-values))
-(define parsed-define-values19.1
+(define parsed-define-values20.1
   (|#%name|
    parsed-define-values
    (record-constructor
@@ -28702,7 +28758,7 @@
    #f
    '(3 . 0)))
 (define effect_2530 (finish_3035 struct:parsed-define-syntaxes))
-(define parsed-define-syntaxes20.1
+(define parsed-define-syntaxes21.1
   (|#%name|
    parsed-define-syntaxes
    (record-constructor
@@ -28744,7 +28800,7 @@
    #f
    '(1 . 0)))
 (define effect_2361 (finish_2438 struct:parsed-begin-for-syntax))
-(define parsed-begin-for-syntax21.1
+(define parsed-begin-for-syntax22.1
   (|#%name|
    parsed-begin-for-syntax
    (record-constructor
@@ -28781,7 +28837,7 @@
    #f
    '(0 . 0)))
 (define effect_2603 (finish_2594 |struct:parsed-#%declare|))
-(define |parsed-#%declare22.1|
+(define |parsed-#%declare23.1|
   (|#%name|
    |parsed-#%declare|
    (record-constructor
@@ -28809,7 +28865,7 @@
    #f
    '(1 . 0)))
 (define effect_2194 (finish_2834 struct:parsed-require))
-(define parsed-require23.1
+(define parsed-require24.1
   (|#%name|
    parsed-require
    (record-constructor
@@ -28841,7 +28897,7 @@
    #f
    '(3 . 0)))
 (define effect_2515 (finish_2226 |struct:parsed-#%module-begin|))
-(define |parsed-#%module-begin24.1|
+(define |parsed-#%module-begin25.1|
   (|#%name|
    |parsed-#%module-begin|
    (record-constructor
@@ -28886,7 +28942,7 @@
    #f
    '(14 . 0)))
 (define effect_2433 (finish_2959 struct:parsed-module))
-(define parsed-module25.1
+(define parsed-module26.1
   (|#%name|
    parsed-module
    (record-constructor
@@ -28956,7 +29012,7 @@
    #f
    '(1 . 0)))
 (define effect_2594 (finish_2842 struct:parsed-bundle))
-(define parsed-bundle26.1
+(define parsed-bundle27.1
   (|#%name|
    parsed-bundle
    (record-constructor
@@ -38099,25 +38155,38 @@
                                              (parsed-quote-syntax-datum p3_0)
                                              cctx4_0)
                                             (let ((s-exp_0 ''syntax)) s-exp_0))
-                                          (if (|parsed-#%variable-reference?|
-                                               p3_0)
-                                            (let ((id_0
-                                                   (|parsed-#%variable-reference-id|
+                                          (if (parsed-foreign-inline? p3_0)
+                                            (let ((datum_0
+                                                   (parsed-foreign-inline-datum
                                                     p3_0)))
-                                              (let ((s-exp_0
-                                                     (if id_0
+                                              (let ((mode_0
+                                                     (parsed-foreign-inline-mode
+                                                      p3_0)))
+                                                (let ((s-exp_0
                                                        (list
-                                                        '|#%variable-reference|
-                                                        (compile-identifier.1
-                                                         #f
-                                                         #f
-                                                         id_0
-                                                         cctx4_0))
-                                                       '(|#%variable-reference|))))
-                                                s-exp_0))
-                                            (error
-                                             "unrecognized parsed form:"
-                                             p3_0)))))))))))))))))))))
+                                                        '|#%foreign-inline|
+                                                        datum_0
+                                                        mode_0)))
+                                                  s-exp_0)))
+                                            (if (|parsed-#%variable-reference?|
+                                                 p3_0)
+                                              (let ((id_0
+                                                     (|parsed-#%variable-reference-id|
+                                                      p3_0)))
+                                                (let ((s-exp_0
+                                                       (if id_0
+                                                         (list
+                                                          '|#%variable-reference|
+                                                          (compile-identifier.1
+                                                           #f
+                                                           #f
+                                                           id_0
+                                                           cctx4_0))
+                                                         '(|#%variable-reference|))))
+                                                  s-exp_0))
+                                              (error
+                                               "unrecognized parsed form:"
+                                               p3_0))))))))))))))))))))))
     (|#%name|
      compile
      (case-lambda
@@ -44650,10 +44719,8 @@
       #f)))
 (define module-cache-set!
   (lambda (key_0 proc_0)
-    (hash-set!
-     (unsafe-place-local-ref cell.1$3)
-     key_0
-     (make-ephemeron key_0 proc_0))))
+    (let ((app_0 (unsafe-place-local-ref cell.1$3)))
+      (hash-set! app_0 key_0 (make-ephemeron key_0 proc_0)))))
 (define module-cache-ref
   (lambda (key_0)
     (let ((e_0 (hash-ref (unsafe-place-local-ref cell.1$3) key_0 #f)))
@@ -50536,7 +50603,7 @@
                                   (if (expanded+parsed? i_0)
                                     (expanded+parsed-parsed i_0)
                                     (if (semi-parsed-begin-for-syntax? i_0)
-                                      (parsed-begin-for-syntax21.1
+                                      (parsed-begin-for-syntax22.1
                                        (semi-parsed-begin-for-syntax-s i_0)
                                        (parsed-only
                                         (semi-parsed-begin-for-syntax-body
@@ -52114,7 +52181,7 @@
                     (let ((exp-rhs_0 (|#%app| parse-rhs_0 rhs_0 rhs-ctx_0)))
                       (let ((app_0 (list ids_0)))
                         (let ((app_1 (list (list keys_0 exp-rhs_0))))
-                          (parsed-let-values17.1
+                          (parsed-let-values18.1
                            rebuild-s_0
                            app_0
                            app_1
@@ -58764,7 +58831,7 @@
                       ns_0
                       phase_0
                       temp188_1)))))
-             (parsed-require23.1 s_0 (reverse$1 (unbox syms_0))))))))))
+             (parsed-require24.1 s_0 (reverse$1 (unbox syms_0))))))))))
 (define wrap-lifts-as-lifted-parsed-begin.1
   (|#%name|
    wrap-lifts-as-lifted-parsed-begin
@@ -58802,7 +58869,7 @@
                                          (let ((dv_0
                                                 (let ((app_0
                                                        (car ids+syms+rhs_0)))
-                                                  (parsed-define-values19.1
+                                                  (parsed-define-values20.1
                                                    rebuild-s61_0
                                                    app_0
                                                    (cadr ids+syms+rhs_0)
@@ -60354,10 +60421,11 @@
                        (begin
                          (let ((lock_0 (unsafe-place-local-ref cell.2$1)))
                            (unsafe-uninterruptible-lock-acquire lock_0))
-                         (hash-set!
-                          (unsafe-place-local-ref cell.1$1)
-                          links-path_0
-                          (cons ts_0 hash2610))
+                         (let ((app_0 (unsafe-place-local-ref cell.1$1)))
+                           (hash-set!
+                            app_0
+                            links-path_0
+                            (cons ts_0 hash2610)))
                          (let ((lock_0 (unsafe-place-local-ref cell.2$1)))
                            (unsafe-uninterruptible-lock-release lock_0)))
                        (void))
@@ -60529,10 +60597,13 @@
                                                 cell.2$1)))
                                           (unsafe-uninterruptible-lock-acquire
                                            lock_0))
-                                        (hash-set!
-                                         (unsafe-place-local-ref cell.1$1)
-                                         links-path_0
-                                         (cons ts_0 ht_0))
+                                        (let ((app_0
+                                               (unsafe-place-local-ref
+                                                cell.1$1)))
+                                          (hash-set!
+                                           app_0
+                                           links-path_0
+                                           (cons ts_0 ht_0)))
                                         (let ((lock_0
                                                (unsafe-place-local-ref
                                                 cell.2$1)))
@@ -76318,10 +76389,8 @@
       (if e_0 (ephemeron-value e_0) #f))))
 (define registry-table-set!
   (lambda (reg_0 v_0)
-    (hash-set!
-     (unsafe-place-local-ref cell.1)
-     reg_0
-     (make-ephemeron reg_0 v_0))))
+    (let ((app_0 (unsafe-place-local-ref cell.1)))
+      (hash-set! app_0 reg_0 (make-ephemeron reg_0 v_0)))))
 (define cell.2 (unsafe-make-place-local (make-weak-hasheq)))
 (define path-cache-get
   (lambda (p_0 reg_0)
@@ -76336,10 +76405,8 @@
              (if (= (hash-count current-cache_0) 1024)
                hash2725
                current-cache_0)))
-        (hash-set!
-         (unsafe-place-local-ref cell.2)
-         reg_0
-         (hash-set cache_0 p_0 v_0))))))
+        (let ((app_0 (unsafe-place-local-ref cell.2)))
+          (hash-set! app_0 reg_0 (hash-set cache_0 p_0 v_0)))))))
 (define -loading-filename (gensym))
 (define -loading-prompt-tag (make-continuation-prompt-tag 'module-loading))
 (define cell.3 (unsafe-make-place-local (cons #f #f)))
@@ -76568,14 +76635,15 @@
                   (if (if (pair? s_0) (eq? (car s_0) 'planet) #f)
                     (begin
                       (prep-planet-resolver!)
-                      (|#%app|
-                       (unsafe-place-local-ref cell.5)
-                       s_0
-                       relto_0
-                       stx_0
-                       load?_0
-                       #f
-                       (unsafe-place-local-ref cell.4)))
+                      (let ((app_0 (unsafe-place-local-ref cell.5)))
+                        (|#%app|
+                         app_0
+                         s_0
+                         relto_0
+                         stx_0
+                         load?_0
+                         #f
+                         (unsafe-place-local-ref cell.4))))
                     (if (if (pair? s_0)
                           (if (eq? (car s_0) 'submod)
                             (if (pair? (cadr s_0))
@@ -76585,16 +76653,17 @@
                           #f)
                       (begin
                         (prep-planet-resolver!)
-                        (let ((app_0 (cadr s_0)))
-                          (let ((app_1 (cddr s_0)))
-                            (|#%app|
-                             (unsafe-place-local-ref cell.5)
-                             app_0
-                             relto_0
-                             stx_0
-                             load?_0
-                             app_1
-                             (unsafe-place-local-ref cell.4)))))
+                        (let ((app_0 (unsafe-place-local-ref cell.5)))
+                          (let ((app_1 (cadr s_0)))
+                            (let ((app_2 (cddr s_0)))
+                              (|#%app|
+                               app_0
+                               app_1
+                               relto_0
+                               stx_0
+                               load?_0
+                               app_2
+                               (unsafe-place-local-ref cell.4))))))
                       (let ((get-dir_0
                              (|#%name|
                               get-dir
@@ -79057,14 +79126,14 @@
                           (if (expand-context/inner-to-parsed?
                                (root-expand-context/outer-inner ctx_0))
                             (if (null? accum-idss_0)
-                              (parsed-let-values17.1
+                              (parsed-let-values18.1
                                (keep-properties-only source35_0)
                                null
                                null
                                exp-body_0)
                               (let ((app_0 (keep-properties-only source35_0)))
                                 (let ((app_1 (reverse$1 accum-idss_0)))
-                                  (parsed-letrec-values18.1
+                                  (parsed-letrec-values19.1
                                    app_0
                                    app_1
                                    (reverse$1
@@ -79143,7 +79212,7 @@
                                                       (keep-properties-only
                                                        source35_0)))
                                                  (let ((app_1 (list ids_0)))
-                                                   (parsed-let-values17.1
+                                                   (parsed-let-values18.1
                                                     app_0
                                                     app_1
                                                     (list
@@ -79211,7 +79280,7 @@
                                                          (cons
                                                           ids_0
                                                           accum-idss_0))))
-                                                   (parsed-letrec-values18.1
+                                                   (parsed-letrec-values19.1
                                                     app_0
                                                     app_1
                                                     (reverse$1
@@ -82138,12 +82207,12 @@
                                                                                                    (root-expand-context/outer-inner
                                                                                                     ctx_0))
                                                                                                 (if rec?3_0
-                                                                                                  (parsed-letrec-values18.1
+                                                                                                  (parsed-letrec-values19.1
                                                                                                    rebuild-s_0
                                                                                                    val-name-idss_0
                                                                                                    clauses_0
                                                                                                    exp-body_0)
-                                                                                                  (parsed-let-values17.1
+                                                                                                  (parsed-let-values18.1
                                                                                                    rebuild-s_0
                                                                                                    val-name-idss_0
                                                                                                    clauses_0
@@ -82734,7 +82803,170 @@
                         (let ((temp278_0 (list quote-syntax261_0 datum-s_0)))
                           (rebuild.1 #t s_0 temp278_0))))))))))))))
     (void)))
-(define effect_2132
+(define effect_3058
+  (begin
+    (void
+     (add-core-form!*
+      '|#%foreign-inline|
+      (lambda (s_0 ctx_0)
+        (begin
+          (let ((obs_0
+                 (expand-context/inner-observer
+                  (root-expand-context/outer-inner ctx_0))))
+            (if obs_0
+              (call-expand-observe obs_0 'prim-foreign-inline #f)
+              (void)))
+          (call-with-values
+           (lambda ()
+             (if (let ((s_1 (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
+                   (if (pair? s_1)
+                     (if (let ((s_2 (car s_1))) #t)
+                       (let ((s_2 (cdr s_1)))
+                         (let ((s_3 (if (syntax?$1 s_2) (syntax-e$1 s_2) s_2)))
+                           (if (pair? s_3)
+                             (if (let ((s_4 (car s_3))) #t)
+                               (let ((s_4 (cdr s_3)))
+                                 (let ((s_5
+                                        (if (syntax?$1 s_4)
+                                          (syntax-e$1 s_4)
+                                          s_4)))
+                                   (if (pair? s_5)
+                                     (if (let ((s_6 (car s_5))) #t)
+                                       (let ((s_6 (cdr s_5)))
+                                         (let ((s_7
+                                                (if (syntax?$1 s_6)
+                                                  (syntax-e$1 s_6)
+                                                  s_6)))
+                                           (null? s_7)))
+                                       #f)
+                                     #f)))
+                               #f)
+                             #f)))
+                       #f)
+                     #f))
+               (call-with-values
+                (lambda ()
+                  (let ((s_1 (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
+                    (let ((foreign-inline282_0 (let ((s_2 (car s_1))) s_2)))
+                      (call-with-values
+                       (lambda ()
+                         (let ((s_2 (cdr s_1)))
+                           (let ((s_3
+                                  (if (syntax?$1 s_2) (syntax-e$1 s_2) s_2)))
+                             (let ((datum285_0 (let ((s_4 (car s_3))) s_4)))
+                               (let ((mode286_0
+                                      (let ((s_4 (cdr s_3)))
+                                        (let ((s_5
+                                               (if (syntax?$1 s_4)
+                                                 (syntax-e$1 s_4)
+                                                 s_4)))
+                                          (let ((mode287_0
+                                                 (let ((s_6 (car s_5))) s_6)))
+                                            (call-with-values
+                                             (lambda ()
+                                               (let ((s_6 (cdr s_5)))
+                                                 (let ((s_7
+                                                        (if (syntax?$1 s_6)
+                                                          (syntax-e$1 s_6)
+                                                          s_6)))
+                                                   (values))))
+                                             (lambda ()
+                                               (let ((mode287_1 mode287_0))
+                                                 (values mode287_1)))))))))
+                                 (let ((datum285_1 datum285_0))
+                                   (values datum285_1 mode286_0)))))))
+                       (lambda (datum283_0 mode284_0)
+                         (let ((foreign-inline282_1 foreign-inline282_0))
+                           (values
+                            foreign-inline282_1
+                            datum283_0
+                            mode284_0)))))))
+                (lambda (foreign-inline279_0 datum280_0 mode281_0)
+                  (values #t foreign-inline279_0 datum280_0 mode281_0)))
+               (values #f #f #f #f)))
+           (lambda (ok?_0 foreign-inline279_0 datum280_0 mode281_0)
+             (call-with-values
+              (lambda ()
+                (if (if (not ok?_0) #t #f)
+                  (call-with-values
+                   (lambda ()
+                     (let ((s_1 (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
+                       (if (pair? s_1)
+                         (let ((foreign-inline290_0
+                                (let ((s_2 (car s_1))) s_2)))
+                           (let ((datum291_0
+                                  (let ((s_2 (cdr s_1)))
+                                    (let ((s_3
+                                           (if (syntax?$1 s_2)
+                                             (syntax-e$1 s_2)
+                                             s_2)))
+                                      (if (pair? s_3)
+                                        (let ((datum292_0
+                                               (let ((s_4 (car s_3))) s_4)))
+                                          (call-with-values
+                                           (lambda ()
+                                             (let ((s_4 (cdr s_3)))
+                                               (let ((s_5
+                                                      (if (syntax?$1 s_4)
+                                                        (syntax-e$1 s_4)
+                                                        s_4)))
+                                                 (if (null? s_5)
+                                                   (values)
+                                                   (raise-syntax-error$1
+                                                    #f
+                                                    "bad syntax"
+                                                    s_0)))))
+                                           (lambda ()
+                                             (let ((datum292_1 datum292_0))
+                                               (values datum292_1)))))
+                                        (raise-syntax-error$1
+                                         #f
+                                         "bad syntax"
+                                         s_0))))))
+                             (let ((foreign-inline290_1 foreign-inline290_0))
+                               (values foreign-inline290_1 datum291_0))))
+                         (raise-syntax-error$1 #f "bad syntax" s_0))))
+                   (lambda (foreign-inline288_0 datum289_0)
+                     (values #t foreign-inline288_0 datum289_0)))
+                  (values #f #f #f)))
+              (lambda (ok?_1 foreign-inline288_0 datum289_0)
+                (begin
+                  (if ok?_0
+                    (if (memq (syntax-e$1 mode281_0) kws2519)
+                      (void)
+                      (raise-syntax-error$1
+                       #f
+                       "invalid foreign-inline mode keyword"
+                       s_0
+                       mode281_0))
+                    (void))
+                  (if (eq? (current-code-inspector) initial-code-inspector)
+                    (void)
+                    (raise-syntax-error$1
+                     #f
+                     "unsafe compilation disallowed by code inspector"
+                     s_0))
+                  (if (expand-context/inner-to-parsed?
+                       (root-expand-context/outer-inner ctx_0))
+                    (let ((app_0
+                           (syntax->datum$1 (if ok?_0 datum280_0 datum289_0))))
+                      (parsed-foreign-inline16.1
+                       '#f
+                       app_0
+                       (if ok?_0
+                         (string->symbol
+                          (keyword->string (syntax-e$1 mode281_0)))
+                         'effect)))
+                    (if ok?_0
+                      s_0
+                      (let ((temp294_0
+                             (list*
+                              foreign-inline288_0
+                              datum289_0
+                              kws2378)))
+                        (rebuild.1 #t s_0 temp294_0)))))))))))))
+    (void)))
+(define effect_1898
   (begin
     (void
      (add-core-form!*
@@ -82817,7 +83049,7 @@
                    (lambda ()
                      (let ((s_1 (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
                        (if (pair? s_1)
-                         (let ((if292_0 (let ((s_2 (car s_1))) s_2)))
+                         (let ((if308_0 (let ((s_2 (car s_1))) s_2)))
                            (call-with-values
                             (lambda ()
                               (let ((s_2 (cdr s_1)))
@@ -82826,7 +83058,7 @@
                                          (syntax-e$1 s_2)
                                          s_2)))
                                   (if (pair? s_3)
-                                    (let ((tst296_0
+                                    (let ((tst312_0
                                            (let ((s_4 (car s_3))) s_4)))
                                       (call-with-values
                                        (lambda ()
@@ -82836,10 +83068,10 @@
                                                     (syntax-e$1 s_4)
                                                     s_4)))
                                              (if (pair? s_5)
-                                               (let ((thn299_0
+                                               (let ((thn315_0
                                                       (let ((s_6 (car s_5)))
                                                         s_6)))
-                                                 (let ((els300_0
+                                                 (let ((els316_0
                                                         (let ((s_6 (cdr s_5)))
                                                           (let ((s_7
                                                                  (if (syntax?$1
@@ -82848,7 +83080,7 @@
                                                                     s_6)
                                                                    s_6)))
                                                             (if (pair? s_7)
-                                                              (let ((els301_0
+                                                              (let ((els317_0
                                                                      (let ((s_8
                                                                             (car
                                                                              s_7)))
@@ -82872,44 +83104,44 @@
                                                                           "bad syntax"
                                                                           s_0)))))
                                                                  (lambda ()
-                                                                   (let ((els301_1
-                                                                          els301_0))
+                                                                   (let ((els317_1
+                                                                          els317_0))
                                                                      (values
-                                                                      els301_1)))))
+                                                                      els317_1)))))
                                                               (raise-syntax-error$1
                                                                #f
                                                                "bad syntax"
                                                                s_0))))))
-                                                   (let ((thn299_1 thn299_0))
+                                                   (let ((thn315_1 thn315_0))
                                                      (values
-                                                      thn299_1
-                                                      els300_0))))
+                                                      thn315_1
+                                                      els316_0))))
                                                (raise-syntax-error$1
                                                 #f
                                                 "bad syntax"
                                                 s_0)))))
-                                       (lambda (thn297_0 els298_0)
-                                         (let ((tst296_1 tst296_0))
+                                       (lambda (thn313_0 els314_0)
+                                         (let ((tst312_1 tst312_0))
                                            (values
-                                            tst296_1
-                                            thn297_0
-                                            els298_0)))))
+                                            tst312_1
+                                            thn313_0
+                                            els314_0)))))
                                     (raise-syntax-error$1
                                      #f
                                      "bad syntax"
                                      s_0)))))
-                            (lambda (tst293_0 thn294_0 els295_0)
-                              (let ((if292_1 if292_0))
-                                (values if292_1 tst293_0 thn294_0 els295_0)))))
+                            (lambda (tst309_0 thn310_0 els311_0)
+                              (let ((if308_1 if308_0))
+                                (values if308_1 tst309_0 thn310_0 els311_0)))))
                          (raise-syntax-error$1 #f "bad syntax" s_0))))
-                   (lambda (if288_0 tst289_0 thn290_0 els291_0)
-                     (values #t if288_0 tst289_0 thn290_0 els291_0))))
-                (lambda (ok?_1 if288_0 tst289_0 thn290_0 els291_0)
+                   (lambda (if304_0 tst305_0 thn306_0 els307_0)
+                     (values #t if304_0 tst305_0 thn306_0 els307_0))))
+                (lambda (ok?_1 if304_0 tst305_0 thn306_0 els307_0)
                   (let ((expr-ctx_0 (as-expression-context ctx_0)))
                     (let ((tail-ctx_0 (as-tail-context.1 ctx_0 expr-ctx_0)))
                       (let ((rebuild-s_0
                              (keep-as-needed.1 #f #f #f ctx_0 s_0)))
-                        (let ((exp-tst_0 (expand.1 #f #f tst289_0 expr-ctx_0)))
+                        (let ((exp-tst_0 (expand.1 #f #f tst305_0 expr-ctx_0)))
                           (begin
                             (let ((obs_0
                                    (expand-context/inner-observer
@@ -82918,7 +83150,7 @@
                                 (call-expand-observe obs_0 'next)
                                 (void)))
                             (let ((exp-thn_0
-                                   (expand.1 #f #f thn290_0 tail-ctx_0)))
+                                   (expand.1 #f #f thn306_0 tail-ctx_0)))
                               (begin
                                 (let ((obs_0
                                        (expand-context/inner-observer
@@ -82928,7 +83160,7 @@
                                     (call-expand-observe obs_0 'next)
                                     (void)))
                                 (let ((exp-els_0
-                                       (expand.1 #f #f els291_0 tail-ctx_0)))
+                                       (expand.1 #f #f els307_0 tail-ctx_0)))
                                   (if (expand-context/inner-to-parsed?
                                        (root-expand-context/outer-inner ctx_0))
                                     (parsed-if8.1
@@ -82936,18 +83168,18 @@
                                      exp-tst_0
                                      exp-thn_0
                                      exp-els_0)
-                                    (let ((temp313_0
+                                    (let ((temp329_0
                                            (list
-                                            if288_0
+                                            if304_0
                                             exp-tst_0
                                             exp-thn_0
                                             exp-els_0)))
                                       (rebuild.1
                                        #t
                                        rebuild-s_0
-                                       temp313_0))))))))))))))))))))
+                                       temp329_0))))))))))))))))))))
     (void)))
-(define effect_2272
+(define effect_2523
   (begin
     (void
      (add-core-form!*
@@ -82966,7 +83198,7 @@
               (lambda ()
                 (let ((s_1 (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
                   (if (pair? s_1)
-                    (let ((with-continuation-mark318_0
+                    (let ((with-continuation-mark334_0
                            (let ((s_2 (car s_1))) s_2)))
                       (call-with-values
                        (lambda ()
@@ -82974,7 +83206,7 @@
                            (let ((s_3
                                   (if (syntax?$1 s_2) (syntax-e$1 s_2) s_2)))
                              (if (pair? s_3)
-                               (let ((key322_0 (let ((s_4 (car s_3))) s_4)))
+                               (let ((key338_0 (let ((s_4 (car s_3))) s_4)))
                                  (call-with-values
                                   (lambda ()
                                     (let ((s_4 (cdr s_3)))
@@ -82983,16 +83215,16 @@
                                                (syntax-e$1 s_4)
                                                s_4)))
                                         (if (pair? s_5)
-                                          (let ((val325_0
+                                          (let ((val341_0
                                                  (let ((s_6 (car s_5))) s_6)))
-                                            (let ((body326_0
+                                            (let ((body342_0
                                                    (let ((s_6 (cdr s_5)))
                                                      (let ((s_7
                                                             (if (syntax?$1 s_6)
                                                               (syntax-e$1 s_6)
                                                               s_6)))
                                                        (if (pair? s_7)
-                                                         (let ((body327_0
+                                                         (let ((body343_0
                                                                 (let ((s_8
                                                                        (car
                                                                         s_7)))
@@ -83016,63 +83248,63 @@
                                                                      "bad syntax"
                                                                      s_0)))))
                                                             (lambda ()
-                                                              (let ((body327_1
-                                                                     body327_0))
+                                                              (let ((body343_1
+                                                                     body343_0))
                                                                 (values
-                                                                 body327_1)))))
+                                                                 body343_1)))))
                                                          (raise-syntax-error$1
                                                           #f
                                                           "bad syntax"
                                                           s_0))))))
-                                              (let ((val325_1 val325_0))
-                                                (values val325_1 body326_0))))
+                                              (let ((val341_1 val341_0))
+                                                (values val341_1 body342_0))))
                                           (raise-syntax-error$1
                                            #f
                                            "bad syntax"
                                            s_0)))))
-                                  (lambda (val323_0 body324_0)
-                                    (let ((key322_1 key322_0))
-                                      (values key322_1 val323_0 body324_0)))))
+                                  (lambda (val339_0 body340_0)
+                                    (let ((key338_1 key338_0))
+                                      (values key338_1 val339_0 body340_0)))))
                                (raise-syntax-error$1 #f "bad syntax" s_0)))))
-                       (lambda (key319_0 val320_0 body321_0)
-                         (let ((with-continuation-mark318_1
-                                with-continuation-mark318_0))
+                       (lambda (key335_0 val336_0 body337_0)
+                         (let ((with-continuation-mark334_1
+                                with-continuation-mark334_0))
                            (values
-                            with-continuation-mark318_1
-                            key319_0
-                            val320_0
-                            body321_0)))))
+                            with-continuation-mark334_1
+                            key335_0
+                            val336_0
+                            body337_0)))))
                     (raise-syntax-error$1 #f "bad syntax" s_0))))
-              (lambda (with-continuation-mark314_0 key315_0 val316_0 body317_0)
+              (lambda (with-continuation-mark330_0 key331_0 val332_0 body333_0)
                 (values
                  #t
-                 with-continuation-mark314_0
-                 key315_0
-                 val316_0
-                 body317_0))))
+                 with-continuation-mark330_0
+                 key331_0
+                 val332_0
+                 body333_0))))
            (lambda (ok?_0
-                    with-continuation-mark314_0
-                    key315_0
-                    val316_0
-                    body317_0)
+                    with-continuation-mark330_0
+                    key331_0
+                    val332_0
+                    body333_0)
              (let ((expr-ctx_0 (as-expression-context ctx_0)))
                (let ((rebuild-s_0 (keep-as-needed.1 #f #f #f ctx_0 s_0)))
-                 (let ((exp-key_0 (expand.1 #f #f key315_0 expr-ctx_0)))
+                 (let ((exp-key_0 (expand.1 #f #f key331_0 expr-ctx_0)))
                    (begin
                      (let ((obs_0
                             (expand-context/inner-observer
                              (root-expand-context/outer-inner ctx_0))))
                        (if obs_0 (call-expand-observe obs_0 'next) (void)))
-                     (let ((exp-val_0 (expand.1 #f #f val316_0 expr-ctx_0)))
+                     (let ((exp-val_0 (expand.1 #f #f val332_0 expr-ctx_0)))
                        (begin
                          (let ((obs_0
                                 (expand-context/inner-observer
                                  (root-expand-context/outer-inner ctx_0))))
                            (if obs_0 (call-expand-observe obs_0 'next) (void)))
                          (let ((exp-body_0
-                                (let ((temp335_0
+                                (let ((temp351_0
                                        (as-tail-context.1 ctx_0 expr-ctx_0)))
-                                  (expand.1 #f #f body317_0 temp335_0))))
+                                  (expand.1 #f #f body333_0 temp351_0))))
                            (if (expand-context/inner-to-parsed?
                                 (root-expand-context/outer-inner ctx_0))
                              (parsed-with-continuation-mark10.1
@@ -83080,16 +83312,16 @@
                               exp-key_0
                               exp-val_0
                               exp-body_0)
-                             (let ((temp339_0
+                             (let ((temp355_0
                                     (list
-                                     with-continuation-mark314_0
+                                     with-continuation-mark330_0
                                      exp-key_0
                                      exp-val_0
                                      exp-body_0)))
                                (rebuild.1
                                 #t
                                 rebuild-s_0
-                                temp339_0))))))))))))))))
+                                temp355_0))))))))))))))))
     (void)))
 (define make-begin.1
   (|#%name|
@@ -83107,8 +83339,8 @@
              (lambda ()
                (let ((s_1 (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
                  (if (pair? s_1)
-                   (let ((begin342_0 (let ((s_2 (car s_1))) s_2)))
-                     (let ((e343_0
+                   (let ((begin358_0 (let ((s_2 (car s_1))) s_2)))
+                     (let ((e359_0
                             (let ((s_2 (cdr s_1)))
                               (let ((s_3
                                      (if (syntax?$1 s_2)
@@ -83123,11 +83355,11 @@
                                        "bad syntax"
                                        s_0)
                                       flat-s_0)))))))
-                       (let ((begin342_1 begin342_0))
-                         (values begin342_1 e343_0))))
+                       (let ((begin358_1 begin358_0))
+                         (values begin358_1 e359_0))))
                    (raise-syntax-error$1 #f "bad syntax" s_0))))
-             (lambda (begin340_0 e341_0) (values #t begin340_0 e341_0))))
-          (lambda (ok?_0 begin340_0 e341_0)
+             (lambda (begin356_0 e357_0) (values #t begin356_0 e357_0))))
+          (lambda (ok?_0 begin356_0 e357_0)
             (let ((expr-ctx_0
                    (if last-is-tail?10_0
                      (as-begin-expression-context ctx_0)
@@ -83151,8 +83383,8 @@
                                        (call-expand-observe obs_0 'next)
                                        (void)))
                                    (let ((app_0
-                                          (let ((temp346_0 (car es_0)))
-                                            (let ((temp347_0
+                                          (let ((temp362_0 (car es_0)))
+                                            (let ((temp363_0
                                                    (if (if last-is-tail?10_0
                                                          (null? rest-es_0)
                                                          #f)
@@ -83160,20 +83392,20 @@
                                                       ctx_0
                                                       expr-ctx_0)
                                                      expr-ctx_0)))
-                                              (let ((temp346_1 temp346_0))
+                                              (let ((temp362_1 temp362_0))
                                                 (expand.1
                                                  #f
                                                  #f
-                                                 temp346_1
-                                                 temp347_0))))))
+                                                 temp362_1
+                                                 temp363_0))))))
                                      (cons app_0 (loop_0 rest-es_0))))))))))
-                        (loop_0 e341_0))))
+                        (loop_0 e357_0))))
                   (if (expand-context/inner-to-parsed?
                        (root-expand-context/outer-inner ctx_0))
                     (|#%app| parsed-begin13_0 rebuild-s_0 exp-es_0)
-                    (let ((temp351_0 (cons begin340_0 exp-es_0)))
-                      (rebuild.1 #t rebuild-s_0 temp351_0)))))))))))))
-(define effect_2739
+                    (let ((temp367_0 (cons begin356_0 exp-es_0)))
+                      (rebuild.1 #t rebuild-s_0 temp367_0)))))))))))))
+(define effect_2951
   (begin
     (void
      (add-core-form!*
@@ -83194,10 +83426,10 @@
                                (null? s_3)))
                            #f)
                          #f))
-                   (let ((begin355_0
+                   (let ((begin371_0
                           (let ((s_1
                                  (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
-                            (let ((begin356_0 (let ((s_2 (car s_1))) s_2)))
+                            (let ((begin372_0 (let ((s_2 (car s_1))) s_2)))
                               (call-with-values
                                (lambda ()
                                  (let ((s_2 (cdr s_1)))
@@ -83207,11 +83439,11 @@
                                             s_2)))
                                      (values))))
                                (lambda ()
-                                 (let ((begin356_1 begin356_0))
-                                   (values begin356_1))))))))
-                     (values #t begin355_0))
+                                 (let ((begin372_1 begin372_0))
+                                   (values begin372_1))))))))
+                     (values #t begin371_0))
                    (values #f #f)))
-               (lambda (ok?_0 begin355_0)
+               (lambda (ok?_0 begin371_0)
                  (if ok?_0
                    (if (expand-context/inner-to-parsed?
                         (root-expand-context/outer-inner ctx_0))
@@ -83256,10 +83488,10 @@
   (lambda (ctx_0 b_0 id_0 s_0)
     (call-with-values
      (lambda ()
-       (let ((temp366_0
+       (let ((temp382_0
               (expand-context/inner-in-local-expand?
                (root-expand-context/outer-inner ctx_0))))
-         (lookup.1 s_0 temp366_0 b_0 ctx_0 id_0)))
+         (lookup.1 s_0 temp382_0 b_0 ctx_0 id_0)))
      (lambda (t_0 primitive?_0 insp-of-t_0 protected?_0)
        (begin
          (if (let ((or-part_0 (variable? t_0)))
@@ -83271,37 +83503,37 @@
             id_0
             s_0))
          (values t_0 primitive?_0))))))
-(define effect_3357
+(define effect_3176
   (begin
     (void
      (add-core-form!*
       '|#%top|
-      (let ((...nder/expand/expr.rkt:603:1_0
+      (let ((...nder/expand/expr.rkt:627:1_0
              (|#%name|
-              ...nder/expand/expr.rkt:603:1
-              (lambda (s368_0 ctx369_0 implicit-omitted?367_0)
+              ...nder/expand/expr.rkt:627:1
+              (lambda (s384_0 ctx385_0 implicit-omitted?383_0)
                 (begin
                   (let ((obs_0
                          (expand-context/inner-observer
-                          (root-expand-context/outer-inner ctx369_0))))
+                          (root-expand-context/outer-inner ctx385_0))))
                     (if obs_0
-                      (call-expand-observe obs_0 '|prim-#%top| s368_0)
+                      (call-expand-observe obs_0 '|prim-#%top| s384_0)
                       (void)))
                   (let ((id_0
-                         (if implicit-omitted?367_0
-                           s368_0
+                         (if implicit-omitted?383_0
+                           s384_0
                            (call-with-values
                             (lambda ()
                               (call-with-values
                                (lambda ()
                                  (let ((s_0
-                                        (if (syntax?$1 s368_0)
-                                          (syntax-e$1 s368_0)
-                                          s368_0)))
+                                        (if (syntax?$1 s384_0)
+                                          (syntax-e$1 s384_0)
+                                          s384_0)))
                                    (if (pair? s_0)
-                                     (let ((|#%top372_0|
+                                     (let ((|#%top388_0|
                                             (let ((s_1 (car s_0))) s_1)))
-                                       (let ((id373_0
+                                       (let ((id389_0
                                               (let ((s_1 (cdr s_0)))
                                                 (if (let ((or-part_0
                                                            (if (syntax?$1 s_1)
@@ -83315,22 +83547,22 @@
                                                   (raise-syntax-error$1
                                                    #f
                                                    "not an identifier"
-                                                   s368_0
+                                                   s384_0
                                                    s_1)))))
-                                         (let ((|#%top372_1| |#%top372_0|))
-                                           (values |#%top372_1| id373_0))))
+                                         (let ((|#%top388_1| |#%top388_0|))
+                                           (values |#%top388_1| id389_0))))
                                      (raise-syntax-error$1
                                       #f
                                       "bad syntax"
-                                      s368_0))))
-                               (lambda (|#%top370_0| id371_0)
-                                 (values #t |#%top370_0| id371_0))))
-                            (lambda (ok?_0 |#%top370_0| id371_0) id371_0)))))
+                                      s384_0))))
+                               (lambda (|#%top386_0| id387_0)
+                                 (values #t |#%top386_0| id387_0))))
+                            (lambda (ok?_0 |#%top386_0| id387_0) id387_0)))))
                     (let ((b_0
-                           (let ((temp375_0
+                           (let ((temp391_0
                                   (expand-context/inner-phase
                                    (root-expand-context/outer-inner
-                                    ctx369_0))))
+                                    ctx385_0))))
                              (resolve+shift.1
                               'ambiguous
                               #f
@@ -83338,9 +83570,9 @@
                               unsafe-undefined
                               #f
                               id_0
-                              temp375_0))))
+                              temp391_0))))
                       (if (eq? b_0 'ambiguous)
-                        (raise-ambiguous-error id_0 ctx369_0)
+                        (raise-ambiguous-error id_0 ctx385_0)
                         (if (if b_0
                               (if (module-binding? b_0)
                                 (let ((app_0 (module-binding-module b_0)))
@@ -83348,24 +83580,24 @@
                                    app_0
                                    (root-expand-context/inner-self-mpi
                                     (root-expand-context/outer-inner
-                                     ctx369_0))))
+                                     ctx385_0))))
                                 #f)
                               #f)
                           (begin
                             (if (expand-context/inner-allow-unbound?
-                                 (root-expand-context/outer-inner ctx369_0))
+                                 (root-expand-context/outer-inner ctx385_0))
                               (void)
                               (check-top-binding-is-variable
-                               ctx369_0
+                               ctx385_0
                                b_0
                                id_0
-                               s368_0))
+                               s384_0))
                             (if (expand-context/inner-to-parsed?
-                                 (root-expand-context/outer-inner ctx369_0))
+                                 (root-expand-context/outer-inner ctx385_0))
                               (parsed-id2.1 id_0 b_0 #f)
                               (if (let ((mpi_0 (module-binding-module b_0)))
                                     (eq? top-level-module-path-index mpi_0))
-                                s368_0
+                                s384_0
                                 id_0)))
                           (if (local-binding? b_0)
                             (raise-unbound-syntax-error
@@ -83374,62 +83606,62 @@
                              id_0
                              #f
                              null
-                             (syntax-debug-info-string id_0 ctx369_0))
-                            (if (register-eventual-variable!? id_0 ctx369_0)
+                             (syntax-debug-info-string id_0 ctx385_0))
+                            (if (register-eventual-variable!? id_0 ctx385_0)
                               (if (expand-context/inner-to-parsed?
-                                   (root-expand-context/outer-inner ctx369_0))
+                                   (root-expand-context/outer-inner ctx385_0))
                                 (parsed-id2.1 id_0 b_0 #f)
                                 id_0)
                               (if (not
                                    (expand-context/inner-allow-unbound?
                                     (root-expand-context/outer-inner
-                                     ctx369_0)))
+                                     ctx385_0)))
                                 (raise-unbound-syntax-error
                                  #f
                                  "unbound identifier"
                                  id_0
                                  #f
                                  null
-                                 (syntax-debug-info-string id_0 ctx369_0))
+                                 (syntax-debug-info-string id_0 ctx385_0))
                                 (let ((tl-id_0
                                        (add-scope
                                         id_0
                                         (root-expand-context/inner-top-level-bind-scope
                                          (root-expand-context/outer-inner
-                                          ctx369_0)))))
+                                          ctx385_0)))))
                                   (let ((tl-b_0
-                                         (let ((temp378_0
+                                         (let ((temp394_0
                                                 (expand-context/inner-phase
                                                  (root-expand-context/outer-inner
-                                                  ctx369_0))))
+                                                  ctx385_0))))
                                            (resolve.1
                                             #f
                                             #f
                                             null
                                             #f
                                             tl-id_0
-                                            temp378_0))))
+                                            temp394_0))))
                                     (if tl-b_0
                                       (if (expand-context/inner-to-parsed?
                                            (root-expand-context/outer-inner
-                                            ctx369_0))
+                                            ctx385_0))
                                         (parsed-top-id4.1 tl-id_0 tl-b_0 #f)
-                                        (if implicit-omitted?367_0
+                                        (if implicit-omitted?383_0
                                           id_0
                                           (call-with-values
                                            (lambda ()
                                              (call-with-values
                                               (lambda ()
                                                 (let ((s_0
-                                                       (if (syntax?$1 s368_0)
-                                                         (syntax-e$1 s368_0)
-                                                         s368_0)))
+                                                       (if (syntax?$1 s384_0)
+                                                         (syntax-e$1 s384_0)
+                                                         s384_0)))
                                                   (if (pair? s_0)
-                                                    (let ((|#%top381_0|
+                                                    (let ((|#%top397_0|
                                                            (let ((s_1
                                                                   (car s_0)))
                                                              s_1)))
-                                                      (let ((id382_0
+                                                      (let ((id398_0
                                                              (let ((s_1
                                                                     (cdr s_0)))
                                                                (if (let ((or-part_0
@@ -83447,45 +83679,45 @@
                                                                  (raise-syntax-error$1
                                                                   #f
                                                                   "not an identifier"
-                                                                  s368_0
+                                                                  s384_0
                                                                   s_1)))))
-                                                        (let ((|#%top381_1|
-                                                               |#%top381_0|))
+                                                        (let ((|#%top397_1|
+                                                               |#%top397_0|))
                                                           (values
-                                                           |#%top381_1|
-                                                           id382_0))))
+                                                           |#%top397_1|
+                                                           id398_0))))
                                                     (raise-syntax-error$1
                                                      #f
                                                      "bad syntax"
-                                                     s368_0))))
-                                              (lambda (|#%top379_0| id380_0)
+                                                     s384_0))))
+                                              (lambda (|#%top395_0| id396_0)
                                                 (values
                                                  #t
-                                                 |#%top379_0|
-                                                 id380_0))))
-                                           (lambda (ok?_0 |#%top379_0| id380_0)
-                                             (let ((temp384_0
-                                                    (cons |#%top379_0| id_0)))
+                                                 |#%top395_0|
+                                                 id396_0))))
+                                           (lambda (ok?_0 |#%top395_0| id396_0)
+                                             (let ((temp400_0
+                                                    (cons |#%top395_0| id_0)))
                                                (rebuild.1
                                                 #t
-                                                s368_0
-                                                temp384_0))))))
+                                                s384_0
+                                                temp400_0))))))
                                       (if (expand-context/inner-to-parsed?
                                            (root-expand-context/outer-inner
-                                            ctx369_0))
+                                            ctx385_0))
                                         (parsed-top-id4.1 id_0 b_0 #f)
-                                        s368_0))))))))))))))))
+                                        s384_0))))))))))))))))
         (|#%name|
-         ...nder/expand/expr.rkt:603:1
+         ...nder/expand/expr.rkt:627:1
          (case-lambda
-          ((s_0 ctx_0) (...nder/expand/expr.rkt:603:1_0 s_0 ctx_0 #f))
-          ((s_0 ctx_0 implicit-omitted?367_0)
-           (...nder/expand/expr.rkt:603:1_0
+          ((s_0 ctx_0) (...nder/expand/expr.rkt:627:1_0 s_0 ctx_0 #f))
+          ((s_0 ctx_0 implicit-omitted?383_0)
+           (...nder/expand/expr.rkt:627:1_0
             s_0
             ctx_0
-            implicit-omitted?367_0)))))))
+            implicit-omitted?383_0)))))))
     (void)))
-(define effect_2396
+(define effect_3007
   (begin
     (void
      (add-core-form!*
@@ -83502,14 +83734,14 @@
               (lambda ()
                 (let ((s_1 (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
                   (if (pair? s_1)
-                    (let ((set!388_0 (let ((s_2 (car s_1))) s_2)))
+                    (let ((set!404_0 (let ((s_2 (car s_1))) s_2)))
                       (call-with-values
                        (lambda ()
                          (let ((s_2 (cdr s_1)))
                            (let ((s_3
                                   (if (syntax?$1 s_2) (syntax-e$1 s_2) s_2)))
                              (if (pair? s_3)
-                               (let ((id391_0
+                               (let ((id407_0
                                       (let ((s_4 (car s_3)))
                                         (if (let ((or-part_0
                                                    (if (syntax?$1 s_4)
@@ -83524,14 +83756,14 @@
                                            "not an identifier"
                                            s_0
                                            s_4)))))
-                                 (let ((rhs392_0
+                                 (let ((rhs408_0
                                         (let ((s_4 (cdr s_3)))
                                           (let ((s_5
                                                  (if (syntax?$1 s_4)
                                                    (syntax-e$1 s_4)
                                                    s_4)))
                                             (if (pair? s_5)
-                                              (let ((rhs393_0
+                                              (let ((rhs409_0
                                                      (let ((s_6 (car s_5)))
                                                        s_6)))
                                                 (call-with-values
@@ -83548,29 +83780,29 @@
                                                           "bad syntax"
                                                           s_0)))))
                                                  (lambda ()
-                                                   (let ((rhs393_1 rhs393_0))
-                                                     (values rhs393_1)))))
+                                                   (let ((rhs409_1 rhs409_0))
+                                                     (values rhs409_1)))))
                                               (raise-syntax-error$1
                                                #f
                                                "bad syntax"
                                                s_0))))))
-                                   (let ((id391_1 id391_0))
-                                     (values id391_1 rhs392_0))))
+                                   (let ((id407_1 id407_0))
+                                     (values id407_1 rhs408_0))))
                                (raise-syntax-error$1 #f "bad syntax" s_0)))))
-                       (lambda (id389_0 rhs390_0)
-                         (let ((set!388_1 set!388_0))
-                           (values set!388_1 id389_0 rhs390_0)))))
+                       (lambda (id405_0 rhs406_0)
+                         (let ((set!404_1 set!404_0))
+                           (values set!404_1 id405_0 rhs406_0)))))
                     (raise-syntax-error$1 #f "bad syntax" s_0))))
-              (lambda (set!385_0 id386_0 rhs387_0)
-                (values #t set!385_0 id386_0 rhs387_0))))
-           (lambda (ok?_0 set!385_0 id386_0 rhs387_0)
+              (lambda (set!401_0 id402_0 rhs403_0)
+                (values #t set!401_0 id402_0 rhs403_0))))
+           (lambda (ok?_0 set!401_0 id402_0 rhs403_0)
              (letrec*
               ((rename-loop_0
                 (|#%name|
                  rename-loop
                  (lambda (id_0 from-rename?_0)
                    (let ((binding_0
-                          (let ((temp395_0
+                          (let ((temp411_0
                                  (expand-context/inner-phase
                                   (root-expand-context/outer-inner ctx_0))))
                             (resolve+shift.1
@@ -83580,7 +83812,7 @@
                              #t
                              #f
                              id_0
-                             temp395_0))))
+                             temp411_0))))
                      (begin
                        (if (eq? binding_0 'ambiguous)
                          (raise-ambiguous-error id_0 ctx_0)
@@ -83650,14 +83882,14 @@
                                             ctx_0
                                             s_0)))
                                       (let ((exp-rhs_0
-                                             (let ((temp404_0
+                                             (let ((temp420_0
                                                     (as-expression-context
                                                      ctx_0)))
                                                (expand.1
                                                 #f
                                                 #f
-                                                rhs387_0
-                                                temp404_0))))
+                                                rhs403_0
+                                                temp420_0))))
                                         (if (expand-context/inner-to-parsed?
                                              (root-expand-context/outer-inner
                                               ctx_0))
@@ -83665,23 +83897,23 @@
                                            rebuild-s_0
                                            (parsed-id2.1 id_0 binding_0 #f)
                                            exp-rhs_0)
-                                          (let ((temp406_0
+                                          (let ((temp422_0
                                                  (list
-                                                  set!385_0
-                                                  (let ((temp409_0
+                                                  set!401_0
+                                                  (let ((temp425_0
                                                          (free-id-set-empty-or-just-module*?
                                                           (expand-context/inner-stops
                                                            (root-expand-context/outer-inner
                                                             ctx_0)))))
                                                     (substitute-variable.1
-                                                     temp409_0
+                                                     temp425_0
                                                      id_0
                                                      t_0))
                                                   exp-rhs_0)))
                                             (rebuild.1
                                              #t
                                              rebuild-s_0
-                                             temp406_0))))))))
+                                             temp422_0))))))))
                               (if (not binding_0)
                                 (raise-unbound-syntax-error
                                  #f
@@ -83692,26 +83924,26 @@
                                  (syntax-debug-info-string id_0 ctx_0))
                                 (if (1/set!-transformer? t_0)
                                   (if (not-in-this-expand-context? t_0 ctx_0)
-                                    (let ((temp410_0
+                                    (let ((temp426_0
                                            (avoid-current-expand-context
                                             (if from-rename?_0
                                               (datum->syntax$1
                                                s_0
-                                               (list set!385_0 rhs387_0 id_0)
+                                               (list set!401_0 rhs403_0 id_0)
                                                s_0
                                                s_0)
                                               s_0)
                                             t_0
                                             ctx_0)))
-                                      (expand.1 #f #f temp410_0 ctx_0))
+                                      (expand.1 #f #f temp426_0 ctx_0))
                                     (call-with-values
                                      (lambda ()
                                        (apply-transformer.1
-                                        id386_0
+                                        id402_0
                                         t_0
                                         insp_0
                                         s_0
-                                        id386_0
+                                        id402_0
                                         ctx_0
                                         binding_0))
                                      (lambda (exp-s_0 re-ctx_0)
@@ -83722,18 +83954,18 @@
                                          (expand.1 #f #f exp-s_0 re-ctx_0)))))
                                   (if (1/rename-transformer? t_0)
                                     (if (not-in-this-expand-context? t_0 ctx_0)
-                                      (let ((temp421_0
+                                      (let ((temp437_0
                                              (avoid-current-expand-context
                                               (if from-rename?_0
                                                 (datum->syntax$1
                                                  s_0
-                                                 (list set!385_0 rhs387_0 id_0)
+                                                 (list set!401_0 rhs403_0 id_0)
                                                  s_0
                                                  s_0)
                                                 s_0)
                                               t_0
                                               ctx_0)))
-                                        (expand.1 #f #f temp421_0 ctx_0))
+                                        (expand.1 #f #f temp437_0 ctx_0))
                                       (rename-loop_0
                                        (apply-rename-transformer
                                         t_0
@@ -83745,14 +83977,14 @@
                                      "cannot mutate syntax identifier"
                                      s_0
                                      id_0))))))))))))))
-              (rename-loop_0 id386_0 #f))))))))
+              (rename-loop_0 id402_0 #f))))))))
     (void)))
 (define substitute-set!-rename
   (lambda (s_0 set!-id_0 id_0 rhs-s_0 from-rename?_0 ctx_0)
     (if from-rename?_0
       (datum->syntax$1 s_0 (list set!-id_0 id_0 rhs-s_0) s_0 s_0)
       s_0)))
-(define effect_3050
+(define effect_2327
   (begin
     (void
      (add-core-form!*
@@ -83792,15 +84024,15 @@
                (call-with-values
                 (lambda ()
                   (let ((s_1 (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
-                    (let ((|#%variable-reference425_0|
+                    (let ((|#%variable-reference441_0|
                            (let ((s_2 (car s_1))) s_2)))
-                      (let ((id426_0
+                      (let ((id442_0
                              (let ((s_2 (cdr s_1)))
                                (let ((s_3
                                       (if (syntax?$1 s_2)
                                         (syntax-e$1 s_2)
                                         s_2)))
-                                 (let ((id427_0 (let ((s_4 (car s_3))) s_4)))
+                                 (let ((id443_0 (let ((s_4 (car s_3))) s_4)))
                                    (call-with-values
                                     (lambda ()
                                       (let ((s_4 (cdr s_3)))
@@ -83810,15 +84042,15 @@
                                                  s_4)))
                                           (values))))
                                     (lambda ()
-                                      (let ((id427_1 id427_0))
-                                        (values id427_1)))))))))
-                        (let ((|#%variable-reference425_1|
-                               |#%variable-reference425_0|))
-                          (values |#%variable-reference425_1| id426_0))))))
-                (lambda (|#%variable-reference423_0| id424_0)
-                  (values #t |#%variable-reference423_0| id424_0)))
+                                      (let ((id443_1 id443_0))
+                                        (values id443_1)))))))))
+                        (let ((|#%variable-reference441_1|
+                               |#%variable-reference441_0|))
+                          (values |#%variable-reference441_1| id442_0))))))
+                (lambda (|#%variable-reference439_0| id440_0)
+                  (values #t |#%variable-reference439_0| id440_0)))
                (values #f #f #f)))
-           (lambda (ok?_0 |#%variable-reference423_0| id424_0)
+           (lambda (ok?_0 |#%variable-reference439_0| id440_0)
              (call-with-values
               (lambda ()
                 (if (if (not ok?_0)
@@ -83863,7 +84095,7 @@
                   (call-with-values
                    (lambda ()
                      (let ((s_1 (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
-                       (let ((|#%variable-reference431_0|
+                       (let ((|#%variable-reference447_0|
                               (let ((s_2 (car s_1))) s_2)))
                          (call-with-values
                           (lambda ()
@@ -83879,15 +84111,15 @@
                                             (if (syntax?$1 s_4)
                                               (syntax-e$1 s_4)
                                               s_4)))
-                                       (let ((|#%top436_0|
+                                       (let ((|#%top452_0|
                                               (let ((s_6 (car s_5))) s_6)))
-                                         (let ((id437_0
+                                         (let ((id453_0
                                                 (let ((s_6 (cdr s_5))) s_6)))
-                                           (let ((|#%top436_1| |#%top436_0|))
+                                           (let ((|#%top452_1| |#%top452_0|))
                                              (values
-                                              |#%top436_1|
-                                              id437_0)))))))
-                                 (lambda (|#%top434_0| id435_0)
+                                              |#%top452_1|
+                                              id453_0)))))))
+                                 (lambda (|#%top450_0| id451_0)
                                    (call-with-values
                                     (lambda ()
                                       (let ((s_4 (cdr s_3)))
@@ -83897,32 +84129,32 @@
                                                  s_4)))
                                           (values))))
                                     (lambda ()
-                                      (let ((|#%top434_1| |#%top434_0|)
-                                            (id435_1 id435_0))
-                                        (values |#%top434_1| id435_1)))))))))
-                          (lambda (|#%top432_0| id433_0)
-                            (let ((|#%variable-reference431_1|
-                                   |#%variable-reference431_0|))
+                                      (let ((|#%top450_1| |#%top450_0|)
+                                            (id451_1 id451_0))
+                                        (values |#%top450_1| id451_1)))))))))
+                          (lambda (|#%top448_0| id449_0)
+                            (let ((|#%variable-reference447_1|
+                                   |#%variable-reference447_0|))
                               (values
-                               |#%variable-reference431_1|
-                               |#%top432_0|
-                               id433_0)))))))
-                   (lambda (|#%variable-reference428_0| |#%top429_0| id430_0)
+                               |#%variable-reference447_1|
+                               |#%top448_0|
+                               id449_0)))))))
+                   (lambda (|#%variable-reference444_0| |#%top445_0| id446_0)
                      (values
                       #t
-                      |#%variable-reference428_0|
-                      |#%top429_0|
-                      id430_0)))
+                      |#%variable-reference444_0|
+                      |#%top445_0|
+                      id446_0)))
                   (values #f #f #f #f)))
-              (lambda (ok?_1 |#%variable-reference428_0| |#%top429_0| id430_0)
+              (lambda (ok?_1 |#%variable-reference444_0| |#%top445_0| id446_0)
                 (call-with-values
                  (lambda ()
                    (if (if (not (if ok?_0 ok?_0 ok?_1)) #t #f)
-                     (let ((|#%variable-reference438_0|
+                     (let ((|#%variable-reference454_0|
                             (let ((s_1
                                    (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
                               (if (pair? s_1)
-                                (let ((|#%variable-reference439_0|
+                                (let ((|#%variable-reference455_0|
                                        (let ((s_2 (car s_1))) s_2)))
                                   (call-with-values
                                    (lambda ()
@@ -83938,22 +84170,22 @@
                                             "bad syntax"
                                             s_0)))))
                                    (lambda ()
-                                     (let ((|#%variable-reference439_1|
-                                            |#%variable-reference439_0|))
-                                       (values |#%variable-reference439_1|)))))
+                                     (let ((|#%variable-reference455_1|
+                                            |#%variable-reference455_0|))
+                                       (values |#%variable-reference455_1|)))))
                                 (raise-syntax-error$1 #f "bad syntax" s_0)))))
-                       (values #t |#%variable-reference438_0|))
+                       (values #t |#%variable-reference454_0|))
                      (values #f #f)))
-                 (lambda (ok?_2 |#%variable-reference438_0|)
+                 (lambda (ok?_2 |#%variable-reference454_0|)
                    (if (if ok?_0 ok?_0 ok?_1)
                      (begin
                        (if ok?_1
                          (let ((phase_0
                                 (expand-context/inner-phase
                                  (root-expand-context/outer-inner ctx_0))))
-                           (if (if (identifier? |#%top429_0|)
+                           (if (if (identifier? |#%top445_0|)
                                  (free-identifier=?$1
-                                  |#%top429_0|
+                                  |#%top445_0|
                                   (core-id '|#%top| phase_0)
                                   phase_0
                                   phase_0)
@@ -83961,18 +84193,18 @@
                              (void)
                              (raise-syntax-error$1 #f "bad syntax" s_0)))
                          (void))
-                       (let ((var-id_0 (if ok?_0 id424_0 id430_0)))
+                       (let ((var-id_0 (if ok?_0 id440_0 id446_0)))
                          (letrec*
                           ((rename-loop_0
                             (|#%name|
                              rename-loop
                              (lambda (var-id_1 from-rename?_0)
                                (let ((binding_0
-                                      (let ((temp441_0
+                                      (let ((temp457_0
                                              (expand-context/inner-phase
                                               (root-expand-context/outer-inner
                                                ctx_0))))
-                                        (let ((temp443_0
+                                        (let ((temp459_0
                                                (not
                                                 (expand-context/inner-to-parsed?
                                                  (root-expand-context/outer-inner
@@ -83981,10 +84213,10 @@
                                            'ambiguous
                                            #f
                                            null
-                                           temp443_0
+                                           temp459_0
                                            #f
                                            var-id_1
-                                           temp441_0)))))
+                                           temp457_0)))))
                                  (begin
                                    (if (eq? binding_0 'ambiguous)
                                      (raise-ambiguous-error var-id_1 ctx_0)
@@ -84036,16 +84268,16 @@
                                                         (local-variable? t_0))
                                                     (let ((vr-id_0
                                                            (if ok?_0
-                                                             |#%variable-reference423_0|
-                                                             |#%variable-reference428_0|)))
+                                                             |#%variable-reference439_0|
+                                                             |#%variable-reference444_0|)))
                                                       (let ((s-var-id_0
-                                                             (let ((temp446_0
+                                                             (let ((temp462_0
                                                                     (free-id-set-empty-or-just-module*?
                                                                      (expand-context/inner-stops
                                                                       (root-expand-context/outer-inner
                                                                        ctx_0)))))
                                                                (substitute-variable.1
-                                                                temp446_0
+                                                                temp462_0
                                                                 var-id_1
                                                                 t_0))))
                                                         (datum->syntax$1
@@ -84079,7 +84311,7 @@
                                               (if (not-in-this-expand-context?
                                                    t_0
                                                    ctx_0)
-                                                (let ((temp447_0
+                                                (let ((temp463_0
                                                        (avoid-current-expand-context
                                                         (substitute-vr-rename_0)
                                                         t_0
@@ -84087,7 +84319,7 @@
                                                   (expand.1
                                                    #f
                                                    #f
-                                                   temp447_0
+                                                   temp463_0
                                                    ctx_0))
                                                 (rename-loop_0
                                                  (apply-rename-transformer
@@ -84102,7 +84334,7 @@
                        (|parsed-#%variable-reference11.1| '#f #f)
                        s_0))))))))))))
     (void)))
-(define effect_2632
+(define effect_2749
   (begin
     (void
      (add-core-form!*
@@ -84121,15 +84353,15 @@
               (lambda ()
                 (let ((s_1 (if (syntax?$1 s_0) (syntax-e$1 s_0) s_0)))
                   (if (pair? s_1)
-                    (let ((|#%expression451_0| (let ((s_2 (car s_1))) s_2)))
-                      (let ((e452_0
+                    (let ((|#%expression467_0| (let ((s_2 (car s_1))) s_2)))
+                      (let ((e468_0
                              (let ((s_2 (cdr s_1)))
                                (let ((s_3
                                       (if (syntax?$1 s_2)
                                         (syntax-e$1 s_2)
                                         s_2)))
                                  (if (pair? s_3)
-                                   (let ((e453_0 (let ((s_4 (car s_3))) s_4)))
+                                   (let ((e469_0 (let ((s_4 (car s_3))) s_4)))
                                      (call-with-values
                                       (lambda ()
                                         (let ((s_4 (cdr s_3)))
@@ -84144,24 +84376,24 @@
                                                "bad syntax"
                                                s_0)))))
                                       (lambda ()
-                                        (let ((e453_1 e453_0))
-                                          (values e453_1)))))
+                                        (let ((e469_1 e469_0))
+                                          (values e469_1)))))
                                    (raise-syntax-error$1
                                     #f
                                     "bad syntax"
                                     s_0))))))
-                        (let ((|#%expression451_1| |#%expression451_0|))
-                          (values |#%expression451_1| e452_0))))
+                        (let ((|#%expression467_1| |#%expression467_0|))
+                          (values |#%expression467_1| e468_0))))
                     (raise-syntax-error$1 #f "bad syntax" s_0))))
-              (lambda (|#%expression449_0| e450_0)
-                (values #t |#%expression449_0| e450_0))))
-           (lambda (ok?_0 |#%expression449_0| e450_0)
+              (lambda (|#%expression465_0| e466_0)
+                (values #t |#%expression465_0| e466_0))))
+           (lambda (ok?_0 |#%expression465_0| e466_0)
              (let ((rebuild-s_0 (keep-as-needed.1 #t #f #f ctx_0 s_0)))
                (let ((exp-e_0
-                      (let ((temp458_0
-                             (let ((temp459_0 (as-expression-context ctx_0)))
-                               (as-tail-context.1 ctx_0 temp459_0))))
-                        (expand.1 #f #f e450_0 temp458_0))))
+                      (let ((temp474_0
+                             (let ((temp475_0 (as-expression-context ctx_0)))
+                               (as-tail-context.1 ctx_0 temp475_0))))
+                        (expand.1 #f #f e466_0 temp474_0))))
                  (if (expand-context/inner-to-parsed?
                       (root-expand-context/outer-inner ctx_0))
                    exp-e_0
@@ -84176,8 +84408,8 @@
                            (eq?
                             'top-level
                             (expand-context/outer-context ctx_0))))
-                     (let ((temp462_0 (list |#%expression449_0| exp-e_0)))
-                       (rebuild.1 #t rebuild-s_0 temp462_0))
+                     (let ((temp478_0 (list |#%expression465_0| exp-e_0)))
+                       (rebuild.1 #t rebuild-s_0 temp478_0))
                      (let ((result-s_0
                             (syntax-track-origin$1 exp-e_0 rebuild-s_0)))
                        (begin
@@ -87248,24 +87480,229 @@
 (define check-count
   (lambda (is-num_0 expected-num_0 enclosing_0)
     (if (= is-num_0 expected-num_0) (void) (disallow enclosing_0))))
+(define walk-for-quotable
+  (lambda (d_0 recur_0)
+    (let ((or-part_0 (number? d_0)))
+      (if or-part_0
+        or-part_0
+        (let ((or-part_1 (boolean? d_0)))
+          (if or-part_1
+            or-part_1
+            (let ((or-part_2 (symbol? d_0)))
+              (if or-part_2
+                or-part_2
+                (let ((or-part_3 (if (string? d_0) (immutable? d_0) #f)))
+                  (if or-part_3
+                    or-part_3
+                    (let ((or-part_4 (if (bytes? d_0) (immutable? d_0) #f)))
+                      (if or-part_4
+                        or-part_4
+                        (let ((or-part_5 (char? d_0)))
+                          (if or-part_5
+                            or-part_5
+                            (let ((or-part_6 (keyword? d_0)))
+                              (if or-part_6
+                                or-part_6
+                                (let ((or-part_7 (null? d_0)))
+                                  (if or-part_7
+                                    or-part_7
+                                    (let ((or-part_8 (regexp? d_0)))
+                                      (if or-part_8
+                                        or-part_8
+                                        (let ((or-part_9 (extflonum? d_0)))
+                                          (if or-part_9
+                                            or-part_9
+                                            (let ((or-part_10
+                                                   (if (pair? d_0)
+                                                     (if (|#%app|
+                                                          recur_0
+                                                          (car d_0))
+                                                       (|#%app|
+                                                        recur_0
+                                                        (cdr d_0))
+                                                       #f)
+                                                     #f)))
+                                              (if or-part_10
+                                                or-part_10
+                                                (let ((or-part_11
+                                                       (if (vector? d_0)
+                                                         (if (immutable? d_0)
+                                                           (call-with-values
+                                                            (lambda ()
+                                                              (values
+                                                               d_0
+                                                               (unsafe-vector-length
+                                                                d_0)))
+                                                            (lambda (vec_0
+                                                                     len_0)
+                                                              (letrec*
+                                                               ((for-loop_0
+                                                                 (|#%name|
+                                                                  for-loop
+                                                                  (lambda (result_0
+                                                                           pos_0)
+                                                                    (if (unsafe-fx<
+                                                                         pos_0
+                                                                         len_0)
+                                                                      (let ((v_0
+                                                                             (unsafe-vector-ref
+                                                                              vec_0
+                                                                              pos_0)))
+                                                                        (let ((result_1
+                                                                               (let ((result_1
+                                                                                      (|#%app|
+                                                                                       recur_0
+                                                                                       v_0)))
+                                                                                 (values
+                                                                                  result_1))))
+                                                                          (if (if (not
+                                                                                   (let ((x_0
+                                                                                          (list
+                                                                                           v_0)))
+                                                                                     (not
+                                                                                      result_1)))
+                                                                                #t
+                                                                                #f)
+                                                                            (for-loop_0
+                                                                             result_1
+                                                                             (unsafe-fx+
+                                                                              1
+                                                                              pos_0))
+                                                                            result_1)))
+                                                                      result_0)))))
+                                                               (for-loop_0
+                                                                #t
+                                                                0))))
+                                                           #f)
+                                                         #f)))
+                                                  (if or-part_11
+                                                    or-part_11
+                                                    (let ((or-part_12
+                                                           (if (hash? d_0)
+                                                             (if (hash-eq? d_0)
+                                                               (if (immutable?
+                                                                    d_0)
+                                                                 (letrec*
+                                                                  ((for-loop_0
+                                                                    (|#%name|
+                                                                     for-loop
+                                                                     (lambda (result_0
+                                                                              i_0)
+                                                                       (if i_0
+                                                                         (call-with-values
+                                                                          (lambda ()
+                                                                            (hash-iterate-key+value
+                                                                             d_0
+                                                                             i_0))
+                                                                          (lambda (k_0
+                                                                                   v_0)
+                                                                            (let ((result_1
+                                                                                   (let ((result_1
+                                                                                          (if (|#%app|
+                                                                                               recur_0
+                                                                                               k_0)
+                                                                                            (|#%app|
+                                                                                             recur_0
+                                                                                             v_0)
+                                                                                            #f)))
+                                                                                     (values
+                                                                                      result_1))))
+                                                                              (if (if (not
+                                                                                       (let ((x_0
+                                                                                              (list
+                                                                                               k_0
+                                                                                               v_0)))
+                                                                                         (not
+                                                                                          result_1)))
+                                                                                    #t
+                                                                                    #f)
+                                                                                (for-loop_0
+                                                                                 result_1
+                                                                                 (hash-iterate-next
+                                                                                  d_0
+                                                                                  i_0))
+                                                                                result_1))))
+                                                                         result_0)))))
+                                                                  (for-loop_0
+                                                                   #t
+                                                                   (hash-iterate-first
+                                                                    d_0)))
+                                                                 #f)
+                                                               #f)
+                                                             #f)))
+                                                      (if or-part_12
+                                                        or-part_12
+                                                        (let ((or-part_13
+                                                               (if (box? d_0)
+                                                                 (if (immutable?
+                                                                      d_0)
+                                                                   (|#%app|
+                                                                    recur_0
+                                                                    (unbox
+                                                                     d_0))
+                                                                   #f)
+                                                                 #f)))
+                                                          (if or-part_13
+                                                            or-part_13
+                                                            (if (immutable-prefab-struct-key
+                                                                 d_0)
+                                                              (call-with-values
+                                                               (lambda ()
+                                                                 (unsafe-normalise-inputs
+                                                                  unsafe-vector-length
+                                                                  (struct->vector
+                                                                   d_0)
+                                                                  1
+                                                                  #f
+                                                                  1))
+                                                               (lambda (v*_0
+                                                                        start*_0
+                                                                        stop*_0
+                                                                        step*_0)
+                                                                 (letrec*
+                                                                  ((for-loop_0
+                                                                    (|#%name|
+                                                                     for-loop
+                                                                     (lambda (result_0
+                                                                              idx_0)
+                                                                       (if (unsafe-fx<
+                                                                            idx_0
+                                                                            stop*_0)
+                                                                         (let ((v_0
+                                                                                (unsafe-vector-ref
+                                                                                 v*_0
+                                                                                 idx_0)))
+                                                                           (let ((result_1
+                                                                                  (let ((result_1
+                                                                                         (|#%app|
+                                                                                          recur_0
+                                                                                          v_0)))
+                                                                                    (values
+                                                                                     result_1))))
+                                                                             (if (if (not
+                                                                                      (let ((x_0
+                                                                                             (list
+                                                                                              v_0)))
+                                                                                        (not
+                                                                                         result_1)))
+                                                                                   #t
+                                                                                   #f)
+                                                                               (for-loop_0
+                                                                                result_1
+                                                                                (unsafe-fx+
+                                                                                 idx_0
+                                                                                 1))
+                                                                               result_1)))
+                                                                         result_0)))))
+                                                                  (for-loop_0
+                                                                   #t
+                                                                   start*_0))))
+                                                              #f)))))))))))))))))))))))))))))))
 (define check-datum
   (lambda (d_0 e_0)
-    (if (let ((or-part_0 (number? d_0)))
-          (if or-part_0
-            or-part_0
-            (let ((or-part_1 (boolean? d_0)))
-              (if or-part_1
-                or-part_1
-                (let ((or-part_2 (symbol? d_0)))
-                  (if or-part_2
-                    or-part_2
-                    (let ((or-part_3 (string? d_0)))
-                      (if or-part_3
-                        or-part_3
-                        (let ((or-part_4 (bytes? d_0)))
-                          (if or-part_4 or-part_4 (null? d_0)))))))))))
-      (void)
-      (disallow e_0))))
+    (let ((or-part_0
+           (walk-for-quotable d_0 (lambda (d2_0) (check-datum d2_0 e_0)))))
+      (if or-part_0 or-part_0 (disallow e_0)))))
 (define quoted-string?
   (lambda (e_0)
     (if (parsed-quote? e_0) (string? (parsed-quote-datum e_0)) #f)))
@@ -88927,7 +89364,7 @@
                                                                                                                                       (if (expand-context/inner-to-parsed?
                                                                                                                                            (root-expand-context/outer-inner
                                                                                                                                             submod-ctx_0))
-                                                                                                                                        (|parsed-#%module-begin24.1|
+                                                                                                                                        (|parsed-#%module-begin25.1|
                                                                                                                                          rebuild-mb-s_0
                                                                                                                                          (parsed-only
                                                                                                                                           fully-expanded-bodys_0)
@@ -88949,7 +89386,7 @@
                                                                                                                                                  submod-ctx_0)))
                                                                                                                                             (expanded+parsed1.1
                                                                                                                                              mb-result-s_0
-                                                                                                                                             (|parsed-#%module-begin24.1|
+                                                                                                                                             (|parsed-#%module-begin25.1|
                                                                                                                                               rebuild-mb-s_0
                                                                                                                                               (parsed-only
                                                                                                                                                fully-expanded-bodys_0)
@@ -89124,7 +89561,7 @@
                                                                                              #f
                                                                                              "compiled-module generation disallowed by code inspector"
                                                                                              bodys_0))
-                                                                                          (parsed-bundle26.1
+                                                                                          (parsed-bundle27.1
                                                                                            rebuild-s_0
                                                                                            (syntax-e$1
                                                                                             mb_0)))
@@ -89246,7 +89683,7 @@
                                                                                                                 (let ((app_4
                                                                                                                        (unbox
                                                                                                                         compiled-module-box_0)))
-                                                                                                                  (parsed-module25.1
+                                                                                                                  (parsed-module26.1
                                                                                                                    rebuild-s_0
                                                                                                                    #f
                                                                                                                    id:module-name217_0
@@ -90759,7 +91196,7 @@
                                                                                          exp-rhs_0))
                                                                                        (void)))
                                                                                    (let ((parsed-body_0
-                                                                                          (parsed-define-syntaxes20.1
+                                                                                          (parsed-define-syntaxes21.1
                                                                                            (keep-properties-only
                                                                                             exp-body_0)
                                                                                            ids_0
@@ -91062,7 +91499,7 @@
                                                                                       (if (memq
                                                                                            (syntax-e$1
                                                                                             kw_0)
-                                                                                           kws2144)
+                                                                                           kws2866)
                                                                                         (void)
                                                                                         (raise-syntax-error$1
                                                                                          #f
@@ -91145,7 +91582,7 @@
                                                                          (loop_1
                                                                           kw576_0))
                                                                         (let ((parsed-body_0
-                                                                               (|parsed-#%declare22.1|
+                                                                               (|parsed-#%declare23.1|
                                                                                 exp-body_0)))
                                                                           (let ((app_0
                                                                                  (if (expand-context/inner-to-parsed?
@@ -91512,7 +91949,7 @@
                                                       #f)
                                                      (void)))
                                                  (let ((comp-form_0
-                                                        (parsed-define-values19.1
+                                                        (parsed-define-values20.1
                                                          rebuild-s_0
                                                          ids_0
                                                          syms_0
@@ -92083,7 +92520,7 @@
                    (let ((app_2
                           (parsed-only
                            fully-expanded-bodys-except-post-submodules138_0)))
-                     (parsed-module25.1
+                     (parsed-module26.1
                       rebuild-s113_0
                       #f
                       module-name-id112_0
@@ -92248,7 +92685,7 @@
                                     (semi-parsed-begin-for-syntax-body body_0)
                                     (add1 phase_0))))
                               (let ((parsed-bfs_0
-                                     (parsed-begin-for-syntax21.1
+                                     (parsed-begin-for-syntax22.1
                                       rebuild-body-s_0
                                       (parsed-only nested-bodys_0))))
                                 (begin
@@ -92910,7 +93347,7 @@
                                                      submod_0)))
                                                (if (parsed-module?
                                                     the-struct_0)
-                                                 (parsed-module25.1
+                                                 (parsed-module26.1
                                                   (parsed-s the-struct_0)
                                                   #t
                                                   (parsed-module-name-id
@@ -92951,7 +93388,7 @@
                                        "expanded+parsed?"
                                        submod_0))
                                     (if (parsed-module? submod_0)
-                                      (parsed-module25.1
+                                      (parsed-module26.1
                                        (parsed-s submod_0)
                                        #t
                                        (parsed-module-name-id submod_0)
@@ -93169,7 +93606,7 @@
                     (namespace-set-transformer! m-ns_0 phase_0 sym_0 t_0)
                     (add-portal-stx! portal-syntaxes_0 t_0 sym_0 phase_0)
                     sym_0))))))))))
-(define effect_2887
+(define effect_2717
   (begin
     (void
      (add-core-form!*
@@ -93314,11 +93751,11 @@
                            (expand.1 #f #f rhs3_0 temp12_0))))
                     (if (expand-context/inner-to-parsed?
                          (root-expand-context/outer-inner ctx_0))
-                      (parsed-define-values19.1 s_0 ids_0 syms_0 exp-rhs_0)
+                      (parsed-define-values20.1 s_0 ids_0 syms_0 exp-rhs_0)
                       (let ((temp14_0 (list define-values1_0 ids_0 exp-rhs_0)))
                         (rebuild.1 #t s_0 temp14_0)))))))))))))
     (void)))
-(define effect_2501
+(define effect_2860
   (begin
     (void
      (add-core-form!*
@@ -93473,12 +93910,12 @@
                               temp26_0))))
                       (if (expand-context/inner-to-parsed?
                            (root-expand-context/outer-inner ctx_0))
-                        (parsed-define-syntaxes20.1 s_0 ids_0 syms_0 exp-rhs_0)
+                        (parsed-define-syntaxes21.1 s_0 ids_0 syms_0 exp-rhs_0)
                         (let ((temp28_0
                                (list define-syntaxes15_0 ids_0 exp-rhs_0)))
                           (rebuild.1 #t s_0 temp28_0))))))))))))))
     (void)))
-(define effect_1995
+(define effect_2452
   (begin
     (void
      (add-core-form!*
@@ -93738,12 +94175,12 @@
                                (loop_0 form30_0))))
                          (if (expand-context/inner-to-parsed?
                               (root-expand-context/outer-inner ctx_0))
-                           (parsed-begin-for-syntax21.1 s_0 all-exp-forms_0)
+                           (parsed-begin-for-syntax22.1 s_0 all-exp-forms_0)
                            (let ((temp46_0
                                   (cons begin-for-syntax29_0 all-exp-forms_0)))
                              (rebuild.1 #t s_0 temp46_0)))))))))))))))
     (void)))
-(define effect_3112
+(define effect_2912
   (begin
     (void
      (add-core-form!*
@@ -93853,7 +94290,7 @@
                                     temp57_1)))))))
                        (if (expand-context/inner-to-parsed?
                             (root-expand-context/outer-inner ctx_0))
-                         (parsed-require23.1
+                         (parsed-require24.1
                           s_0
                           (reverse$1 (unbox generated-syms_0)))
                          s_0))))))))))))

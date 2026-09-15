@@ -87,12 +87,13 @@
                                           ,varargs-after
                                           ,blocking?
                                           ,async-apply
+                                          ,save-errno
                                           ,result-type
                                           . ,arg-types)
        ;; This case is aided by an ad hoc ffi-maybe-call-and-callback-core
        (or (and (eq? target 'compile)
                 (or (make-ffi-static-core arg-types result-type
-                                          abi varargs-after blocking? async-apply
+                                          abi varargs-after blocking? async-apply save-errno
                                           prim-knowns primitives knowns imports mutated)
                     (and (unwrap must-at)
                          (error 'compile "unable to generate foreign function statically: ~s"
@@ -174,6 +175,9 @@
             [(and (known-literal? k)
                   (simple-mutated-state? (hash-ref mutated u #f)))
              (wrap-literal (known-literal-value k))]
+            [(and (known-foreign-inline? k)
+                  (simple-mutated-state? (hash-ref mutated u #f)))
+             (known-foreign-inline-expr k)]
             ;; Note: we can't do `known-copy?` here, because a copy of
             ;; an imported or exported name will need to be schemified
             ;; to a different name
@@ -268,6 +272,7 @@
           unsafe-mode?]
          [`(#%variable-reference) v]
          [`(#%variable-reference ,id) v]
+         [`(#%foreign-inline . ,_) v]
          [`(quote ,_) v]
          [`(,rator ,exps ...)
           `(,(optimize* rator) ,@(optimize*-body exps))]

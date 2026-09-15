@@ -630,47 +630,25 @@
                      (map (λ (x) (format " ~a" x)) (cdr langs-nts)))))))
      nts)))
 
-;; save-as-ps/pdf : (-> pict) path-string -> void
-(define (save-as-ps/pdf mk-pict filename) 
-  (let ([ps/pdf-dc (make-ps/pdf-dc filename)])
-    (parameterize ([dc-for-text-size ps/pdf-dc])
-      (send ps/pdf-dc start-doc "x")
-      (send ps/pdf-dc start-page)
-      (draw-pict (mk-pict) ps/pdf-dc 0 0)
-      (send ps/pdf-dc end-page)
-      (send ps/pdf-dc end-doc))))
-
-(define (make-ps/pdf-dc filename)
-  (let ([ps-setup (make-object ps-setup%)])
-    (send ps-setup copy-from (current-ps-setup))
-    (send ps-setup set-file filename)
-    (send ps-setup set-mode 'file)
-    (define is-pdf? 
-      (cond
-        [(path? filename) (regexp-match #rx#"[.]pdf$" (path->bytes filename))]
-        [else (regexp-match #rx"[.]pdf$" filename)]))
-    (define % (if is-pdf? pdf-dc% post-script-dc%))
-    (parameterize ([current-ps-setup ps-setup])
-      (make-object % #f #f))))
-
 (define non-terminal-gap-space (make-parameter 0))
 
 ;; raw-info : language-pict-info
 ;; nts : (listof symbol) -- the nts that the user expects to see
 (define (make-grammar-pict what raw-info nts all-nts)
-  (define info (remove-unwanted-nts nts (flatten-grammar-info raw-info all-nts nts)))
   (cond
-    [(null? info)
-     (error what
-            (string-append
-             "expected some non-terminals to render, but there were none\n"
-             "  language's nts: ~a\n"
-             "  requested nts: ~a")
-            (nts->str all-nts)
-            (nts->str nts))]
+    [(extend-language-show-union)
+     (make-union-grammar-pict what raw-info nts all-nts)]
     [else
-     (define snts (map (λ (x) (sequence-of-non-terminals (car x)))
-                       info))
+     (define flattened-grammar-info
+       (cond
+         [(vector? raw-info)
+          (vector-ref raw-info 1)]
+         [else raw-info]))
+     (define info (remove-unwanted-nts nts flattened-grammar-info))
+     (check-no-info what info all-nts nts)
+     (define snts
+       (for/list ([x (in-list info)])
+         (sequence-of-non-terminals (car x))))
      (define term-space
        (launder
         (ghost
@@ -734,62 +712,186 @@
 ;; remove-unwanted-nts : (listof symbol) flattened-language-pict-info -> flattened-language-pict-info
 (define (remove-unwanted-nts nts info)
   (filter (λ (x) (not (null? (car x))))
-          (map
-           (λ (x) (cons (filter (λ (x) (member x nts)) (car x))
-                        (cdr x)))
-           info)))
+          (for/list ([x (in-list info)])
+            (cons (filter (λ (x) (member x nts)) (car x))
+                  (cdr x)))))
 
+(define (make-union-grammar-pict what raw-info nts all-nts)
+  (define info (remove-unwanted-nts nts (flatten-grammar-info raw-info all-nts)))
+  (check-no-info what info all-nts nts)
+  (define grammar-in-lines (split-grammar-up-into-lines info))
+  (define term-space
+    (launder
+     (ghost
+      (apply cc-superimpose
+             (for/list ([x (in-list info)])
+               (if (car x)
+                   (sequence-of-non-terminals (car x))
+                   (blank)))))))
+  (define snts
+    (for/list ([x (in-list grammar-in-lines)])
+      (and (car x)
+           (sequence-of-non-terminals (car x)))))
+  (define snts-space (ghost (launder (apply cc-superimpose (filter values snts)))))
+  (define ::=-or-bar-for-each-line
+    (for/list ([line (in-list grammar-in-lines)])
+      (cond
+        [(car line) (make-::= (car line))]
+        [else (make-bar)])))
+  (define bars-space
+    (ghost (launder (apply cc-superimpose ::=-or-bar-for-each-line))))
+  (apply vl-append
+         (non-terminal-gap-space)
+         (for/list ([line (in-list grammar-in-lines)]
+                    [snt (in-list snts)]
+                    [::=-or-bar-for-this-line (in-list ::=-or-bar-for-each-line)])
+           ((adjust 'language-production)
+            (htl-append
+             (rc-superimpose snts-space (or snt (blank)))
+             (rc-superimpose ::=-or-bar-for-this-line bars-space)
+             (apply
+              htl-append
+              (for/list ([lw (in-list (cdr line))]
+                         [i (in-naturals)])
+                (define p (lw->pict all-nts lw (adjust 'language-line)))
+                (if (= i 0)
+                    p
+                    (htl-append (make-bar) p)))))))))
+
+;; split-grammar-up-into-lines : (listof (cons (listof symbol) (listof (or/c 'newline lws))))
+;;                            -> (listof (cons (or/c #f (listof symbol)) (listof lws))
+;; breaks a grammar up into the lines as they'll be typeset;
+;; the result list will have more elements, breaking up the input on the `'newline`s
+(define (split-grammar-up-into-lines info)
+  (apply
+   append
+   (for/list ([item (in-list info)])
+     (define nts (car item))
+     (define lines
+       (let loop ([lws+newline (cdr item)]
+                  [current-line #f])
+         (match lws+newline
+           [(cons 'newline lws+newline)
+            (unless current-line
+              (error 'split-grammar-up-into-lines "internal error: found a newline at the start of a line"))
+            (cons (reverse current-line) (loop lws+newline #f))]
+           [(cons lws lws+newline)
+            (loop lws+newline (cons lws (or current-line '())))]
+           ['()
+            (if current-line
+                (list (reverse current-line))
+                (list))])))
+     (cons (cons nts (car lines))
+           (for/list ([line (in-list (cdr lines))])
+             (cons #f line))))))
+
+(module+ test
+  ;; these tests rely on the fact that `split-grammar-up-into-lines` doesn't actually
+  ;; looks at the lws, checking only to see if they are the symbol newline or not
+  (check-equal? (split-grammar-up-into-lines (list (list '(x) 1 2 3)))
+                (list (list '(x) 1 2 3)))
+  (check-equal? (split-grammar-up-into-lines (list (list '(x) 1 'newline 2 3)))
+                (list (list '(x) 1)
+                      (list #f 2 3)))
+  (check-equal? (split-grammar-up-into-lines (list (list '(x) 1 'newline 2 'newline 3)))
+                (list (list '(x) 1)
+                      (list #f 2)
+                      (list #f 3)))
+  (check-equal? (split-grammar-up-into-lines (list (list '(x) 1 'newline 2 'newline 3 'newline)))
+                (list (list '(x) 1)
+                      (list #f 2)
+                      (list #f 3))))
+
+(define (check-no-info what info all-nts nts)
+  (when (null? info)
+    ;; this check and error message is the same as in above; combine the code
+    ;; so the error message is always the same
+    (error what
+           (string-append
+            "expected some non-terminals to have productions to render, but there were none\n"
+            "  language's nts: ~a\n"
+            "  requested nts: ~a")
+           (nts->str all-nts)
+           (nts->str nts))))
 
 ;; flatten-grammar-info : language-pict-info (listof symbol) -> flattened-language-pict-info
-(define (flatten-grammar-info info all-nts wanted-nts)
-  (define (merge-line nt extension orig-line)
+;; the flattened-language-pict-info returned from here may have the loc wrappers
+;; for adjacent rhs's (productions inside an nt) coming from different
+;; `define-language`s so they cannot be typeset together; instead each
+;; one must be turned into a pict separately and the picts combined.
+;; that's because the result from this function potentially contains
+;; productions from multiple `define-language`s that are in different
+;; places in their sources.
+(define (flatten-grammar-info info all-nts)
+  (let loop ([info info])
     (cond
-     [(and extension orig-line)
-      (let ([rhss (cdr extension)])
-        (cons nt
-              (map (λ (x)
-                     (if (and (lw? x) (eq? '.... (lw-e x)))
-                         (struct-copy lw
-                                      x
-                                      [e
-                                       (lw->pict all-nts
-                                                 (find-enclosing-loc-wrapper
-                                                  (add-bars (cdr orig-line))))])
-                         x))
-                   (cdr extension))))]
-     [extension extension]
-     [else orig-line]))
-  (let ([union? (extend-language-show-union)]
-        [ext-order? (extend-language-show-extended-order)])
-    (let loop ([info info])
-      (cond
-        [(vector? info) 
-         (let ([orig (loop (vector-ref info 0))]
-               [extensions (vector-ref info 1)])
-           (if union?
-               (cond
-                [(not ext-order?)
-                 ;; Use original order, adding extra extensions after:
-                 (define orig-nts (list->set (map car orig)))
-                 (append
-                  (map (λ (orig-line)
-                         (define nt (car orig-line))
-                         (merge-line nt (assoc nt extensions) orig-line))
-                       orig)
-                  (filter (lambda (extension) (not (set-member? orig-nts (car extension))))
-                          extensions))]
-                [else
-                 ;; Use extension order, adding any extra originals after:
-                 (define ext-nts (list->set (map car extensions)))
-                 (append
-                  (map (λ (extension)
-                         (define nt (car extension))
-                         (merge-line nt extension (assoc nt orig)))
-                       extensions)
-                  (filter (lambda (orig-line) (not (set-member? ext-nts (car orig-line))))
-                          orig))])
-               extensions))]
-        [else info]))))
+      [(vector? info)
+       (define orig (loop (vector-ref info 0)))
+       (define extensions (vector-ref info 1))
+       (cond
+         [(extend-language-show-extended-order)
+          ;; Use extension order, adding any extra originals after:
+          (define ext-nts (list->set (map car extensions)))
+          (append
+           (for/list ([extension (in-list extensions)])
+             (define nt (car extension))
+             (merge-grammar-line nt extension (assoc nt orig)))
+           (filter (lambda (orig-line) (not (set-member? ext-nts (car orig-line))))
+                   orig))]
+         [else
+          ;; Use original order, adding extra extensions after:
+          (define orig-nts (list->set (map car orig)))
+          (append
+           (for/list ([orig-line (in-list orig)])
+             (define nt (car orig-line))
+             (merge-grammar-line nt (assoc nt extensions) orig-line))
+           (filter (lambda (extension) (not (set-member? orig-nts (car extension))))
+                   extensions))])]
+      [else
+       (for/list ([line (in-list info)])
+         (cons (car line) (add-grammar-newlines (cdr line) #f)))])))
+
+;; merge-grammar-line : symbol
+;;                      (cons symbol (listof (or/c 'newline lw)))
+;;                      (cons symbol (listof lw))
+;;                   -> (cons symbol (listof (or/c 'newline lw)))
+;; merges two grammar lines, adding newlines into the result
+(define (merge-grammar-line nt extension orig-line)
+  (cond
+    [(and extension orig-line)
+     (define extension-lws (cdr extension))
+     (define orig-lws (cdr orig-line))
+     (cons nt (add-grammar-newlines (cdr extension) (cdr orig-line)))]
+    [extension
+     (cons (car extension) (add-grammar-newlines (cdr extension) #f))]
+    [else
+     orig-line]))
+
+;; add-grammar-newlines : (listof lw) (listof (or/c 'newline lw)) -> (listof (or/c 'newline lw)) 
+;; adds symbols indicating where lines should be broken in `lws` and splices in
+;; an extension (if there is one)
+(define (add-grammar-newlines lws lws-extension)
+  (let loop ([lws lws]
+             [previous #f])
+    (match lws
+      ['() '()]
+      [(cons lw lws)
+       (define add-newline?
+         (and previous
+              (not (= (+ (lw-line previous) (lw-line-span previous))
+                      (lw-line lw)))))
+       (define without-newline
+         (cond
+           [(equal? '.... (lw-e lw))
+            (unless lws-extension
+              (error 'pict.rkt
+                     "internal error: found four-period ellipsis but there was no extension to add"))
+            (append lws-extension (loop lws lw))]
+           [else
+            (cons lw (loop lws lw))]))
+       (if add-newline?
+           (cons 'newline without-newline)
+           without-newline)])))
 
 (define (default-make-::= non-terminals) (basic-text " ::= " (grammar-style)))
 (define language-make-::=-pict (make-parameter default-make-::=))
@@ -1803,3 +1905,28 @@
     (define r (unappend (cdr l) (cons (cdar wrt) (cdr wrt))))
     (cons (cons (car l) (car r))
           (cdr r))]))
+
+
+
+;; save-as-ps/pdf : (-> pict) path-string -> void
+(define (save-as-ps/pdf mk-pict filename)
+  (let ([ps/pdf-dc (make-ps/pdf-dc filename)])
+    (parameterize ([dc-for-text-size ps/pdf-dc])
+      (send ps/pdf-dc start-doc "x")
+      (send ps/pdf-dc start-page)
+      (draw-pict (mk-pict) ps/pdf-dc 0 0)
+      (send ps/pdf-dc end-page)
+      (send ps/pdf-dc end-doc))))
+
+(define (make-ps/pdf-dc filename)
+  (let ([ps-setup (make-object ps-setup%)])
+    (send ps-setup copy-from (current-ps-setup))
+    (send ps-setup set-file filename)
+    (send ps-setup set-mode 'file)
+    (define is-pdf?
+      (cond
+        [(path? filename) (regexp-match #rx#"[.]pdf$" (path->bytes filename))]
+        [else (regexp-match #rx"[.]pdf$" filename)]))
+    (define % (if is-pdf? pdf-dc% post-script-dc%))
+    (parameterize ([current-ps-setup ps-setup])
+      (make-object % #f #f))))

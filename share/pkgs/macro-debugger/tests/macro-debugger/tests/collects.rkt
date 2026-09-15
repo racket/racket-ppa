@@ -58,10 +58,12 @@
 (define (rel+mod->mod rel mod)
   (let* ([rel (resolved-module-path-name rel)]
          [rel (if (pair? rel) (car rel) rel)])
-    (if (pair? mod)
-        #f  ;; give up on submodules for now; FIXME
-        (let-values ([(base file dir?) (split-path rel)])
-          (path->mod (simplify-path (build-path base mod)))))))
+    (cond
+      [(pair? mod) #f]  ;; give up on submodules for now; FIXME
+      [(not (path? rel)) #f]  ;; give up on non-path modules (e.g., lazy-require proxies)
+      [else
+       (let-values ([(base file dir?) (split-path rel)])
+         (path->mod (simplify-path (build-path base mod))))])))
 
 (define (path->mod path)
   (cond [(for/or ([c (current-library-collection-paths)]) (path->mod* path c))
@@ -113,7 +115,7 @@
   (test-libs "Trace collections" modules-for-test))
 
 (module+ test
-  (module config info (define timeout 1200))
+  (module config info (define timeout 2400))
   (require rackunit/text-ui)
   (parameterize ((verbose #t))
     (run-tests

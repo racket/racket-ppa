@@ -28,6 +28,7 @@
                     [(val-args body) (wrapper outer-args)])
         (with-syntax ([inner-lambda
                        (set-inferred-name-from
+                        method-proc?
                         stx
                         (syntax/loc stx (lambda val-args body)))])
           (let ([inner-lambda
@@ -63,6 +64,7 @@
                        [(body ...) (wrapper outer-args)])
            (with-syntax ([inner-lambda 
                           (set-inferred-name-from
+                           method-proc?
                            inferred-name-stx
                            (syntax/loc stx (case-lambda body ...)))])
              (let ([inner-lambda
@@ -148,6 +150,7 @@
                            inferred-name-stx
                            select/h)])
              (set-inferred-name-from
+              method-proc?
               stx
               (syntax/loc stx
                 (let ([res-vs ress] 
@@ -1089,18 +1092,24 @@
      (raise-syntax-error name "expected list of identifiers and expression pairs" stx (syntax x))]))
 
 ;; set-inferred-name-from : syntax syntax -> syntax
-(define (set-inferred-name-from with-name to-be-named)
-  (let ([name (syntax-local-infer-name with-name)])
+(define (set-inferred-name-from method-proc? with-name to-be-named)
+  (define (add-method-arity-prop stx)
+    (if method-proc?
+        (syntax-property stx 'method-arity-error #t)
+        stx))
+  (let ([name (if (identifier? method-proc?)
+                  (string->symbol (format "~a method" (syntax-e method-proc?)))
+                  (syntax-local-infer-name with-name))])
     (cond
       [(identifier? name)
        (with-syntax ([rhs (syntax-property to-be-named 'inferred-name (syntax-e name))]
                      [name (syntax-e name)])
-         (syntax (let ([name rhs]) name)))]
+         #`(let ([name #,(add-method-arity-prop #'rhs)]) name))]
       [(symbol? name)
        (with-syntax ([rhs (syntax-property to-be-named 'inferred-name name)]
                      [name name])
-         (syntax (let ([name rhs]) name)))]
-      [else to-be-named])))
+         #`(let ([name #,(add-method-arity-prop #'rhs)]) name))]
+      [else (add-method-arity-prop to-be-named)])))
 
 ;; generate-indices : syntax[list] -> (cons number (listof number))
 ;; given a syntax list of length `n', returns a list containing
