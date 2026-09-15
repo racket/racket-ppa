@@ -1,1 +1,3 @@
 chez-scheme-add-configuration-for-s390x-.patch
+cs-repairs-for-detecting-big-endian-mode.patch
+repair-for-embed-boot-commit.patch
