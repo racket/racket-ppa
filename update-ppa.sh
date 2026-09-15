@@ -659,6 +659,10 @@ for release in $RELEASES; do
     sed -i "1s/) ${release};/) ${PRIMARY};/" debian/changelog
 done
 
+# dpkg-genchanges leaves this behind after a source-only build, which
+# makes the working tree look dirty on the next run.
+rm -f debian/files
+
 log "Source packages built:"
 ls -1 ../racket_"${VERSION}"+ppa"${PPA_ITERATION}"-1~*_source.changes
 
