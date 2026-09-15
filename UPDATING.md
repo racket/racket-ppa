@@ -333,7 +333,7 @@ that will cause `debuild -S` to fail with "unexpected upstream
 changes":
 
 ```
-debuild -- clean
+fakeroot debian/rules clean
 ```
 
 Verify the tree is clean relative to the orig tarball:

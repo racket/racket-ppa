@@ -618,7 +618,7 @@ if ! $SKIP_BINARY_BUILD; then
         log "Binary build succeeded"
 
         log "Cleaning build artifacts"
-        debuild -- clean
+        fakeroot debian/rules clean
     fi
 fi
 
