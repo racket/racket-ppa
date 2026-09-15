@@ -36,11 +36,15 @@
          (prefix-in u: net/url)
          (prefix-in html: scribble/html-render)
          (prefix-in latex: scribble/latex-render)
+         (prefix-in markdown: scribble/markdown-render)
          (prefix-in contract: scribble/contract-render))
 
 (provide setup-scribblings
          verbose
          run-pdflatex)
+
+(module+ docs-to-destdir
+  (provide move-rendered-docs-to-destdir))
 
 (define verbose (make-parameter #t))
 
@@ -54,7 +58,24 @@
       (flush-output))
     (log-setup-debug format-str arg ...)))
 
-(define-serializable-struct doc (src-dir 
+;; A doc-dests value is a list of destinations, where each destination
+;; is `(list <kind> <path>)` for `<kind>` in `'(latex markdown)`. An
+;; empty list means "render HTML in place"; currently the list contains
+;; at most one element, since rendering to multiple non-HTML formats in
+;; one pass is not yet supported.
+
+(define (doc-dest-kind dests)
+  (if (doc-dest? dests)
+      (car (car dests))
+      'html))
+
+(define (doc-dest-path dests)
+  (and (pair? dests) (cadr (car dests))))
+
+(define (doc-dest? dests)
+  (pair? dests))
+
+(define-serializable-struct doc (src-dir
                                  src-spec
                                  src-file
                                  dest-dir
@@ -147,7 +168,7 @@
          use-places?        ; use places when available?
          program-name       ; name of program that calls setup-scribblings
          only-dirs          ; limits doc builds
-         latex-dest         ; if not #f, generate Latex output
+         latex-dest         ; list of `(list <kind> <path>)` destinations; empty means HTML
          auto-start-doc?    ; if #t, expands `only-dir' with [user-]start to catch new docs
          make-user?         ; are we making user stuff?
          always-user?       ; make user-specific even if otherwise unneeded
@@ -159,55 +180,26 @@
          gc-after-each-sequential?)
   (unless (doc-db-available?)
     (error 'setup "install SQLite to build documentation"))
-  (when latex-dest
-    (log-setup-info "latex working directory: ~a" latex-dest))
+  (when (doc-dest? latex-dest)
+    (log-setup-info "~a working directory: ~a"
+                    (doc-dest-kind latex-dest)
+                    (doc-dest-path latex-dest)))
   (define (get-docs main-dirs)
-    (define doc-dir (find-doc-dir))
     (lambda (i rec)
-      (let* ([pre-s (and i (i 'scribblings (λ () #f)))]
-	     [s (validate-scribblings-infos pre-s)]
-	     [dir (directory-record-path rec)])
-	(if s
-	    (map (lambda (d)
-		   (let* ([flags (cadr d)]
-			  [under-main?
-			   (and (not (memq 'user-doc-root flags))
-				(not (memq 'user-doc flags))
-				(or (memq 'main-doc flags)
-				    (hash-ref main-dirs dir #f)))])
-		     (define src (simplify-path (build-path dir (car d)) #f))
-		     (define name (cadddr d))
-                     (define cat (caddr d))
-                     (define lang-fam (and ((length cat) . >= . 3) (list-ref cat 2)))
-		     (define dest (doc-path dir name flags under-main?))
-		     (define via-search? (and under-main?
-					      (not (or (equal? (find-doc-dir) dest)
-						       (let-values ([(base name dir?) (split-path dest)])
-							 (equal? (path->directory-path (find-doc-dir))
-								 base))))))
-		     (make-doc dir
-			       (let ([spec (directory-record-spec rec)])
-				 (list* (car spec)
-					(car d)
-					(if (eq? 'planet (car spec))
-					    (list (append (cdr spec)
-							  (list (directory-record-maj rec)
-								(list '= (directory-record-min rec)))))
-					    (cdr spec))))
-			       src
-			       dest
-			       flags under-main? via-search?
-			       cat
-                               lang-fam
-			       (list-ref d 4)
-			       (if (path? name) (path-element->string name) name)
-			       (list-ref d 5))))
-		 s)
-	    (begin (setup-printf
-		    "WARNING"
-		    "bad 'scribblings info: ~e from: ~e" 
-		    pre-s dir)
-		   null)))))
+      (get-docs-from-info i
+                          (directory-record-path rec)
+                          #:setup-printf setup-printf
+                          #:get-spec (lambda (doc-src)
+                                       (let ([spec (directory-record-spec rec)])
+                                         (list* (car spec)
+                                                doc-src
+                                                (if (eq? 'planet (car spec))
+                                                    (list (append (cdr spec)
+                                                                  (list (directory-record-maj rec)
+                                                                        (list '= (directory-record-min rec)))))
+                                                    (cdr spec)))))
+                          #:is-main? (lambda (dir)
+                                       (hash-ref main-dirs dir #f)))))
   (log-setup-info "getting documents")
   (define docs
     (sort
@@ -262,7 +254,7 @@
 
   (when (and (or (not only-dirs) tidy?)
              (not avoid-main?)
-             (not latex-dest))
+             (not (doc-dest? latex-dest)))
     ;; Check for extra document directories that we should remove
     ;; in the main installation:
     (log-setup-info "checking installation document directories")
@@ -290,7 +282,7 @@
                               always-user?)))
   (define (can-build**? doc) (can-build? only-dirs avoid-main? doc auto-main? auto-user?))
   
-  (unless latex-dest
+  (unless (doc-dest? latex-dest)
     ;; Make sure "scribble.css", etc., is in place:
     (let ([ht (make-hash)])
       (for ([doc (in-list docs)])
@@ -422,7 +414,7 @@
 
   (define (tidy-database)
     (when (and (or (not only-dirs) tidy?)
-               (not latex-dest)
+               (not (doc-dest? latex-dest))
                infos)
       (log-setup-info "tidying database")
       (define tidy-docs (if tidy?
@@ -785,11 +777,89 @@
 
   (when infos
     (make-loop #t 0)
-    (unless latex-dest
+    (unless (doc-dest? latex-dest)
       (perform-supplants infos))
     ;; cache info to disk
     (for ([i infos] #:when (info-need-in-write? i))
       (write-in/info latex-dest i no-lock main-doc-exists? pkg-cache))))
+
+(define (move-rendered-docs-to-destdir dirs destdir)
+  ;; recursively scan `dirs` for built packages that have rendered documentation,
+  ;; and move the documentation to `destdir`, adding an "unsynced.rktd" file
+  ;; so that it will be synchronized when the directory is merged into an
+  ;; installation
+  (define (move dir)
+    (when (directory-exists? dir)
+      (define info.rkt (build-path dir "info.rkt"))
+      (when (file-exists? info.rkt)
+        (define info (get-info/full dir))
+        (when (info 'scribblings (λ () #f))
+          (define docs
+            (get-docs-from-info info dir
+                                #:setup-printf (lambda (prefix msg . args)
+                                                 (apply printf msg args)
+                                                 (newline))
+                                #:get-spec (lambda (x) #f)
+                                #:is-main? (lambda (dir) #t)
+                                #:user-doc-mode 'never
+                                #:doc-destdir destdir))
+          (for ([doc (in-list docs)])
+            (define dest-dir (doc-dest-dir doc))
+            (when dest-dir
+              (define rendered-dir (build-path dir "doc" (doc-name doc)))
+              (when (directory-exists? rendered-dir)
+                (make-directory* destdir)
+                (copy-directory/files rendered-dir dest-dir)
+                (let ([unprovided-path (build-path dest-dir "unsynced.rktd")])
+                  (unless (file-exists? unprovided-path)
+                    (call-with-output-file unprovided-path (lambda (o) (write '#t o)))))
+                (delete-directory/files rendered-dir))))))
+      (for ([f (in-list (directory-list dir #:build? #t))])
+        (move f))))
+  (for-each move dirs))
+
+(define (get-docs-from-info i dir
+                            #:setup-printf setup-printf
+                            #:get-spec get-spec
+                            #:is-main? is-main?
+                            #:user-doc-mode [user-doc-mode #f]
+                            #:doc-destdir [doc-destdir #f])
+  (let* ([pre-s (and i (i 'scribblings (λ () #f)))]
+         [s (validate-scribblings-infos pre-s)])
+    (if s
+        (map (lambda (d)
+               (let* ([flags (cadr d)]
+                      [under-main?
+                       (and (not (memq 'user-doc-root flags))
+                            (not (memq 'user-doc flags))
+                            (or (memq 'main-doc flags)
+                                (is-main? dir)))])
+                 (define src (simplify-path (build-path dir (car d)) #f))
+                 (define name (cadddr d))
+                 (define cat (caddr d))
+                 (define lang-fam (and ((length cat) . >= . 3) (list-ref cat 2)))
+                 (define dest (doc-path dir name flags under-main? user-doc-mode #:doc-destdir doc-destdir))
+                 (define via-search? (and under-main?
+                                          (not (or (equal? (find-doc-dir) dest)
+                                                   (let-values ([(base name dir?) (split-path dest)])
+                                                     (equal? (path->directory-path (find-doc-dir))
+                                                             base))))))
+                 (make-doc dir
+                           (get-spec (car d))
+                           src
+                           dest
+                           flags under-main? via-search?
+                           cat
+                           lang-fam
+                           (list-ref d 4)
+                           (if (path? name) (path-element->string name) name)
+                           (list-ref d 5))))
+             s)
+        (begin (setup-printf
+                "WARNING"
+                "bad 'scribblings info: ~e from: ~e"
+                pre-s dir)
+               null))))
 
 (define shared-style-files
   (list "scribble.css"
@@ -806,150 +876,169 @@
   (list "doc-site.js"))
 
 (define (make-renderer latex-dest doc main-doc-exists? pkg-cache)
-  (if latex-dest
-      (new (latex:render-mixin render%)
-           [dest-dir latex-dest]
-           ;; Use PLT manual style:
-           [prefix-file (collection-file-path "manual-prefix.tex" "scribble")]
-           [style-file (collection-file-path "manual-style.tex" "scribble")]
-           ;; All .tex files go to the same directory, so prefix
-           ;; generated/copied file names to keep them separate:
-           [helper-file-prefix (let-values ([(base name dir?) (split-path
-                                                               (doc-dest-dir doc))])
-                                 (path-element->string name))])
-      (let* ([flags (doc-flags doc)]
-             [multi? (memq 'multi-page flags)]
-             [main?  (doc-under-main? doc)]
-             [ddir   (doc-dest-dir doc)]
-             [root?  (or (memq 'main-doc-root flags)
-                         (memq 'user-doc-root flags))]
-             [contract-override-mixin
-              (if multi?
-                  contract:override-render-mixin-multi 
-                  contract:override-render-mixin-single)]
-             [pkg-cache (doc-pkg doc pkg-cache)]
-             [allow-indirect? (and pkg-cache
-                                   ;; (not main?)
-                                   (not (memq 'no-depend-on (doc-flags doc))))]
-             [local-redirect-file (build-path (if main-doc-exists?
-                                                  (find-doc-dir)
-                                                  (find-user-doc-dir))
-                                              "local-redirect"
-                                              "local-redirect.js")]
-             [local-user-redirect-file (build-path (if main?
-                                                       (find-doc-dir)
-                                                       (find-user-doc-dir))
-                                                   "local-redirect"
-                                                   "local-user-redirect.js")])
-        (define r
-          (new (contract-override-mixin
-                ((if multi? html:render-multi-mixin values)
-                 (html:render-mixin render%)))
-               ;; Use PLT manual style:
-               [style-file (if (memq 'keep-style flags)
-                               #f
-                               (collection-file-path "manual-style.css" "scribble"))]
-               [extra-files (if (memq 'keep-style flags)
-                                null
-                                (list (collection-file-path "manual-fonts.css" "scribble")))]
-               ;; See also `style-extra-files`, below
-               [dest-dir (if multi?
-                             (let-values ([(base name dir?) (split-path ddir)]) base)
-                             ddir)]
-               [alt-paths   (let ([std-path (lambda (s)
-                                              (cons (collection-file-path s "scribble")
-                                                    (if root?
-                                                        s
-                                                        (format "../~a" s))))])
-                              (list* (cons local-redirect-file 
-                                           (if main?
-                                               "../local-redirect/local-redirect.js"
-                                               (u:url->string (u:path->url local-redirect-file))))
-                                     (cons local-user-redirect-file
-                                           (if main?
-                                               "../local-redirect/local-user-redirect.js"
-                                               (u:url->string (u:path->url local-user-redirect-file))))
-                                     (map std-path (append
-                                                    shared-style-files
-                                                    shared-empty-style-files
-                                                    shared-empty-script-files))))]
-               [up-path (cond
-                         [root? #f] ; no up from root
-                         [main?
-                          ;; #t make the "up" link go to the (user's) start page
-                          ;; using query or cookies:
-                          #t]
-                         [allow-indirect?
-                          ;; building a package, so also rely on query or cookies in this
-                          ;; case:
-                          #t]
-                         [(and (memq 'user-doc flags)
-                               (memq 'no-depend-on flags))
-                          ;; in main user doc directory; use query or cookies
-                          #t]
-                         [else
-                          ;; user-installed and not a package, so hard link is ok:
-                          (build-path (find-user-doc-dir) "index.html")])]
-               [search-up-path (cond
-                                 [root? #f]
-                                 [else #t])]
+  (case (doc-dest-kind latex-dest)
+    [(latex)
+     (define dest-dir (doc-dest-path latex-dest))
+     (new (latex:render-mixin render%)
+          [dest-dir dest-dir]
+          ;; Use PLT manual style:
+          [prefix-file (collection-file-path "manual-prefix.tex" "scribble")]
+          [style-file (collection-file-path "manual-style.tex" "scribble")]
+          ;; All .tex files go to the same directory, so prefix
+          ;; generated/copied file names to keep them separate:
+          [helper-file-prefix (let-values ([(base name dir?) (split-path
+                                                              (doc-dest-dir doc))])
+                                (path-element->string name))])]
+    [(markdown)
+     (define dest-dir (doc-dest-path latex-dest))
+     (new (markdown:render-mixin render%)
+          [dest-dir dest-dir]
+          ;; Prefix helper files to avoid collisions across documents
+          [helper-file-prefix (let-values ([(base name dir?) (split-path
+                                                              (doc-dest-dir doc))])
+                                (path-element->string name))])]
+    [else
+     (let* ([flags (doc-flags doc)]
+            [multi? (memq 'multi-page flags)]
+            [main?  (doc-under-main? doc)]
+            [ddir   (doc-dest-dir doc)]
+            [root?  (or (memq 'main-doc-root flags)
+                        (memq 'user-doc-root flags))]
+            [contract-override-mixin
+             (if multi?
+                 contract:override-render-mixin-multi
+                 contract:override-render-mixin-single)]
+            [pkg-cache (doc-pkg doc pkg-cache)]
+            [allow-indirect? (and pkg-cache
+                                  ;; (not main?)
+                                  (not (memq 'no-depend-on (doc-flags doc))))]
+            [local-redirect-file (build-path (if main-doc-exists?
+                                                 (find-doc-dir)
+                                                 (find-user-doc-dir))
+                                             "local-redirect"
+                                             "local-redirect.js")]
+            [local-user-redirect-file (build-path (if main?
+                                                      (find-doc-dir)
+                                                      (find-user-doc-dir))
+                                                  "local-redirect"
+                                                  "local-user-redirect.js")])
+       (define r
+         (new (contract-override-mixin
+               ((if multi? html:render-multi-mixin values)
+                (html:render-mixin render%)))
+              ;; Use PLT manual style:
+              [style-file (if (memq 'keep-style flags)
+                              #f
+                              (collection-file-path "manual-style.css" "scribble"))]
+              [extra-files (if (memq 'keep-style flags)
+                               null
+                               (list (collection-file-path "manual-fonts.css" "scribble")))]
+              ;; See also `style-extra-files`, below
+              [dest-dir (if multi?
+                            (let-values ([(base name dir?) (split-path ddir)]) base)
+                            ddir)]
+              [alt-paths   (let ([std-path (lambda (s)
+                                             (cons (collection-file-path s "scribble")
+                                                   (if root?
+                                                       s
+                                                       (format "../~a" s))))])
+                             (list* (cons local-redirect-file
+                                          (if main?
+                                              "../local-redirect/local-redirect.js"
+                                              (u:url->string (u:path->url local-redirect-file))))
+                                    (cons local-user-redirect-file
+                                          (if main?
+                                              "../local-redirect/local-user-redirect.js"
+                                              (u:url->string (u:path->url local-user-redirect-file))))
+                                    (map std-path (append
+                                                   shared-style-files
+                                                   shared-empty-style-files
+                                                   shared-empty-script-files))))]
+              [up-path (cond
+                        [root? #f] ; no up from root
+                        [main?
+                         ;; #t make the "up" link go to the (user's) start page
+                         ;; using query or cookies:
+                         #t]
+                        [allow-indirect?
+                         ;; building a package, so also rely on query or cookies in this
+                         ;; case:
+                         #t]
+                        [(and (memq 'user-doc flags)
+                              (memq 'no-depend-on flags))
+                         ;; in main user doc directory; use query or cookies
+                         #t]
+                        [else
+                         ;; user-installed and not a package, so hard link is ok:
+                         (build-path (find-user-doc-dir) "index.html")])]
+              [search-up-path (cond
+                                [root? #f]
+                                [else #t])]
 
-               ;; In cross-reference information, use paths that are relative
-               ;; to the target rendering directory for documentation that might
-               ;; be moved into a binary package:
-               [root-path (and allow-indirect? ddir)]
+              ;; In cross-reference information, use paths that are relative
+              ;; to the target rendering directory for documentation that might
+              ;; be moved into a binary package:
+              [root-path (and allow-indirect? ddir)]
 
-               [style-extra-files (if (memq 'keep-style flags)
-                                      null
-                                      (cons
-                                       (collection-file-path "manual-racket.css" "scribble")
-                                       (map (lambda (s)
-                                              (collection-file-path s "scribble"))
-                                            shared-empty-style-files)))]
+              [style-extra-files (if (memq 'keep-style flags)
+                                     null
+                                     (cons
+                                      (collection-file-path "manual-racket.css" "scribble")
+                                      (map (lambda (s)
+                                             (collection-file-path s "scribble"))
+                                           shared-empty-style-files)))]
 
-               [search-box? (not (memq 'no-search flags))]))
-        (unless (memq 'keep-style flags)
-          (send r add-extra-script-file (collection-file-path "manual-racket.js" "scribble"))
-          (for ([s (in-list shared-empty-script-files)])
-            (send r add-extra-script-file (collection-file-path s "scribble"))))
-        (when allow-indirect?
-          ;; For documentation that might be moved into a binary package
-          ;; or that can contain an indirect reference, use a server indirection
-          ;; for all links external to the document, but also install the
-          ;; "local-[user-]redirect.js" hooks:
-          (send r set-external-tag-path 
-                (u:url->string
-                 (let ([u (u:string->url (get-doc-search-url))])
-                   (struct-copy
-                    u:url
-                    u
-                    [query
-                     (cons (cons 'version (version))
-                           (u:url-query u))]))))
-          (send r add-extra-script-file local-redirect-file)
-          (send r add-extra-script-file local-user-redirect-file))
-        ;; Result is the renderer:
-        r)))
+              [search-box? (not (memq 'no-search flags))]))
+       (unless (memq 'keep-style flags)
+         (send r add-extra-script-file (collection-file-path "manual-racket.js" "scribble"))
+         (for ([s (in-list shared-empty-script-files)])
+           (send r add-extra-script-file (collection-file-path s "scribble"))))
+       (when allow-indirect?
+         ;; For documentation that might be moved into a binary package
+         ;; or that can contain an indirect reference, use a server indirection
+         ;; for all links external to the document, but also install the
+         ;; "local-[user-]redirect.js" hooks:
+         (send r set-external-tag-path 
+               (u:url->string
+                (let ([u (u:string->url (get-doc-search-url))])
+                  (struct-copy
+                   u:url
+                   u
+                   [query
+                    (cons (cons 'version (version))
+                          (u:url-query u))]))))
+         (send r add-extra-script-file local-redirect-file)
+         (send r add-extra-script-file local-user-redirect-file))
+       ;; Result is the renderer:
+       r)]))
 
 (define (pick-dest latex-dest doc)
-  (cond [(path? latex-dest)
-         (let-values ([(base name dir?) (split-path (doc-dest-dir doc))])
-           (build-path latex-dest (path-replace-suffix name #".tex")))]
-        [(not latex-dest)
-         (cond
-           [(memq 'multi-page (doc-flags doc)) (doc-dest-dir doc)]
-           [else (build-path (doc-dest-dir doc) "index.html")])]))
+  (case (doc-dest-kind latex-dest)
+    [(latex)
+     (let-values ([(base name dir?) (split-path (doc-dest-dir doc))])
+       (build-path (doc-dest-path latex-dest)
+                   (path-replace-suffix name #".tex")))]
+    [(markdown)
+     (let-values ([(base name dir?) (split-path (doc-dest-dir doc))])
+       (build-path (doc-dest-path latex-dest)
+                   (path-replace-suffix name #".md")))]
+    [else
+     (cond
+       [(memq 'multi-page (doc-flags doc)) (doc-dest-dir doc)]
+       [else (build-path (doc-dest-dir doc) "index.html")])]))
 
 (define (sxref-path latex-dest doc file)
-  (cond [(path? latex-dest)
-         (let-values ([(base name dir?) (split-path (doc-src-file doc))])
-           (build-path latex-dest (path-replace-suffix name (string-append "." file))))]
-        [(not latex-dest) (build-path (doc-dest-dir doc) file)]))
+  (case (doc-dest-kind latex-dest)
+    [(latex markdown)
+     (let-values ([(base name dir?) (split-path (doc-dest-dir doc))])
+       (build-path (doc-dest-path latex-dest)
+                   (path-replace-suffix name (string-append "." file))))]
+    [else (build-path (doc-dest-dir doc) file)]))
 
 (define (find-doc-db-path latex-dest user? main-doc-exists?)
   (cond
-   [latex-dest
-    (build-path latex-dest "docindex.sqlite")]
+   [(doc-dest? latex-dest)
+    (build-path (doc-dest-path latex-dest) "docindex.sqlite")]
    [else
     (build-path (if (or user? (not main-doc-exists?))
                     (find-user-doc-dir)
@@ -1077,7 +1166,7 @@
                 #:no-user? (main-doc? doc)
                 #:no-main? (or (not main-doc-exists?)
                                (memq 'depends-all-user (doc-flags doc)))
-                #:doc-db (and latex-dest
+                #:doc-db (and (doc-dest? latex-dest)
                               (find-doc-db-path latex-dest #t main-doc-exists?))
                 #:register-shutdown! (lambda (s)
                                        (set! shutdown s))))
@@ -1104,13 +1193,15 @@
   (let ([rendered-dir (let-values ([(base name dir?) (split-path (doc-dest-dir doc))])
                         (build-path (doc-src-dir doc) "doc" name))])
     (when (and (can-build? only-dirs avoid-main? doc)
-               (directory-exists? rendered-dir)
-               (not (file-exists? (build-path rendered-dir "synced.rktd")))
-               (or (not (directory-exists? (doc-dest-dir doc)))
-                   force-out-of-date?
-                   (not (file-exists? (build-path (doc-dest-dir doc) "synced.rktd")))))
-      (move-documentation-into-place doc rendered-dir setup-printf workerid lock
-                                     main-doc-exists? pkg-cache)))
+               (or (and (directory-exists? rendered-dir)
+                        (not (file-exists? (build-path rendered-dir "synced.rktd")))
+                        (or (not (directory-exists? (doc-dest-dir doc)))
+                            force-out-of-date?
+                            (not (file-exists? (build-path (doc-dest-dir doc) "synced.rktd")))))
+                   (and (file-exists? (build-path (doc-dest-dir doc) "unsynced.rktd")))))
+      (let ([rendered-dir (and (directory-exists? rendered-dir) rendered-dir)])
+        (move-documentation-into-place doc rendered-dir setup-printf workerid lock
+                                       main-doc-exists? pkg-cache))))
 
   (let* ([info-out-files (for/list ([i (add1 (doc-out-count doc))])
                            (sxref-path latex-dest doc (format "out~a.sxref" i)))]
@@ -1138,9 +1229,10 @@
                              (list "" "" ""))))]
          [renderer-path (let ([p (collection-file-path
                                   #:check-compiled? #t
-                                  (cond
-                                   [(path? latex-dest) "latex-render.rkt"]
-                                   [(not latex-dest) "html-render.rkt"])
+                                  (case (doc-dest-kind latex-dest)
+                                    [(latex) "latex-render.rkt"]
+                                    [(markdown) "markdown-render.rkt"]
+                                    [else "html-render.rkt"])
                                   "scribble")])
                           (get-compilation-bytecode-file p))]
          [css-path (collection-file-path "scribble.css" "scribble")]
@@ -1181,7 +1273,7 @@
                                     (not (file-exists? (build-path (doc-dest-dir doc) "provides.sxref"))))))]
          [up-to-date? (not out-of-date)]
          [can-run? (and src-zo
-                        (or (not latex-dest)
+                        (or (not (doc-dest? latex-dest))
                             (not (omit? (doc-category doc))))
                         (or can-run?
                             (and auto-main?
@@ -1459,7 +1551,11 @@
     ;; with "provides.sxref" and ".html" files have been updated.
     (let ([provided-path (build-path dest-dir "synced.rktd")])
       (unless (file-exists? provided-path)
-        (call-with-output-file provided-path (lambda (o) (write '#t o)))))))
+        (call-with-output-file provided-path (lambda (o) (write '#t o)))))
+    ;; Make sure that "unsynced.rktd" doesn't exist
+    (let ([unprovided-path (build-path dest-dir "unsynced.rktd")])
+      (when (file-exists? unprovided-path)
+        (delete-file unprovided-path)))))
 
 (define (read-delayed-in! info latex-dest)
   (let* ([doc (info-doc info)]
@@ -1522,7 +1618,10 @@
                   (equal? in-version2 expected)
                   (for/and ([out-version out-versions])
                     (equal? out-version expected)))
-       (error "old info has wrong version or flags" in-version in-version2 out-versions expected))
+       (error "old info has wrong version or flags"
+              (doc-src-dir doc)
+              in-filename
+              in-version in-version2 out-versions expected))
      (match (with-my-namespace
              (lambda ()
                (deserialize undef+searches)))
@@ -1541,7 +1640,7 @@
   ;; it provides just enough of `info' from the main place to re-build
   ;; in this place along with the content of "in.sxref".
   (define (cleanup-dest-dir doc)
-    (unless latex-dest
+    (unless (doc-dest? latex-dest)
       (let ([dir (doc-dest-dir doc)])
         (if (not (directory-exists? dir))
             (make-directory* dir)
@@ -1614,7 +1713,7 @@
              (parameterize ([current-namespace (make-isolated-namespace)])
                (send renderer render (list v) (list dest-dir) ri)))
            void))
-         (unless (or latex-dest (main-doc? doc))
+        (unless (or (doc-dest? latex-dest) (main-doc? doc))
            ;; Since dest dir is the same place as pre-built documentation,
            ;; mark it so that it is not treated as needing an install:
            (let ([synced (build-path (doc-dest-dir doc) "synced.rktd")])
@@ -1687,7 +1786,7 @@
   (define pkg (doc-pkg doc pkg-cache))
   (when (and pkg
              (not (doc-under-main? doc))
-             (not latex-dest))
+             (not (doc-dest? latex-dest)))
     (make-directory* (doc-dest-dir doc))
     (with-compile-output
      (sxref-path latex-dest doc "provides.sxref")

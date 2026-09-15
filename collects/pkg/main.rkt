@@ -11,6 +11,9 @@
          "name.rkt"
          "lib.rkt"
          "commands.rkt"
+         "private/adjacent-dep.rkt"
+         (only-in "private/create.rkt"
+                  package-name-and-dir-for-create)
          (prefix-in setup: setup/setup)
          (for-syntax racket/base
                      syntax/strip-context))
@@ -170,9 +173,12 @@
         #:update-deps-flags (update-deps-flags ...)
         #:install-copy-flags/pre-clone (install-copy-flags/pre-clone ...)
         #:install-copy-flags/unclone (install-copy-flags/unclone ...)
+        #:install-copy-flags/attach (install-copy-flags/attach ...)
         #:install-copy-flags/post-clone (install-copy-flags/post-clone ...)
         #:install-copy-defns (install-copy-defns ...)
-        #:install-copy-checks (install-copy-checks ...))
+        #:install-copy-checks (install-copy-checks ...)
+        #:bundle-mode-flags (bundle-mode-flags ...)
+        #:bundle-mode-flag-to-mode bundle-mode-flag-to-mode)
      (replace-context
       stx
        #`(commands
@@ -192,8 +198,10 @@
            [#:bool auto () "Shorthand for `--deps search-auto'"]
            #:once-each
            update-deps-flags ...
+           [#:bool adjacent-deps () "Look for dependencies adjacently before consulting catalog"]
            #:once-any
            install-copy-flags/pre-clone ...
+           install-copy-flags/attach ...
            install-copy-flags/post-clone ...
            #:once-any
            scope-flags ...
@@ -202,9 +210,11 @@
            #:once-each
            [#:bool skip-installed () ("Skip a <pkg-source> if already installed")]
            [#:bool pkgs () ("Install only the specified packages, even when none are provided")]
+           [#:bool no-promote () ("Install as auto-installed")]
            install-force-flags ...
            install-clone-flags ...
            dry-run-flags ...
+           [(#:str dir #f) destdir () ("Stage into <dir> instead of installing")]
            job-flags ...
            trash-flags ...
            [#:bool fail-fast () ("Break `raco setup' when it discovers an error")]
@@ -253,6 +263,7 @@
                                      #:strict-doc-conflicts? strict-doc-conflicts
                                      #:use-cache? (not no-cache)
                                      #:skip-installed? skip-installed
+                                     #:skip-auto-installed? (and skip-installed no-promote)
                                      #:update-deps? update-deps
                                      #:update-implies? (not ignore-implies)
                                      #:strip (or (and source 'source)
@@ -266,11 +277,13 @@
                                      #:pull-behavior pull
                                      #:link-dirs? link-dirs?
                                      #:dry-run? dry-run
+                                     #:destdir destdir
                                      #:use-trash? (not no-trash)
                                      (for/list ([p (in-list sources)])
-                                       (pkg-desc p a-type* name checksum #f
+                                       (pkg-desc p a-type* name checksum no-promote
                                                  #:path (and (eq? a-type* 'clone)
-                                                             (path->complete-path clone))))))))
+                                                             (path->complete-path clone))
+                                                 #:adjacent-deps? adjacent-deps))))))
                 (setup "installed" no-setup no-docs recompile-only recompile-cache fail-fast setup-collects jobs))))]
           ;; ----------------------------------------
           [update
@@ -305,6 +318,7 @@
            job-flags ...
            trash-flags ...
            #:args pkg-source
+           (define attach #f)
            install-copy-defns ...
            (let ([pkg-source
                   ;; Implement special rules for an empty list of package sources
@@ -373,7 +387,7 @@
                                                                    'ask))
                                     #:pull-behavior pull
                                     #:link-dirs? link-dirs?
-                                    #:infer-clone-from-dir? (not (or link static-link copy))
+                                    #:infer-clone-from-dir? (not (or link static-link copy attach))
                                     #:dry-run? dry-run
                                     #:use-trash? (not no-trash)))))
                 (setup "updated" no-setup no-docs recompile-only recompile-cache #f setup-collects jobs))))]
@@ -524,36 +538,34 @@
            [#:bool from-dir () "Treat <directory-or-package> as a directory (the default)"]
            [#:bool from-install () "Treat <directory-or-package> as a package name"]
            #:once-any
-           [(#:sym fmt [zip tgz plt] #f) format ()
+           [(#:sym fmt [zip tgz plt dir] #f) format ()
             ("Select the format of the package to be created;"
-             "valid <fmt>s are: zip (the default), tgz, plt")]
+             "valid <fmt>s are: zip (the default), tgz, plt, dir")]
            [#:bool manifest () "Creates a manifest file for a directory, rather than an archive"]
            #:once-any
-           [#:bool as-is () "Bundle the directory/package as-is (the default)"]
-           [#:bool source () "Bundle sources only"]
-           [#:bool binary () "Bundle bytecode and rendered documentation without sources"]
-           [#:bool binary-lib () "Bundle bytecode without sources or documentation"]
-           [#:bool built () "Bundle sources, bytecode and rendered documentation"]
+           bundle-mode-flags ...
            #:once-each
            [(#:str package #f) original () "Record <package> as original package source"]
            [(#:str dest-dir #f) dest () "Create output files in <dest-dir>"]
-           #:args (directory-or-package)
+           [#:bool adjacent-deps () "Also bundle adjacent dependencies"]
+           #:args directory-or-package
+           (define pkg-source
+             (cond
+               [from-install 'name]
+               [else 'dir]))
            (parameterize ([current-pkg-error (pkg-error 'create)])
-             (pkg-create (if manifest 'MANIFEST (or format 'zip))
-                         directory-or-package
-                         #:from-command-line? #t
-                         #:dest (and dest
-                                     (path->complete-path dest))
-                         #:source (cond
-                                   [from-install 'name]
-                                   [else 'dir])
-                         #:mode (cond
-                                 [source 'source]
-                                 [binary 'binary]
-                                 [binary-lib 'binary-lib]
-                                 [built 'built]
-                                 [else 'as-is])
-                         #:original original))]
+             (for ([directory-or-package (in-list (if adjacent-deps
+                                                      (close-over-adjacent directory-or-package pkg-source
+                                                                           package-name-and-dir-for-create)
+                                                      directory-or-package))])
+               (pkg-create (if manifest 'MANIFEST (or format 'zip))
+                           directory-or-package
+                           #:from-command-line? #t
+                           #:dest (and dest
+                                       (path->complete-path dest))
+                           #:source pkg-source
+                           #:mode bundle-mode-flag-to-mode
+                           #:original original)))]
           ;; ----------------------------------------
           [config
            "View and modify the package manager's configuration"
@@ -648,12 +660,23 @@
            [(#:strs sys subpath #f) include-deps-platform () "Include one platform's dependencies"]
            #:multi
            [(#:str pkg '()) exclude () "Exclude <pkg> from new catalog"]
+           #:once-any
+           bundle-mode-flags ...
            #:once-each
            [#:bool fast-file-copy () "Copy a local file package as-is"]
            #:args (dest-dir . src-catalog)
            (parameterize ([current-pkg-error (pkg-error 'catalog-archive)]
                           [current-pkg-lookup-version (or version
                                                           (current-pkg-lookup-version))])
+               (when (and fast-file-copy
+                          (or source binary binary-lib built))
+                 ((current-pkg-error)
+                  (~a "cannot combine `--fast-file-copy` with `--~a`")
+                  (cond
+                    [source "source"]
+                    [binary "binary"]
+                    [binary-lib "binary-lib"]
+                    [else "built"])))
                (define fail-at-end? #f)
                (pkg-catalog-archive dest-dir
                                     src-catalog
@@ -666,6 +689,7 @@
                                                                     (cons (string->symbol (car include-deps-platform))
                                                                           (string->path (cadr include-deps-platform))))
                                     #:exclude (as-list exclude)
+                                    #:mode bundle-mode-flag-to-mode
                                     #:fast-file-copy? fast-file-copy
                                     #:package-exn-handler (case pkg-fail
                                                             [(fail) (lambda (name exn) (raise exn))]
@@ -781,6 +805,8 @@
   [(#:str dir #f) clone () ("Clone Git and GitHub package sources to <dir> and link")])
  #:install-copy-flags/unclone
  ([#:bool unclone () ("Unclones when currently a clone; alias for --lookup")])
+ #:install-copy-flags/attach
+ ([#:bool attach () ("Attach package directory already staged in scope")])
  #:install-copy-flags/post-clone
  ([#:bool source () ("Strip packages' built elements before installing; implies --copy")]
   [#:bool binary () ("Strip packages' source elements before installing; implies --copy")]
@@ -789,6 +815,7 @@
  [(define link-dirs? (not (or copy source binary binary-lib)))
   (define link-type (or (and link 'link)
                         (and static-link 'static-link)
+                        (and attach 'attach)
                         (and (eq? type 'dir) link-dirs? 'link)
                         (and clone 'clone)))
   (define a-type (or link-type type))]
@@ -798,12 +825,28 @@
              (not (memq type
                         (case link-type
                           [(clone) '(git git-url github)]
+                          [(attach) '(name)]
                           [else '(dir)]))))
     ((current-pkg-error) (format "-t/--type value must be ~a with --~a"
                                  (cond
-                                  [clone "`git', `git-url', or `github'"]
+                                   [clone "`git', `git-url', or `github'"]
+                                   [attach "`name'"]
                                   [else "`dir'"])
                                  (cond
                                   [link "link"]
                                   [static-link "static-link"]
-                                  [clone "clone"]))))])
+                                  [clone "clone"]
+                                  [attach "attach"]))))]
+ #:bundle-mode-flags
+ ([#:bool as-is () "Bundle the directory/package as-is (the default)"]
+  [#:bool source () "Bundle sources only"]
+  [#:bool binary () "Bundle bytecode and rendered documentation without sources"]
+  [#:bool binary-lib () "Bundle bytecode without sources or documentation"]
+  [#:bool built () "Bundle sources, bytecode and rendered documentation"])
+ #:bundle-mode-flag-to-mode
+ (cond
+   [source 'source]
+   [binary 'binary]
+   [binary-lib 'binary-lib]
+   [built 'built]
+   [else 'as-is]))

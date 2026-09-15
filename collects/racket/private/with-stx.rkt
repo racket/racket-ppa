@@ -2,9 +2,11 @@
 ;; with-syntax, generate-temporaries
 
 (module with-stx '#%kernel
-  (#%require "stx.rkt" "define-et-al.rkt" "qq-and-or.rkt" "cond.rkt" "stxcase.rkt"
+  (#%require "stx.rkt" "core-syntax.rkt" "stxcase.rkt"
+             (rename "core-syntax.rkt" -define define)
+             (rename "core-syntax.rkt" -define-syntax define-syntax)
              (for-syntax '#%kernel "stxcase.rkt" "stxloc.rkt" 
-                         "stx.rkt" "sc.rkt" "qq-and-or.rkt" "cond.rkt"))
+                         "stx.rkt" "sc.rkt" "core-syntax.rkt"))
 
   (-define (with-syntax-fail stx)
     (raise-syntax-error

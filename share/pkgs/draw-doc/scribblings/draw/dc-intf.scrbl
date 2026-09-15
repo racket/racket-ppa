@@ -365,7 +365,8 @@ If @racket[radius] is positive, the value is used as the radius of the
  rectangle.
 
 If @racket[radius] is less than @racket[-0.5] or more than half of
- @racket[width] or @racket[height], @|MismatchExn|.
+ @racket[width] or @racket[height] (respectively), then half of
+ @racket[width] or @racket[height] (respectively) is used, instead.
 
 Brush filling and pen outline meet so that no space is left between
  them, but the precise overlap between the filling and outline is

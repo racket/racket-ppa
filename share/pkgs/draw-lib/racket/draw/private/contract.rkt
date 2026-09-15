@@ -327,10 +327,16 @@
 (define record-dc%/c
   (class/c
     (init [width (>=/c 0)]
-          [height (>=/c 0)])
+          [height (>=/c 0)]
+          [record-ink? any/c])
     [get-clipping-region (->m (or/c #f (instanceof/c region%/c)))]
     [get-recorded-datum (->m any/c)]
-    [get-recorded-procedure (->m ((is-a?/c dc<%>) . -> . void?))]))
+    [get-recorded-procedure (->m ((is-a?/c dc<%>) . -> . void?))]
+    ;; Not adding for now, in case it creates trouble for existing
+    ;; code that intends to satisfy the contract, but the method was
+    ;; added in v1.24
+    #;
+    [get-ink-extent (->m (values real? real? real? real?))]))
 
 (define dc-path%/c
   (class/c

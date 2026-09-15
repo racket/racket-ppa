@@ -84,6 +84,7 @@
                  arm32nb tarm32nb arm64nb tarm64nb
                  ppc32nb tppc32nb)
            'netbsd]
+          [(a6hk ta6hk) 'haiku]
           [(a6s2 ta6s2 i3s2 ti3s2) 'solaris]
           [(i3qnx) 'qnx]
           [(pb tpb
@@ -107,7 +108,8 @@
                   a6ob ta6ob
                   a6nb ta6nb
                   a6fb ta6fb
-                  a6s2 ta6s2)
+                  a6s2 ta6s2
+                  a6hk ta6hk)
            'x86_64]
           [(i3osx ti3osx
                   i3nt ti3nt
@@ -192,11 +194,11 @@
   (case (reflect-machine-type)
     [(a6ios ta6ios arm64ios tarm64ios
             a6osx ta6osx i3osx ti3osx arm64osx tarm64osx ppc32osx tppc32osx)
-     (string->utf8 ".dylib")]
+     (bytes->immutable-bytes (string->utf8 ".dylib"))]
     [(a6nt ta6nt i3nt ti3nt arm64nt tarm64nt)
-     (string->utf8 ".dll")]
+     (bytes->immutable-bytes (string->utf8 ".dll"))]
     [else
-     (string->utf8 ".so")]))
+     (bytes->immutable-bytes (string->utf8 ".so"))]))
 
 (define so-mode
   (case (reflect-machine-type)

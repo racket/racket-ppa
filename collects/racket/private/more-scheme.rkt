@@ -3,8 +3,8 @@
 ;; more-scheme : case, do, etc. - remaining syntax
 
 (module more-scheme '#%kernel
-  (#%require "define-et-al.rkt" "qq-and-or.rkt" "cond.rkt" "define.rkt" '#%paramz "case.rkt" "logger.rkt"
-             (for-syntax '#%kernel "stx.rkt" "define-et-al.rkt" "qq-and-or.rkt" "cond.rkt" "stxcase-scheme.rkt" "qqstx.rkt"))
+  (#%require "core-syntax.rkt" '#%paramz "case.rkt" "logger.rkt"
+             (for-syntax '#%kernel "stx.rkt" "core-syntax.rkt" "stxcase-scheme.rkt" "qqstx.rkt"))
 
   ;; For `old-case`:
   (define-syntax case-test
@@ -285,12 +285,7 @@
 				    stx
 				    id)))
 	    ids)
-	   (let ([dup (check-duplicate-identifier ids)])
-	     (when dup
-	       (raise-syntax-error #f
-				   "duplicate identifier"
-				   stx
-				   dup))))
+           (raise-if-duplicate-identifiers "duplicate identifier" stx ids))
 	 (with-syntax ([(temp ...) (generate-temporaries (syntax (id ...)))])
 	   (syntax/loc
 	    stx

@@ -39,8 +39,9 @@
 
 (define pkg-desc/opt
   (let ([pkg-desc (lambda (source type name checksum auto?
-                             #:path [path #f])
-                    (pkg-desc source type name checksum auto? path))])
+                                  #:path [path #f]
+                                  #:adjacent-deps? [adjacent-deps? #f])
+                    (pkg-desc source type name checksum auto? path adjacent-deps?))])
     pkg-desc))
 
 (provide
@@ -80,11 +81,12 @@
   [rename
    pkg-desc/opt pkg-desc
    (->* (string?
-         (or/c #f 'file 'dir 'link 'static-link 'file-url 'dir-url 'git 'git-url 'github 'clone 'name)
+         (or/c #f 'file 'dir 'link 'static-link 'file-url 'dir-url 'git 'git-url 'github 'clone 'name 'attach)
          (or/c string? #f)
          (or/c string? #f)
          boolean?)
-        (#:path (or/c #f path-string?))
+        (#:path (or/c #f path-string?)
+         #:adjacent-deps? boolean?)
         pkg-desc?)]
   [pkg-config
    (->* (boolean? (listof string?))
@@ -97,7 +99,7 @@
   [pkg-new
    (-> path-string? void?)]
   [pkg-create
-   (->* ((or/c 'zip 'tgz 'plt 'MANIFEST)
+   (->* ((or/c 'zip 'tgz 'plt 'dir 'MANIFEST)
          path-string?)
         (#:source (or/c 'dir 'name)
                   #:pkg-name (or/c #f string?)
@@ -161,6 +163,7 @@
                         #:strict-doc-conflicts? boolean?
                         #:use-cache? boolean?
                         #:skip-installed? boolean?
+                        #:skip-auto-installed? boolean?
                         #:quiet? boolean?
                         #:use-trash? boolean?
                         #:from-command-line? boolean?
@@ -169,7 +172,8 @@
                         #:link-dirs? boolean?
                         #:multi-clone-behavior (or/c 'fail 'force 'convert 'ask)
                         #:pull-behavior (or/c 'ff-only 'rebase 'try)
-                        #:dry-run? boolean?)
+                        #:dry-run? boolean?
+                        #:destdir (or/c #f path-string?))
         (or/c #f 'skip (listof (or/c path-string? (non-empty-listof path-string?)))))]
   [pkg-migrate
    (->* (string?)
@@ -202,7 +206,7 @@
                         #:relative-sources? boolean?)
         void?)]
   [pkg-catalog-archive
-   (->* (path-string? (listof string?))
+   (->* (path-string? (listof path-string?))
         (#:from-config? boolean?
                         #:state-catalog (or/c path-string? #f)
                         #:relative-sources? boolean?
@@ -211,6 +215,7 @@
                         #:include-deps? boolean?
                         #:include-deps-sys+subpath (or/c #f (cons/c symbol? path-for-some-system?))
                         #:exclude (or/c #f (listof string?))
+                        #:mode (or/c 'as-is 'source 'binary 'binary-lib 'built)
                         #:fast-file-copy? boolean?
                         #:package-exn-handler (string? exn:fail? . -> . any))
         void?)]

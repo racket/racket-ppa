@@ -1,9 +1,349 @@
+(module core-syntax '#%kernel
 
-;;----------------------------------------------------------------------
-;; quasiquote, and, or
+  ; ======================================================================
+  ; Many of the base syntactic forms of Racket-- things like `and`, `let`,
+  ; and `cond`. These are written together in a single module for startup
+  ; time reasons, and this module forms a nice base for defining the rest
+  ; of `#lang racket/base`.
+  ; ======================================================================
+  ;
 
-(module qq-and-or '#%kernel
   (#%require (for-syntax "stx.rkt" '#%kernel))
+
+  (#%provide define define-syntax define-for-syntax
+             define-values-for-syntax
+             when unless
+             call/ec let/ec
+             cond else =>
+             let*-values
+             let let* letrec
+             quasiquote
+             and or)
+
+  (module* old-cond #f
+    (#%provide old-cond))
+
+  ; --------------------------------------------------
+  ;
+  ;
+  ;        ;             ;;;;   ;                                        ;                                    ;                 ;
+  ;        ;            ;                                               ;                                     ;                  ;
+  ;        ;            ;                                              ;                                      ;                   ;
+  ;     ;;;;    ;;;     ;     ;;;     ; ;;;     ;;;                    ;      ; ;;;     ;;    ; ;;;           ;   ;  ;  ;  ;      ;
+  ;    ;   ;   ;   ;  ;;;;;;    ;     ;;   ;   ;   ;                  ;       ;;   ;   ;  ;   ;;   ;          ;  ;   ;  ;  ;       ;
+  ;   ;    ;  ;    ;    ;       ;     ;    ;  ;    ;                  ;       ;    ;  ;    ;  ;    ;          ; ;    ; ; ; ;       ;
+  ;   ;    ;  ;;;;;;    ;       ;     ;    ;  ;;;;;;                  ;       ;    ;  ;    ;  ;    ;          ;;     ; ; ; ;       ;
+  ;   ;    ;  ;         ;       ;     ;    ;  ;                       ;       ;    ;  ;    ;  ;    ;          ;;     ; ; ; ;       ;
+  ;   ;    ;  ;         ;       ;     ;    ;  ;                        ;      ;    ;  ;    ;  ;    ;          ; ;    ; ; ; ;      ;
+  ;   ;   ;;   ;        ;       ;     ;    ;   ;                       ;      ;    ;   ;  ;   ;    ;          ;  ;    ;   ;       ;
+  ;    ;;; ;    ;;;;    ;       ;;;   ;    ;    ;;;;                    ;     ;    ;    ;;    ;    ;          ;   ;   ;   ;      ;
+  ;                                                  ;;;;;;;             ;                                                      ;
+  ;                                                                       ;                                                    ;
+  ;
+  ;
+  ; non-keyword define* forms
+  ;
+
+
+  ; define, define-syntax, and define-for-syntax
+  ;
+  ; These are not user-visible (they get replaced by the full versions which
+  ; use the norm-define.rkt machinery and support keywords) and so we put
+  ; minimal effort into having user-friendly error reporting.
+  (define-syntaxes (define define-syntax define-for-syntax)
+    (let-values ()
+      (define-values (process-define*)
+        (lambda (full-stx id-or-prototype body-list)
+          (if (identifier? id-or-prototype)
+              (values id-or-prototype body-list)
+              (if (stx-pair? id-or-prototype)
+                  (let-values ([(nested) (stx-car id-or-prototype)]
+                               [(arg-spec) (stx-cdr id-or-prototype)])
+                    (process-define* full-stx
+                                     nested
+                                     (list (datum->syntax #f
+                                                          (list* (quote-syntax lambda)
+                                                                 arg-spec
+                                                                 body-list)
+                                                          full-stx))))
+                  (raise-syntax-error #f "bad syntax" full-stx id-or-prototype)))))
+
+      (define-values (process-define)
+        (lambda (head-for-output-form stx)
+          (define-values (lst) (syntax->list stx))
+          (raise-syntax-error-unless lst "bad syntax" stx)
+          (raise-syntax-error-unless (pair? (cdr lst)) "bad syntax" stx)
+          (define-values (id rhs-list)
+            (process-define* stx (cadr lst) (cddr lst)))
+          (datum->syntax #f
+                         (list* head-for-output-form (list id) rhs-list)
+                         stx)))
+
+    (values
+     (lambda (stx)
+       (process-define (quote-syntax define-values) stx))
+     (lambda (stx)
+      (process-define (quote-syntax define-syntaxes) stx))
+     (lambda (stx)
+      (datum->syntax #f
+                     (list (quote-syntax begin-for-syntax)
+                           (process-define (quote-syntax define-values) stx))
+                     stx)))))
+
+  ; define-values-for-syntax: this one is public
+  (define-syntaxes (define-values-for-syntax)
+    (lambda (stx)
+      (raise-syntax-error-if (identifier? stx) "bad syntax" stx)
+      (define-values (lst) (syntax->list stx))
+      (raise-syntax-error-unless lst "bad syntax (illegal use of `.')" stx)
+      (raise-syntax-error-if (null? (cdr lst)) "bad syntax (missing names to define)" stx)
+      (define-values (ids) (syntax->list (cadr lst)))
+      (raise-syntax-error-unless ids
+                                 "bad syntax (expected a list of identifiers)"
+                                 stx
+                                 (cadr lst))
+      (for-each (lambda (id)
+                  (raise-syntax-error-unless (identifier? id) "not an identifier" stx id))
+                ids)
+      ; TODO(jsailor): April 2026-ish: uncomment when raise-if-duplicate-identifiers is committed
+      ;(raise-if-duplicate-identifiers "duplicate identifier" stx ids)
+      (raise-syntax-error-if (null? (cddr lst)) "bad syntax (missing expression after identifiers)" stx)
+      (raise-syntax-error-if (pair? (cdddr lst)) "bad syntax (multiple expressions after identifiers)" stx)
+      (datum->syntax #f
+                     (list (quote-syntax begin-for-syntax)
+                           (datum->syntax #f
+                                          (list* (quote-syntax define-values) (cdr lst))
+                                          stx))
+                     stx)))
+
+  ; --------------------------------------------------
+  ;
+  ;
+  ;           ;                            ;                  ;;;
+  ;           ;                            ;                    ;
+  ;           ;                           ;                     ;
+  ;  ;  ;  ;  ; ;;;     ;;;   ; ;;;       ;   ;    ;  ; ;;;     ;       ;;;    ;;;;    ;;;;
+  ;  ;  ;  ;  ;;   ;   ;   ;  ;;   ;     ;    ;    ;  ;;   ;    ;      ;   ;  ;    ;  ;    ;
+  ;  ; ; ; ;  ;    ;  ;    ;  ;    ;    ;     ;    ;  ;    ;    ;     ;    ;  ;       ;
+  ;  ; ; ; ;  ;    ;  ;;;;;;  ;    ;    ;     ;    ;  ;    ;    ;     ;;;;;;   ;;      ;;
+  ;  ; ; ; ;  ;    ;  ;       ;    ;   ;      ;    ;  ;    ;    ;     ;          ;;      ;;
+  ;  ; ; ; ;  ;    ;  ;       ;    ;   ;      ;    ;  ;    ;    ;     ;            ;       ;
+  ;   ;   ;   ;    ;   ;      ;    ;  ;       ;   ;;  ;    ;    ;      ;      ;    ;  ;    ;
+  ;   ;   ;   ;    ;    ;;;;  ;    ;  ;        ;;; ;  ;    ;    ;;;     ;;;;   ;;;;    ;;;;
+  ;
+  ;
+  ; when and unless
+  ;
+
+  (define-syntaxes (when)
+    (lambda (stx)
+      (define-values (lst) (syntax->list stx))
+      (raise-syntax-error-unless (pair? lst) "bad syntax" stx)
+      (raise-syntax-error-if (null? (cdr lst)) "bad syntax (missing test expression and body)" stx)
+      (raise-syntax-error-if (null? (cddr lst)) "bad syntax (missing body)" stx)
+      (datum->syntax (quote-syntax here)
+                     (list (quote-syntax if)
+                           (cadr lst)
+                           (list* (quote-syntax let-values)
+                                  (quote-syntax ())
+                                  (cddr lst))
+                           (quote-syntax (void)))
+                     stx)))
+
+  (define-syntaxes (unless)
+    (lambda (stx)
+      (define-values (lst) (syntax->list stx))
+      (raise-syntax-error-unless (pair? lst) "bad syntax" stx)
+      (raise-syntax-error-if (null? (cdr lst)) "bad syntax (missing test expression and body)" stx)
+      (raise-syntax-error-if (null? (cddr lst)) "bad syntax (missing body)" stx)
+      (datum->syntax (quote-syntax here)
+                     (list (quote-syntax if)
+                           (cadr lst)
+                           (quote-syntax (void))
+                           (list* (quote-syntax let-values)
+                                  (quote-syntax ())
+                                  (cddr lst)))
+                     stx)))
+
+  ; --------------------------------------------------
+  ;
+  ;
+  ;                   ;;;     ;;;          ;                          ;;;                          ;
+  ;                     ;       ;          ;                            ;               ;          ;
+  ;                     ;       ;         ;                             ;               ;         ;
+  ;     ;;;;    ;;;;    ;       ;         ;     ;;;     ;;;;            ;       ;;;     ;         ;     ;;;     ;;;;
+  ;    ;       ;   ;    ;       ;        ;     ;   ;   ;                ;      ;   ;  ;;;;;;     ;     ;   ;   ;
+  ;   ;       ;    ;    ;       ;       ;     ;    ;  ;                 ;     ;    ;    ;       ;     ;    ;  ;
+  ;   ;       ;    ;    ;       ;       ;     ;;;;;;  ;                 ;     ;;;;;;    ;       ;     ;;;;;;  ;
+  ;   ;       ;    ;    ;       ;      ;      ;       ;                 ;     ;         ;      ;      ;       ;
+  ;   ;       ;    ;    ;       ;      ;      ;       ;                 ;     ;         ;      ;      ;       ;
+  ;    ;      ;   ;;    ;       ;     ;        ;       ;                ;      ;        ;     ;        ;       ;
+  ;     ;;;;   ;;; ;    ;;;     ;;;   ;         ;;;;    ;;;;            ;;;     ;;;;     ;;;  ;         ;;;;    ;;;;
+  ;
+  ;
+  ; call/ec and let/ec
+  ;
+
+  (define-values (call/ec) call-with-escape-continuation)
+
+  (define-syntaxes (let/ec)
+    (lambda (stx)
+      (define-values (lst) (syntax->list stx))
+      (raise-syntax-error-unless (pair? lst) "bad syntax" stx)
+      (define-values (len) (length lst))
+      (raise-syntax-error-if (= len 1) "bad syntax (missing identifier and body)" stx)
+      (raise-syntax-error-if (= len 2) "bad syntax (missing body)" stx)
+      (datum->syntax (quote-syntax here)
+                     (list (quote-syntax call-with-escape-continuation)
+                           (datum->syntax #f
+                                          (list* (quote-syntax lambda)
+                                                 (list (cadr lst))
+                                                 (stx-cdr (stx-cdr stx)))
+                                          stx))
+                     stx)))
+
+  ; --------------------------------------------------
+  ;
+  ;
+  ;                                ;
+  ;                                ;
+  ;                                ;
+  ;     ;;;;    ;;    ; ;;;     ;;;;
+  ;    ;       ;  ;   ;;   ;   ;   ;
+  ;   ;       ;    ;  ;    ;  ;    ;
+  ;   ;       ;    ;  ;    ;  ;    ;
+  ;   ;       ;    ;  ;    ;  ;    ;
+  ;   ;       ;    ;  ;    ;  ;    ;
+  ;    ;       ;  ;   ;    ;  ;   ;;
+  ;     ;;;;    ;;    ;    ;   ;;; ;
+  ;
+  ;
+  ; `cond`
+  ;
+
+  (define-syntaxes (=>)
+    (lambda (stx)
+      (raise-syntax-error #f "arrow not allowed as an expression" stx)))
+
+  (define-syntaxes (else)
+    (lambda (stx)
+      (raise-syntax-error #f "not allowed as an expression" stx)))
+
+  ;; old-cond is like cond, but uses unbound `=>' and `else'
+
+  (define-syntaxes (cond old-cond)
+    (let-values ([(go)
+                  (let-values ([(here) (quote-syntax here)])
+                    (lambda (in-form =>-stx else-stx track-disappeared-uses?)
+                      (if (identifier? in-form)
+                          (raise-syntax-error #f "bad syntax" in-form)
+                          (void))
+                      (let-values
+                          ([(expansion disappeared-uses)
+                            (let-values ([(form) (stx-cdr in-form)]
+                                         [(serror)
+                                          (lambda (msg at)
+                                            (raise-syntax-error #f msg in-form at))])
+                              (letrec-values ([(loop)
+                                               (lambda (tests)
+
+                                                 (if (stx-null? tests)
+                                                     (values (quote-syntax (void)) '())
+                                                     (if (not (stx-pair? tests))
+                                                         (serror
+                                                          "bad syntax (body must contain a list of pairs)"
+                                                          tests)
+                                                         (let-values ([(line) (stx-car tests)]
+                                                                      [(rest) (stx-cdr tests)])
+                                                           (if (not (stx-pair? line))
+                                                               (serror
+                                                                "bad syntax (clause is not a test-value pair)"
+                                                                line)
+                                                               (letrec-values ([(test) (stx-car line)]
+                                                                               [(value) (stx-cdr line)]
+                                                                               [(else?) (if (identifier? test)
+                                                                                            (free-identifier=? test else-stx)
+                                                                                            #f)])
+                                                                 (if (if else? (stx-pair? rest) #f)
+                                                                     (serror "bad syntax (`else' clause must be last)" line)
+                                                                     (void))
+                                                                 (if (if (not else?)
+                                                                         (if (stx-pair? value)
+                                                                             (if (identifier? (stx-car value))
+                                                                                 (free-identifier=? (stx-car value) =>-stx)
+                                                                                 #f)
+                                                                             #f)
+                                                                         #f)
+                                                                     (if (if (stx-pair? (stx-cdr value))
+                                                                             (stx-null? (stx-cdr (stx-cdr value)))
+                                                                             #f)
+                                                                         (let-values ([(exp d-u) (loop rest)])
+                                                                           (let-values ([(gen) 'cond-val])
+                                                                             (values
+                                                                              (list (quote-syntax let-values)
+                                                                                    (list (list (list gen) test))
+                                                                                    (list (quote-syntax if)
+                                                                                          gen
+                                                                                          (list (stx-car (stx-cdr value)) gen)
+                                                                                          exp))
+                                                                              (cons (syntax-local-introduce (stx-car value))
+                                                                                    d-u))))
+                                                                         (serror
+                                                                          "bad syntax (bad clause form with =>)"
+                                                                          line))
+                                                                     (if else?
+                                                                         (if (stx-null? value)
+                                                                             (serror
+                                                                              "missing expressions in `else' clause"
+                                                                              line)
+                                                                             (values (list* (quote-syntax let-values)
+                                                                                            (quote-syntax ())
+                                                                                            value)
+                                                                                     (list (syntax-local-introduce test))))
+                                                                         (let-values ([(exp d-u) (loop rest)])
+                                                                           (values
+                                                                            (if (stx-null? value)
+                                                                                (let-values ([(gen) 'cond-val])
+                                                                                  (list (quote-syntax let-values)
+                                                                                        (list (list (list gen) test))
+                                                                                        (list (quote-syntax if)
+                                                                                              gen gen exp)))
+                                                                                (list
+                                                                                 (quote-syntax if) test
+                                                                                 (list* (quote-syntax let-values)
+                                                                                        (quote-syntax ())
+                                                                                        value)
+                                                                                 exp))
+                                                                            d-u)))))))))
+                                                 )])
+                                (loop form)))])
+                        (let-values ([(expansion-stx) (datum->syntax here expansion in-form)])
+                          (if (if (not track-disappeared-uses?) #t (null? disappeared-uses))
+                              expansion-stx
+                              (syntax-property expansion-stx 'disappeared-use disappeared-uses))))))])
+      (values
+       (lambda (stx) (go stx (quote-syntax =>) (quote-syntax else) #t))
+       (lambda (stx) (go stx (datum->syntax #f '=>) (datum->syntax #f 'else) #f)))))
+
+  ; --------------------------------------------------
+  ;
+  ;
+  ;   ;;;                                ;;;;
+  ;     ;               ;               ;
+  ;     ;               ;               ;
+  ;     ;       ;;;     ;               ;       ;;     ; ;;; ; ;; ;;   ;;;;
+  ;     ;      ;   ;  ;;;;;;          ;;;;;;   ;  ;    ;;  ; ;; ;; ;  ;    ;
+  ;     ;     ;    ;    ;               ;     ;    ;   ;   ; ;  ;  ;  ;
+  ;     ;     ;;;;;;    ;               ;     ;    ;   ;     ;  ;  ;   ;;
+  ;     ;     ;         ;               ;     ;    ;   ;     ;  ;  ;     ;;
+  ;     ;     ;         ;               ;     ;    ;   ;     ;  ;  ;       ;
+  ;     ;      ;        ;               ;      ;  ;    ;     ;  ;  ;  ;    ;
+  ;     ;;;     ;;;;     ;;;            ;       ;;     ;     ;  ;  ;   ;;;;
+  ;
+  ;
+  ; let, let*, letrec, let-values
+  ;
+
   
   (define-syntaxes (let*-values let let* letrec)
     (let-values ([(lambda-stx) (quote-syntax lambda-stx)]
@@ -193,6 +533,25 @@
          (lambda (stx) (go stx #t #f (quote-syntax let-values)))
          (lambda (stx) (go stx #f #t (quote-syntax let*-values)))
          (lambda (stx) (go stx #f #f (quote-syntax letrec-values)))))))
+
+  ; --------------------------------------------------
+  ;
+  ;
+  ;     ;;;;    ;;;;
+  ;    ;   ;   ;   ;
+  ;   ;    ;  ;    ;
+  ;   ;    ;  ;    ;
+  ;   ;    ;  ;    ;
+  ;   ;    ;  ;    ;
+  ;   ;   ;;  ;   ;;
+  ;    ;;; ;   ;;; ;
+  ;        ;       ;
+  ;        ;       ;
+  ;        ;       ;
+  ;
+  ;
+  ; quasiquote
+  ;
 
   (define-values (qq-append)
     (lambda (a b)
@@ -439,6 +798,25 @@
 	    form)
 	   in-form)))))
 
+  ; --------------------------------------------------
+  ;
+  ;
+  ;                        ;       ;
+  ;                        ;       ;
+  ;                        ;      ;
+  ;     ;;;;  ; ;;;     ;;;;      ;     ;;     ; ;;;
+  ;    ;   ;  ;;   ;   ;   ;     ;     ;  ;    ;;  ;
+  ;   ;    ;  ;    ;  ;    ;    ;     ;    ;   ;   ;
+  ;   ;    ;  ;    ;  ;    ;    ;     ;    ;   ;
+  ;   ;    ;  ;    ;  ;    ;   ;      ;    ;   ;
+  ;   ;    ;  ;    ;  ;    ;   ;      ;    ;   ;
+  ;   ;   ;;  ;    ;  ;   ;;  ;        ;  ;    ;
+  ;    ;;; ;  ;    ;   ;;; ;  ;         ;;     ;
+  ;
+  ;
+  ; `and` and `or`
+  ;
+
   (define-syntaxes (and)
     (let-values ([(here) (quote-syntax here)])
       (lambda (x)
@@ -501,6 +879,6 @@
 		       "bad syntax"
 		       x))))))))
 
-  (#%provide let*-values
-             let let* letrec
-             quasiquote and or))
+  ;
+  ; --------------------------------------------------
+  )

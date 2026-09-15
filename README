@@ -3,7 +3,7 @@ The Racket Programming Language
 
 This is the
   Racket | All Platforms | Source
-distribution for version 9.2.
+distribution for version 9.3.
  
 This distribution provides source for the Racket run-time system;
 for build and installation instructions, see "src/README.txt".
@@ -12,7 +12,7 @@ installed packages in source form.)
 
 The distribution has been configured so that when you install or
 update packages, the package catalogs at
-  https://download.racket-lang.org/releases/9.2/catalog/
+  https://download.racket-lang.org/releases/9.3/catalog/
   https://download.rhombus-lang.org/releases/current/catalog/
 are consulted first.
 

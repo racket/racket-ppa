@@ -357,7 +357,7 @@
 ;; ---------------------------------------------------------------------
 ;; Version and machine types:
 
-(define-constant scheme-version #x0a040004)
+(define-constant scheme-version #x0a050001)
 
 (define-syntax define-machine-types
   (lambda (x)
@@ -419,6 +419,7 @@
   rv64ob    trv64ob
   rv64nb    trv64nb
   la64le    tla64le
+  a6hk      ta6hk
 )
 
 (include "machine.def")
