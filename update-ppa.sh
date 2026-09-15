@@ -538,27 +538,40 @@ if $NO_DOCKER; then
 else
     log "Validating Build-Depends across target releases"
 
-    # Extract Build-Depends package names from debian/control
-    BUILD_DEPS=$(sed -n '/^Build-Depends:/,/^[A-Z][A-Za-z-]*:/p' debian/control \
+    # One line per Build-Depends entry, alternatives kept together, so
+    # that "a | b" counts as satisfied when either exists.
+    BUILD_DEP_GROUPS=$(sed -n '/^Build-Depends:/,/^[A-Z][A-Za-z-]*:/p' debian/control \
         | sed '$d' \
-        | sed 's/^Build-Depends://; s/([^)]*)//g; s/,/\n/g; s/|/\n/g' \
-        | sed 's/^[ \t]*//; s/[ \t]*$//' \
-        | grep -v '^$' \
-        | sort -u)
+        | sed 's/^Build-Depends://' \
+        | tr ',' '\n' \
+        | sed 's/([^)]*)//g; s/|/ /g; s/^[ \t]*//; s/[ \t]*$//; s/[ \t][ \t]*/ /g' \
+        | grep -v '^$')
 
     DEPS_PROBLEMS=false
     for release in $RELEASES; do
         log "  Checking packages on $release..."
-        MISSING=""
-        for pkg in $BUILD_DEPS; do
-            if ! docker run --rm "ubuntu:${release}" \
-                bash -c "apt-get update -qq 2>/dev/null && apt-cache show '$pkg' >/dev/null 2>&1" \
-                2>/dev/null; then
-                MISSING="${MISSING} ${pkg}"
-            fi
-        done
+        # One container per release, not one per package.
+        MISSING=$(docker run --rm -e GROUPS="$BUILD_DEP_GROUPS" "ubuntu:${release}" \
+            bash -c '
+                apt-get update -qq >/dev/null 2>&1
+                printf "%s\n" "$GROUPS" | while read -r group; do
+                    [ -z "$group" ] && continue
+                    found=no
+                    for pkg in $group; do
+                        if apt-cache show "$pkg" >/dev/null 2>&1; then
+                            found=yes
+                            break
+                        fi
+                    done
+                    [ "$found" = no ] && echo "$group"
+                done
+                # The loop ends non-zero when the last group was found,
+                # which would abort this script under set -e.
+                exit 0
+            ' 2>/dev/null || true)
+
         if [[ -n "$MISSING" ]]; then
-            warn "Missing on $release:$MISSING"
+            warn "Missing on $release: $(echo "$MISSING" | tr '\n' ',' | sed 's/,$//')"
             DEPS_PROBLEMS=true
         fi
     done
