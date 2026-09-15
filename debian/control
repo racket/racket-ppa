@@ -30,10 +30,17 @@ Homepage: https://www.racket-lang.org/
 
 Package: racket
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, racket-common (= ${source:Version})
-Recommends: racket-doc (>= ${source:Upstream-Version}),
-            libglib2.0-0, libpangocairo-1.0-0, libjpeg62-turbo, libpng16-16,
-            libgtk2.0-0, libgdk-pixbuf2.0-0, libssl3
+Depends: racket-common (= ${source:Version}),
+         ${misc:Depends},
+         ${shlibs:Depends}
+Recommends: libgdk-pixbuf2.0-0,
+            libglib2.0-0,
+            libgtk2.0-0,
+            libjpeg62-turbo,
+            libpangocairo-1.0-0,
+            libpng16-16,
+            libssl3,
+            racket-doc (>= ${source:Upstream-Version})
 Breaks: racket-common (<<8.6~)
 Replaces: racket-common (<<8.0~)
 Description: extensible programming language in the Scheme family
@@ -55,9 +62,9 @@ Architecture: all
 Breaks: racket (<< 8.6~)
 Replaces: racket (<< 8.6~)
 Depends: ${misc:Depends}, ${shlibs:Depends}
-Recommends: racket (>= ${source:Upstream-Version})
-            , racket-doc (>= ${source:Upstream-Version})
-            , sensible-utils
+Recommends: racket (>= ${source:Upstream-Version}),
+            racket-doc (>= ${source:Upstream-Version}),
+            sensible-utils
 Description: extensible programming language in the Scheme family (shared files)
  This package includes the architecture independent files for Racket
  (but not the documentation, see racket-doc for that).
