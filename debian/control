@@ -1,7 +1,7 @@
 Source: racket
 Section: lisp
 Priority: optional
-Maintainer: David Bremner <bremner@debian.org>
+Maintainer: Racket PPA <adm@racket-lang.org>
 Standards-Version: 4.1.1
 Build-Depends: debhelper (>= 10),
                libcairo2-dev,
@@ -23,8 +23,8 @@ Build-Depends: debhelper (>= 10),
                sqlite3,
                xbitmaps,
                zlib1g-dev
-Vcs-Git: https://salsa.debian.org/bremner/racket
-Vcs-Browser: https://salsa.debian.org/bremner/racket
+Vcs-Git: https://github.com/racket/racket-ppa
+Vcs-Browser: https://github.com/racket/racket-ppa
 Homepage: https://www.racket-lang.org/
 
 Package: racket
@@ -36,13 +36,13 @@ Recommends: libgdk-pixbuf-2.0-0,
             libgdk-pixbuf-xlib-2.0-0,
             libglib2.0-0,
             libgtk2.0-0,
-            libjpeg62-turbo,
+            libjpeg-turbo8 | libjpeg62-turbo,
             libpangocairo-1.0-0,
             libpng16-16,
             libssl3,
             racket-doc (>= ${source:Upstream-Version})
-Breaks: racket-common (<<8.16+dfsg1-3~)
-Replaces: racket-common (<<8.16+dfsg1-3~)
+Breaks: racket-common (<< 9.2~)
+Replaces: racket-common (<< 9.2~)
 Description: extensible programming language in the Scheme family
  Racket (previously PLT Scheme) is a programming language suitable for
  scripting and application development, including GUIs and web
