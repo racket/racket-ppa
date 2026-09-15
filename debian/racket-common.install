@@ -2,6 +2,7 @@
 echo "usr/include"
 find debian/tmp/usr/share/racket/collects -type f -not -name "*.zo" -not -name "*.dep"
 find debian/tmp/usr/share/racket/pkgs -type f -not -name "*.zo" -not -name "*.dep"
+echo "usr/share/doc/racket/release"
 echo "usr/share/racket/links.rktd"
 echo "usr/share/racket/shares.rktd"
 echo "usr/share/racket/info-cache.rktd"

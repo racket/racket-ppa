@@ -1,2 +1,3 @@
-usr/share/doc/racket
+#!/bin/sh
+find debian/tmp/usr/share/doc/racket -type f -not -path "debian/tmp/usr/share/doc/racket/release/*"
 
