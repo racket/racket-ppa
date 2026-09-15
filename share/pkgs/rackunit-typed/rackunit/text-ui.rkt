@@ -1,6 +1,5 @@
 #lang typed/racket
-(require typed/rackunit
-         typed/private/utils)
+(require typed/rackunit)
 
 (define-type Verbosity
   (U 'quiet 'normal 'verbose))

@@ -132,9 +132,10 @@
               (thread (RECEIVE in))))))
       
       (define/private (broadcast msg)
-        (when *out* 
+        (when *out*
           (check-result 'send sexp? "Sexp expected; given ~e\n" msg)
-          (tcp-send *out* msg)))
+          (with-handlers ([exn:fail:network? (lambda (e) (set! *out* #f))])
+            (tcp-send *out* msg))))
       
       ;; -----------------------------------------------------------------------
       (field
@@ -185,12 +186,11 @@
             (class %
               (super-new)
               (define/override (on-char e) 
-                (when live
-                  (let ([e:str (key-event->parts e)])
-                    (cond
-                      [(string=? e:str "release") (prelease (key-release->parts e))]
-                      [(and pad (pad-event? e:str)) (ppad e:str)]
-                      [else (pkey e:str)])))))))
+                (let ([e:str (key-event->parts e)])
+                  (cond
+                    [(string=? e:str "release") (prelease (key-release->parts e))]
+                    [(and pad (pad-event? e:str)) (ppad e:str)]
+                    [else (pkey e:str)]))))))
       
       (define/public (deal-with-mouse %)
         (if (not on-mouse) 
@@ -205,11 +205,10 @@
               (super-new)
               (define/override (on-event e)
                 (define-values (x y me) (mouse-event->parts e))
-                (when live
-                  (cond
-                    [(and (<= 0 x width) (<= 0 y height)) (pmouse x y me)]
-                    [(member me '("leave" "enter")) (pmouse x y me)]
-                    [else (void)]))))))
+                (cond
+                  [(and (<= 0 x width) (<= 0 y height)) (pmouse x y me)]
+                  [(member me '("leave" "enter")) (pmouse x y me)]
+                  [else (void)])))))
       
       ;; allows embedding of the world-canvas in other GUIs
       (define/public (create-frame)
@@ -265,7 +264,7 @@
         (send editor-canvas focus)
         
         (send frame fullscreen (eq? display-full? 'fullscreen))
-	(set! the-frame frame)
+        (set! the-frame frame)
         (send frame show #t))
       
       ;; Image -> Void
@@ -325,63 +324,64 @@
              (pub name)
              
              (define (name arg ...) 
-               (queue-callback 
+               (queue-callback
                 (lambda ()
-                  (collect-garbage 'incremental)
-                  (define H (handler #t))
-                  (with-handlers ([exn? H])
-		    (define ws (send world get))
-                    (define nw (transform ws arg ...))
+                  (when live
+                    (collect-garbage 'incremental)
+                    (define H (handler #t))
+                    (with-handlers ([exn? H])
+                      (define ws (send world get))
+                      (define nw (transform ws arg ...))
 
-		    ;; log events:
-		    (when (and state (not (eq? 'pub 'private)))
-		      (define tg (symbol->string 'transform))
-		      (define e* (string-append tg " event: ~a " (begin arg "~a ") ...))
-		      (send gui log e* ws arg ...)
-		      (send gui log "new state: ~a" nw))
+                      ;; log events:
+                      (when (and state (not (eq? 'pub 'private)))
+                        (define tg (symbol->string 'transform))
+                        (define e* (string-append tg " event: ~a " (begin arg "~a ") ...))
+                        (send gui log e* ws arg ...)
+                        (send gui log "new state: ~a" nw))
 
-                    (define (d) 
-                      (with-handlers ((exn? H))
-                        (pdraw))
-                      (set-draw#!))
-                    ;; ---
-                    ;; [Listof (Box [d | void])]
-                    (define w '()) 
-                    ;; set all to void, then w to null 
-                    ;; when a high priority draw is scheduledd
-                    ;; --- 
-                    (when (package? nw)
-                      (broadcast (package-message nw))
-                      (set! nw (package-world nw)))
-                    (cond
-                      [(stop-the-world? nw)
-                       (set! nw (stop-the-world-world nw))
-                       (send world set tag nw)
-		       (wrap-up 'name)]
-                      [else 
-                       [define changed-world? (send world set tag nw)]
-                       [define stop? (stop (send world get))]
-                       ;; this is the old "Robby optimization" see checked-cell:
-                       ; unless changed-world? 
-                       (cond
-                         [(and draw (not stop?))
-                          (cond
-                            [(not drawing)
-                             (set! drawing #t)
-                             (let ([b (box d)])
-                               (set! w (cons b w))
-                               ;; low priority, otherwise it's too fast
-                               (queue-callback (lambda () ((unbox b))) #f))]
-                            [(< draw# 0)
-                             (set-draw#!)
-                             (for-each (lambda (b) (set-box! b void)) w)
-                             (set! w '())
-                             ;; high!!  the scheduled callback didn't fire
-                             (queue-callback (lambda () (d)) #t)]
-                            [else 
-                             (set! draw# (- draw# 1))])]
-                         [stop? (wrap-up 'name)])
-                       changed-world?]))))))]))
+                      (define (d) 
+                        (with-handlers ((exn? H))
+                          (pdraw))
+                        (set-draw#!))
+                      ;; ---
+                      ;; [Listof (Box [d | void])]
+                      (define w '()) 
+                      ;; set all to void, then w to null 
+                      ;; when a high priority draw is scheduledd
+                      ;; --- 
+                      (when (package? nw)
+                        (broadcast (package-message nw))
+                        (set! nw (package-world nw)))
+                      (cond
+                        [(stop-the-world? nw)
+                         (set! nw (stop-the-world-world nw))
+                         (send world set tag nw)
+                         (wrap-up 'name)]
+                        [else 
+                         [define changed-world? (send world set tag nw)]
+                         [define stop? (stop (send world get))]
+                         ;; this is the old "Robby optimization" see checked-cell:
+                         ; unless changed-world? 
+                         (cond
+                           [(and draw (not stop?))
+                            (cond
+                              [(not drawing)
+                               (set! drawing #t)
+                               (let ([b (box d)])
+                                 (set! w (cons b w))
+                                 ;; low priority, otherwise it's too fast
+                                 (queue-callback (lambda () ((unbox b))) #f))]
+                              [(< draw# 0)
+                               (set-draw#!)
+                               (for-each (lambda (b) (set-box! b void)) w)
+                               (set! w '())
+                               ;; high!!  the scheduled callback didn't fire
+                               (queue-callback (lambda () (d)) #t)]
+                              [else 
+                               (set! draw# (- draw# 1))])]
+                           [stop? (wrap-up 'name)])
+                         changed-world?])))))))]))
 
       ;; tick, tock : deal with a tick event for this world
       (define (clock w) (pptock w))
@@ -437,18 +437,27 @@
 
       ;; wrap up actions 
       (define/private (wrap-up name)
-	(last-draw)
-	(callback-stop! 'name)
-	(enable-images-button)
+        (last-draw)
+
+        (set! live #false)
+        
         ;; in principle, a big-bang that specifies both
         ;;   [record? #true]
         ;; and
         ;;   [close-on-stop #true]
         ;; is self-contradictory; I will wait until someone complaints -- MF, 22 Nov 2015
-	(when close-on-stop
-          (unless (boolean? close-on-stop)
-            (sleep close-on-stop))
-	  (send the-frame show #f)))
+        (cond
+          [(number? close-on-stop)
+           (sleep/yield close-on-stop)
+           (send the-frame show #f)]
+          [(false? close-on-stop)
+           (sleep/yield 600) ;; just wait for a long time
+           (send the-frame show #f)]
+          [else
+           (send the-frame show #f)])
+
+        (callback-stop! 'name)
+        (enable-images-button))
 
       (define/public (callback-stop! msg)
         (stop! (send world get)))

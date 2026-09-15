@@ -99,7 +99,12 @@
                   primitive-realm))
 
 (define/who error-print-context-length
-  (make-parameter 16
+  (make-parameter (let ([s (getenv "PLT_ERROR_PRINT_CONTEXT_LENGTH")])
+                    (or (and s
+                             (let ([n (string->number s)])
+                               (and (exact-nonnegative-integer? n)
+                                    n)))
+                        16))
                   (lambda (v)
                     (check who exact-nonnegative-integer? v)
                     v)
@@ -1217,7 +1222,7 @@
   (current-exception-state (create-exception-state))
   (base-exception-handler
    (lambda (v)
-     #;(#%printf "~s\n" (exn->string v))
+     #;(#%printf "~s\n" (parameterize () (exn->string v)))
      #;(#%printf "~s\n" (continuation-mark-set-traces (current-continuation-marks)))
      (cond
       [(and (warning? v)

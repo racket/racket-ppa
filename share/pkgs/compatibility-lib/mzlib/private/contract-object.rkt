@@ -1,10 +1,8 @@
 #lang racket/base
 (require "contract-arrow.rkt"
-         racket/contract/private/guts
-         racket/contract/private/misc
-         racket/contract/private/prop
-         racket/private/class-internal
-         racket/private/class-c-old
+         (only-in racket/contract any/c coerce-contract)
+         (only-in racket/class field)
+         (prefix-in r/c: racket/class)
          "contract-arr-checks.rkt")
 
 (require (for-syntax racket/base
@@ -14,14 +12,14 @@
 
 (define-syntax object-contract
   (let ()
-    (define (obj->/proc stx) (make-/proc #t ->/h stx))
-    (define (obj->*/proc stx) (make-/proc #t ->*/h stx))
-    (define (obj->d/proc stx) (make-/proc #t ->d/h stx))
-    (define (obj->d*/proc stx) (make-/proc #t ->d*/h stx))
-    (define (obj->r/proc stx) (make-/proc #t ->r/h stx))
-    (define (obj->pp/proc stx) (make-/proc #t ->pp/h stx))
-    (define (obj->pp-rest/proc stx) (make-/proc #t ->pp-rest/h stx))
-    (define (obj-case->/proc stx) (make-case->/proc #t stx stx select/h))
+    (define ((obj->/proc mtd-name) stx) (make-/proc mtd-name ->/h stx))
+    (define ((obj->*/proc mtd-name) stx) (make-/proc mtd-name ->*/h stx))
+    (define ((obj->d/proc mtd-name) stx) (make-/proc mtd-name ->d/h stx))
+    (define ((obj->d*/proc mtd-name) stx) (make-/proc mtd-name ->d*/h stx))
+    (define ((obj->r/proc mtd-name) stx) (make-/proc mtd-name ->r/h stx))
+    (define ((obj->pp/proc mtd-name) stx) (make-/proc mtd-name ->pp/h stx))
+    (define ((obj->pp-rest/proc mtd-name) stx) (make-/proc mtd-name ->pp-rest/h stx))
+    (define (obj-case->/proc mtd-name stx) (make-case->/proc mtd-name stx stx select/h))
     
     ;; WARNING: select/h is copied from contract-arrow.rkt. I'm not sure how
     ;; I can avoid this duplication -robby
@@ -38,8 +36,8 @@
         [_ (raise-syntax-error err-name "malformed arrow clause" ctxt-stx stx)]))
     
     
-    (define (obj-opt->/proc stx) (make-opt->/proc #t stx select/h #'case-> #'->))
-    (define (obj-opt->*/proc stx) (make-opt->*/proc #t stx stx select/h #'case-> #'->))
+    (define (obj-opt->/proc mtd-name stx) (make-opt->/proc mtd-name stx select/h #'case-> #'->))
+    (define (obj-opt->*/proc mtd-name stx) (make-opt->*/proc mtd-name stx stx select/h #'case-> #'->))
     
     (λ (stx)
       
@@ -62,7 +60,7 @@
            (raise-syntax-error 'object-contract "expected name of field" stx (syntax field-name))]
           [(mtd-name ctc)
            (identifier? (syntax mtd-name))
-           (let-values ([(ctc-stx proc-stx) (expand-mtd-contract (syntax ctc))])
+           (let-values ([(ctc-stx proc-stx) (expand-mtd-contract #'mtd-name (syntax ctc))])
              (make-mtd (syntax mtd-name)
                        ctc-stx
                        proc-stx))]
@@ -71,7 +69,7 @@
           [_ (raise-syntax-error 'object-contract "expected field or method clause" stx f/m-stx)]))
       
       ;; expand-mtd-contract : syntax -> (values syntax[expanded ctc] syntax[mtd-arg])
-      (define (expand-mtd-contract mtd-stx)
+      (define (expand-mtd-contract mtd-name mtd-stx)
         (syntax-case mtd-stx (case-> opt-> opt->*)
           [(case-> cases ...)
            (let loop ([cases (syntax->list (syntax (cases ...)))]
@@ -81,31 +79,31 @@
                [(null? cases) 
                 (values
                  (with-syntax ([(x ...) (reverse ctc-stxs)])
-                   (obj-case->/proc (syntax (case-> x ...))))
+                   (obj-case->/proc mtd-name (syntax (case-> x ...))))
                  (with-syntax ([(x ...) (apply append (map syntax->list (reverse args-stxs)))])
                    (syntax (x ...))))]
                [else
-                (let-values ([(trans ctc-stx mtd-args) (expand-mtd-arrow (car cases))])
+                (let-values ([(trans ctc-stx mtd-args) (expand-mtd-arrow mtd-name (car cases))])
                   (loop (cdr cases)
                         (cons ctc-stx ctc-stxs)
                         (cons mtd-args args-stxs)))]))]
           [(opt->* (req-contracts ...) (opt-contracts ...) (res-contracts ...))
            (values
-            (obj-opt->*/proc (syntax (opt->* (any/c req-contracts ...) (opt-contracts ...) (res-contracts ...))))
+            (obj-opt->*/proc mtd-name (syntax (opt->* (any/c req-contracts ...) (opt-contracts ...) (res-contracts ...))))
             (generate-opt->vars (syntax (req-contracts ...))
                                 (syntax (opt-contracts ...))))]
           [(opt->* (req-contracts ...) (opt-contracts ...) any)
            (values
-            (obj-opt->*/proc (syntax (opt->* (any/c req-contracts ...) (opt-contracts ...) any)))
+            (obj-opt->*/proc mtd-name (syntax (opt->* (any/c req-contracts ...) (opt-contracts ...) any)))
             (generate-opt->vars (syntax (req-contracts ...))
                                 (syntax (opt-contracts ...))))]
           [(opt-> (req-contracts ...) (opt-contracts ...) res-contract) 
            (values
-            (obj-opt->/proc (syntax (opt-> (any/c req-contracts ...) (opt-contracts ...) res-contract)))
+            (obj-opt->/proc mtd-name (syntax (opt-> (any/c req-contracts ...) (opt-contracts ...) res-contract)))
             (generate-opt->vars (syntax (req-contracts ...))
                                 (syntax (opt-contracts ...))))]
           [else 
-           (let-values ([(x y z) (expand-mtd-arrow mtd-stx)])
+           (let-values ([(x y z) (expand-mtd-arrow mtd-name mtd-stx)])
              (values (x y) z))]))
       
       ;; generate-opt->vars : syntax[requried contracts] syntax[optional contracts] -> syntax[list of arg specs]
@@ -121,7 +119,7 @@
                                rests ...)))]))))
       
       ;; expand-mtd-arrow : stx -> (values (syntax[ctc] -> syntax[expanded ctc]) syntax[ctc] syntax[mtd-arg])
-      (define (expand-mtd-arrow mtd-stx)
+      (define (expand-mtd-arrow mtd-name mtd-stx)
         (syntax-case mtd-stx (-> ->* ->d ->d* ->r ->pp ->pp-rest)
           [(->) (raise-syntax-error 'object-contract "-> must have arguments" stx mtd-stx)]
           [(-> args ...)
@@ -129,21 +127,21 @@
            ;; (args ...) contains the right number of arguments
            ;; to the method because it also contains one arg for the result! urgh.
            (with-syntax ([(arg-vars ...) (generate-temporaries (syntax (args ...)))])
-             (values obj->/proc
-                     (syntax (-> any/c args ...))
+             (values (obj->/proc mtd-name)
+                     (remove-source-loc (syntax (-> any/c args ...)))
                      (syntax ((arg-vars ...)))))]
           [(->* (doms ...) (rngs ...))
            (with-syntax ([(args-vars ...) (generate-temporaries (syntax (doms ...)))]
                          [(this-var) (generate-temporaries (syntax (this-var)))])
-             (values obj->*/proc
-                     (syntax (->* (any/c doms ...) (rngs ...)))
+             (values (obj->*/proc mtd-name)
+                     (remove-source-loc (syntax (->* (any/c doms ...) (rngs ...))))
                      (syntax ((this-var args-vars ...)))))]
           [(->* (doms ...) rst (rngs ...))
            (with-syntax ([(args-vars ...) (generate-temporaries (syntax (doms ...)))]
                          [(rst-var) (generate-temporaries (syntax (rst)))]
                          [(this-var) (generate-temporaries (syntax (this-var)))])
-             (values obj->*/proc
-                     (syntax (->* (any/c doms ...) rst (rngs ...)))
+             (values (obj->*/proc mtd-name)
+                     (remove-source-loc (syntax (->* (any/c doms ...) rst (rngs ...))))
                      (syntax ((this-var args-vars ... . rst-var)))))]
           [(->* x ...)
            (raise-syntax-error 'object-contract "malformed ->*" stx mtd-stx)]
@@ -151,44 +149,55 @@
           [(->d doms ... rng-proc)
            (let ([doms-val (syntax->list (syntax (doms ...)))])
              (values
-              obj->d/proc
+              (obj->d/proc mtd-name)
               (with-syntax ([(arg-vars ...) (generate-temporaries doms-val)]
                             [arity-count (length doms-val)])
-                (syntax 
-                 (->d any/c doms ... 
-                      (let ([f rng-proc])
-                        (check->* f arity-count)
-                        (lambda (_this-var arg-vars ...)
-                          (f arg-vars ...))))))
+                (remove-source-loc
+                 #`(->d any/c doms ... 
+                        (let ([f rng-proc])
+                          (check->* f arity-count)
+                          #,(syntax-property
+                             #'(lambda (_this-var arg-vars ...)
+                                 (f arg-vars ...))
+                             'method-arity-error
+                             #t)))))
               (with-syntax ([(args-vars ...) (generate-temporaries doms-val)])
                 (syntax ((this-var args-vars ...))))))]
           [(->d* (doms ...) rng-proc)
            (values
-            obj->d*/proc
+            (obj->d*/proc mtd-name)
             (let ([doms-val (syntax->list (syntax (doms ...)))])
               (with-syntax ([(arg-vars ...) (generate-temporaries doms-val)]
                             [arity-count (length doms-val)])
-                (syntax (->d* (any/c doms ...)
-                              (let ([f rng-proc])
-                                (check->* f arity-count)
-                                (lambda (_this-var arg-vars ...)
-                                  (f arg-vars ...)))))))
+                (remove-source-loc
+                 #`(->d* (any/c doms ...)
+                         (let ([f rng-proc])
+                           (check->* f arity-count)
+                           #,(syntax-property
+                              #'(lambda (_this-var arg-vars ...)
+                                  (f arg-vars ...))
+                              'method-arity-error
+                              #t))))))
             (with-syntax ([(args-vars ...) (generate-temporaries (syntax (doms ...)))]
                           [(this-var) (generate-temporaries (syntax (this-var)))])
               (syntax ((this-var args-vars ...)))))]
           [(->d* (doms ...) rst-ctc rng-proc)
            (let ([doms-val (syntax->list (syntax (doms ...)))])
              (values
-              obj->d*/proc
+              (obj->d*/proc mtd-name)
               (with-syntax ([(arg-vars ...) (generate-temporaries doms-val)]
                             [(rest-var) (generate-temporaries (syntax (rst-ctc)))]
                             [arity-count (length doms-val)])
-                (syntax (->d* (any/c doms ...)
-                              rst-ctc
-                              (let ([f rng-proc])
-                                (check->*/more f arity-count)
-                                (lambda (_this-var arg-vars ... . rest-var)
-                                  (apply f arg-vars ... rest-var))))))
+                (remove-source-loc
+                 #`(->d* (any/c doms ...)
+                         rst-ctc
+                         (let ([f rng-proc])
+                           (check->*/more f arity-count)
+                           #,(syntax-property
+                              #'(lambda (_this-var arg-vars ... . rest-var)
+                                  (apply f arg-vars ... rest-var))
+                              'method-arity-error
+                              #t)))))
               (with-syntax ([(args-vars ...) (generate-temporaries (syntax (doms ...)))]
                             [(rst-var) (generate-temporaries (syntax (rst-ctc)))]
                             [(this-var) (generate-temporaries (syntax (this-var)))])
@@ -202,8 +211,8 @@
                          [(this-var) (generate-temporaries (syntax (this-var)))]
                          [this (datum->syntax mtd-stx 'this)])
              (values
-              obj->r/proc
-              (syntax (->r ([this any/c] [x dom] ...) rng))
+              (obj->r/proc mtd-name)
+              (remove-source-loc (syntax (->r ([this any/c] [x dom] ...) rng)))
               (syntax ((this-var arg-vars ...)))))]
           
           [(->r ([x dom] ...) rest-x rest-dom rng)
@@ -212,8 +221,8 @@
                          [(this-var) (generate-temporaries (syntax (this-var)))]
                          [this (datum->syntax mtd-stx 'this)])
              (values
-              obj->r/proc
-              (syntax (->r ([this any/c] [x dom] ...) rest-x rest-dom rng))
+              (obj->r/proc mtd-name)
+              (remove-source-loc (syntax (->r ([this any/c] [x dom] ...) rest-x rest-dom rng)))
               (syntax ((this-var arg-vars ... . rest-var)))))]
           
           [(->r . x)
@@ -224,8 +233,8 @@
                          [(this-var) (generate-temporaries (syntax (this-var)))]
                          [this (datum->syntax mtd-stx 'this)])
              (values
-              obj->pp/proc
-              (syntax (->pp ([this any/c] [x dom] ...) . other-stuff))
+              (obj->pp/proc mtd-name)
+              (remove-source-loc (syntax (->pp ([this any/c] [x dom] ...) . other-stuff)))
               (syntax ((this-var arg-vars ...)))))]
           [(->pp . x)
            (raise-syntax-error 'object-contract "malformed ->pp declaration")]
@@ -236,12 +245,18 @@
                          [(this-var) (generate-temporaries (syntax (this-var)))]
                          [this (datum->syntax mtd-stx 'this)])
              (values
-              obj->pp-rest/proc
-              (syntax (->pp ([this any/c] [x dom] ...) rest-id . other-stuff))
+              (obj->pp-rest/proc mtd-name)
+              (remove-source-loc (syntax (->pp ([this any/c] [x dom] ...) rest-id . other-stuff)))
               (syntax ((this-var arg-vars ... . rest-id)))))]
           [(->pp-rest . x)
            (raise-syntax-error 'object-contract "malformed ->pp-rest declaration")]
           [else (raise-syntax-error 'object-contract "unknown method contract syntax" stx mtd-stx)]))
+
+      (define (remove-source-loc stx)
+        (datum->syntax stx
+                       (syntax-e stx)
+                       #f
+                       stx))
       
       (define (syntax->improper-list stx)
         (define (se->il se)
@@ -273,31 +288,9 @@
                          [(field-ctc-stx ...) (map fld-ctc-stx flds)]
                          [(field-name ...) (map fld-name flds)]
                          [(field-ctc-var ...) (generate-temporaries flds)])
-             (syntax
-              (let ([method-ctc-var method-ctc-stx] 
-                    ...
-                    [field-ctc-var (coerce-contract 'object-contract field-ctc-stx)]
-                    ...)
-                (define ctc
-                  (make-contract
-                   #:name
-                   `(object-contract 
-                     ,(build-compound-type-name 'method-name method-ctc-var) ...
-                     ,(build-compound-type-name 'field 'field-name field-ctc-var) ...)
-                   #:projection
-                   (lambda (blame)
-                     (define p-app
-                       (make-wrapper-object blame
-                                            (list 'method-name ...) (list method-ctc-var ...)
-                                            '(field-name ...) (list field-ctc-var ...)))
-                     (lambda (val)
-                       (p-app ctc val #f)))
-                   #:first-order
-                   (lambda (val)
-                     (let/ec ret
-                       (check-object-contract val (list 'method-name ...) (list 'field-name ...)
-                                              (λ args (ret #f)))))))
-                  ctc))))]))))
-
-
-
+             (quasisyntax
+              (let ([method-ctc-var method-ctc-stx] ...
+                    [field-ctc-var (coerce-contract 'object-contract field-ctc-stx)] ...)
+                (r/c:object/c
+                 (method-name method-ctc-var) ...
+                 (field [field-name field-ctc-var] ...))))))]))))

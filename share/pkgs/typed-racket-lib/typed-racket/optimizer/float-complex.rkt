@@ -208,16 +208,21 @@
                   (define new-imag-id (if both-real?
                                           (mark-as-real (car is))
                                           (car is)))
+                  ;; Helper to convert non-float values to flonum for unsafe ops
+                  (define (maybe-to-float v)
+                    (if (as-non-float v)
+                        #`(real->double-flonum #,v)
+                        v))
                   (loop (car rs) new-imag-id (cdr e1) (cdr e2) (cdr rs) (cdr is)
                         ;; complex multiplication, imag part, then real part (reverse)
                         ;; we eliminate operations on the imaginary parts of reals
                         (list* #`((#,new-imag-id)
                                   #,(cond ((and o-real? e-real?) #'0.0)
-                                          (o-real? #`(unsafe-fl* #,o1 #,(car e2)))
-                                          (e-real? #`(unsafe-fl* #,o2 #,(car e1)))
+                                          (o-real? #`(unsafe-fl* #,(maybe-to-float o1) #,(car e2)))
+                                          (e-real? #`(unsafe-fl* #,o2 #,(maybe-to-float (car e1))))
                                           (else
-                                           #`(unsafe-fl+ (unsafe-fl* #,o2 #,(car e1))
-                                                         (unsafe-fl* #,o1 #,(car e2))))))
+                                           #`(unsafe-fl+ (unsafe-fl* #,o2 #,(maybe-to-float (car e1)))
+                                                         (unsafe-fl* #,(maybe-to-float o1) #,(car e2))))))
                                #`((#,(car rs))
                                   #,(cond [(and o-nf e-nf both-real?)
                                            ;; we haven't seen float operands yet, so
@@ -256,10 +261,19 @@
     #:with scaling-factor (generate-temporary "unboxed-scaling-")
     #:do [(log-unboxing-opt "unboxed unary float complex")]
     #:with (bindings ...)
+      ;; exp(a+bi) = exp(a) * (cos(b) + i*sin(b))
+      ;; When b is ±0.0, sin(b) is ±0.0 and exp(a) may be +inf.0,
+      ;; so sin(b)*exp(a) would produce NaN via IEEE 754 (0*inf=NaN).
+      ;; In Racket: (exp +inf.0+0.0i) = +inf.0+0.0i, (exp +nan.0+0.0i) = +nan.0+0.0i.
+      ;; Guard the zero case to avoid the spurious NaN.
       #`(c.bindings ...
          ((scaling-factor) (unsafe-flexp c.real-binding))
-         ((real-binding) (unsafe-fl* (unsafe-flcos c.imag-binding) scaling-factor))
-         ((imag-binding) (unsafe-fl* (unsafe-flsin c.imag-binding) scaling-factor))))
+         ((real-binding) (if (unsafe-fl= c.imag-binding 0.0)
+                             scaling-factor
+                             (unsafe-fl* (unsafe-flcos c.imag-binding) scaling-factor)))
+         ((imag-binding) (if (unsafe-fl= c.imag-binding 0.0)
+                             c.imag-binding
+                             (unsafe-fl* (unsafe-flsin c.imag-binding) scaling-factor)))))
 
 
   ;; we can eliminate boxing that was introduced by the user

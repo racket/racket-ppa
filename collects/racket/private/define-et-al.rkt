@@ -4,7 +4,33 @@
 
 (module define-et-al '#%kernel
   (#%require (for-syntax '#%kernel "stx.rkt" "qq-and-or.rkt" 
-                         "member.rkt" "cond.rkt"))
+                         "cond.rkt"))
+
+  (#%provide -define -define-syntax
+             when unless
+             call/ec let/ec)
+
+  ; --------------------------------------------------
+  ;
+  ;
+  ;        ;             ;;;;   ;                                        ;                                    ;                 ;
+  ;        ;            ;                                               ;                                     ;                  ;
+  ;        ;            ;                                              ;                                      ;                   ;
+  ;     ;;;;    ;;;     ;     ;;;     ; ;;;     ;;;                    ;      ; ;;;     ;;    ; ;;;           ;   ;  ;  ;  ;      ;
+  ;    ;   ;   ;   ;  ;;;;;;    ;     ;;   ;   ;   ;                  ;       ;;   ;   ;  ;   ;;   ;          ;  ;   ;  ;  ;       ;
+  ;   ;    ;  ;    ;    ;       ;     ;    ;  ;    ;                  ;       ;    ;  ;    ;  ;    ;          ; ;    ; ; ; ;       ;
+  ;   ;    ;  ;;;;;;    ;       ;     ;    ;  ;;;;;;                  ;       ;    ;  ;    ;  ;    ;          ;;     ; ; ; ;       ;
+  ;   ;    ;  ;         ;       ;     ;    ;  ;                       ;       ;    ;  ;    ;  ;    ;          ;;     ; ; ; ;       ;
+  ;   ;    ;  ;         ;       ;     ;    ;  ;                        ;      ;    ;  ;    ;  ;    ;          ; ;    ; ; ; ;      ;
+  ;   ;   ;;   ;        ;       ;     ;    ;   ;                       ;      ;    ;   ;  ;   ;    ;          ;  ;    ;   ;       ;
+  ;    ;;; ;    ;;;;    ;       ;;;   ;    ;    ;;;;                    ;     ;    ;    ;;    ;    ;          ;   ;   ;   ;      ;
+  ;                                                  ;;;;;;;             ;                                                      ;
+  ;                                                                       ;                                                    ;
+  ;
+  ;
+  ; non-keyword define* forms
+  ;
+
   
   ;; No error checking here, because these macros merely help
   ;;  us write macros before the real define and define-syntax
@@ -31,188 +57,92 @@
 	(values (mk-define (quote-syntax define-values))
 		(mk-define (quote-syntax define-syntaxes))))))
 
-  (-define-syntax when
-    (lambda (x)
-      (let ([l (syntax->list x)])
-        (cond
-          [(or (not l) (null? l))
-           (raise-syntax-error
-            #f
-            "bad syntax"
-            x)]
-          [(null? (cdr l))
-           (raise-syntax-error
-            #f
-            "missing test expression and body"
-            x)]
-          [(null? (cddr l))
-           (raise-syntax-error
-            #f
-            "missing body"
-            x)]
-          [else
-           (datum->syntax
-            (quote-syntax here)
-            (list (quote-syntax if)
-                  (stx-car (stx-cdr x))
-                  (list*
-                   (quote-syntax let-values)
-                   (quote-syntax ())
-                   (stx-cdr (stx-cdr x)))
-                  (quote-syntax (void)))
-            x)]))))
+  ; --------------------------------------------------
+  ;
+  ;
+  ;           ;                            ;                  ;;;
+  ;           ;                            ;                    ;
+  ;           ;                           ;                     ;
+  ;  ;  ;  ;  ; ;;;     ;;;   ; ;;;       ;   ;    ;  ; ;;;     ;       ;;;    ;;;;    ;;;;
+  ;  ;  ;  ;  ;;   ;   ;   ;  ;;   ;     ;    ;    ;  ;;   ;    ;      ;   ;  ;    ;  ;    ;
+  ;  ; ; ; ;  ;    ;  ;    ;  ;    ;    ;     ;    ;  ;    ;    ;     ;    ;  ;       ;
+  ;  ; ; ; ;  ;    ;  ;;;;;;  ;    ;    ;     ;    ;  ;    ;    ;     ;;;;;;   ;;      ;;
+  ;  ; ; ; ;  ;    ;  ;       ;    ;   ;      ;    ;  ;    ;    ;     ;          ;;      ;;
+  ;  ; ; ; ;  ;    ;  ;       ;    ;   ;      ;    ;  ;    ;    ;     ;            ;       ;
+  ;   ;   ;   ;    ;   ;      ;    ;  ;       ;   ;;  ;    ;    ;      ;      ;    ;  ;    ;
+  ;   ;   ;   ;    ;    ;;;;  ;    ;  ;        ;;; ;  ;    ;    ;;;     ;;;;   ;;;;    ;;;;
+  ;
+  ;
+  ; when and unless
+  ;
 
-  (-define-syntax unless
-    (lambda (x)
-      (let ([l (syntax->list x)])
-        (cond
-          [(or (not l) (null? l))
-           (raise-syntax-error
-            #f
-            "bad syntax"
-            x)]
-          [(null? (cdr l))
-           (raise-syntax-error
-            #f
-            "missing test expression and body"
-            x)]
-          [(null? (cddr l))
-           (raise-syntax-error
-            #f
-            "missing body"
-            x)]
-          [else
-           (datum->syntax
-            (quote-syntax here)
-            (list (quote-syntax if)
-                  (cadr l)
-                  (quote-syntax (void))
-                  (list*
-                   (quote-syntax let-values)
-                   (quote-syntax ())
-                   (cddr l)))
-            x)]))))
+  (define-syntaxes (when)
+    (lambda (stx)
+      (define-values (lst) (syntax->list stx))
+      (raise-syntax-error-unless (pair? lst) "bad syntax" stx)
+      (raise-syntax-error-if (null? (cdr lst)) "bad syntax (missing test expression and body)" stx)
+      (raise-syntax-error-if (null? (cddr lst)) "bad syntax (missing body)" stx)
+      (datum->syntax (quote-syntax here)
+                     (list (quote-syntax if)
+                           (cadr lst)
+                           (list* (quote-syntax let-values)
+                                  (quote-syntax ())
+                                  (cddr lst))
+                           (quote-syntax (void)))
+                     stx)))
+
+  (define-syntaxes (unless)
+    (lambda (stx)
+      (define-values (lst) (syntax->list stx))
+      (raise-syntax-error-unless (pair? lst) "bad syntax" stx)
+      (raise-syntax-error-if (null? (cdr lst)) "bad syntax (missing test expression and body)" stx)
+      (raise-syntax-error-if (null? (cddr lst)) "bad syntax (missing body)" stx)
+      (datum->syntax (quote-syntax here)
+                     (list (quote-syntax if)
+                           (cadr lst)
+                           (quote-syntax (void))
+                           (list* (quote-syntax let-values)
+                                  (quote-syntax ())
+                                  (cddr lst)))
+                     stx)))
+
+  ; --------------------------------------------------
+  ;
+  ;
+  ;                   ;;;     ;;;          ;                          ;;;                          ;
+  ;                     ;       ;          ;                            ;               ;          ;
+  ;                     ;       ;         ;                             ;               ;         ;
+  ;     ;;;;    ;;;;    ;       ;         ;     ;;;     ;;;;            ;       ;;;     ;         ;     ;;;     ;;;;
+  ;    ;       ;   ;    ;       ;        ;     ;   ;   ;                ;      ;   ;  ;;;;;;     ;     ;   ;   ;
+  ;   ;       ;    ;    ;       ;       ;     ;    ;  ;                 ;     ;    ;    ;       ;     ;    ;  ;
+  ;   ;       ;    ;    ;       ;       ;     ;;;;;;  ;                 ;     ;;;;;;    ;       ;     ;;;;;;  ;
+  ;   ;       ;    ;    ;       ;      ;      ;       ;                 ;     ;         ;      ;      ;       ;
+  ;   ;       ;    ;    ;       ;      ;      ;       ;                 ;     ;         ;      ;      ;       ;
+  ;    ;      ;   ;;    ;       ;     ;        ;       ;                ;      ;        ;     ;        ;       ;
+  ;     ;;;;   ;;; ;    ;;;     ;;;   ;         ;;;;    ;;;;            ;;;     ;;;;     ;;;  ;         ;;;;    ;;;;
+  ;
+  ;
+  ; call/ec and let/ec
+  ;
 
   (define-values (call/ec) call-with-escape-continuation)
 
-  (-define-syntax let/ec 
-    (lambda (code)
-      (let ([l (syntax->list code)])
-	(if (and l
-		 (> (length l) 2)
-		 (identifier? (cadr l)))
-	    (let ([var (cadr l)]
-		  [exprs (stx-cdr (stx-cdr code))])
-	      (datum->syntax
-	       (quote-syntax here)
-	       `(call/ec (lambda (,var) ,@(stx->list exprs)))
-	       code))
-	    (raise-syntax-error
-	     #f
-	     "bad syntax"
-	     code)))))
+  (define-syntaxes (let/ec)
+    (lambda (stx)
+      (define-values (lst) (syntax->list stx))
+      (raise-syntax-error-unless (pair? lst) "bad syntax" stx)
+      (define-values (len) (length lst))
+      (raise-syntax-error-if (= len 1) "bad syntax (missing identifier and body)" stx)
+      (raise-syntax-error-if (= len 2) "bad syntax (missing body)" stx)
+      (datum->syntax (quote-syntax here)
+                     (list (quote-syntax call-with-escape-continuation)
+                           (datum->syntax #f
+                                          (list* (quote-syntax lambda)
+                                                 (list (cadr lst))
+                                                 (stx-cdr (stx-cdr stx)))
+                                          stx))
+                     stx)))
 
-  (define-syntaxes (-define-struct)
-    (let ([make-core
-	   ;; generates the call to `make-struct-type'
-	   (lambda (name inspector super-id/struct: field-names)
-	     `(let-values ([(type maker pred access mutate)
-			    (make-struct-type ',name
-					      ,super-id/struct:
-					      ,(length field-names)
-					      0 #f null
-					      ,inspector)])
-		(values type maker pred
-			,@(let loop ([field-names field-names][n 0])
-			    (if (null? field-names)
-				null
-				(list* `(make-struct-field-accessor access ,n ',(car field-names))
-				       `(make-struct-field-mutator mutate ,n ',(car field-names))
-				       (loop (cdr field-names) (add1 n))))))))])
-      ;; define-struct
-      (lambda (stx)
-	(if (identifier? stx)
-	    (raise-syntax-error #f "bad syntax" stx)
-            (void))
-	(let ([body (stx->list (stx-cdr stx))])
-	  (let ([syntax-error
-		 (lambda (s . detail)
-		   (apply
-		    raise-syntax-error
-		    #f
-		    s
-		    stx
-		    detail))]
-		[build-struct-names
-		 (lambda (name fields)
-		   (let ([name (symbol->string (syntax-e name))]
-			 [fields (map symbol->string (map syntax-e fields))]
-			 [+ string-append])
-		     (map string->symbol
-			  (append
-			   (list 
-			    (+ "struct:" name)
-			    (+ "make-" name)
-			    (+ name "?"))
-			   (apply
-			    append
-			    (map
-			     (lambda (f) 
-			       (list 
-				(+ name "-" f)
-				(+ "set-" name "-" f "!")))
-			     fields))))))])
-	    (or (pair? body)
-		(syntax-error "empty declaration"))
-	    (or (stx-list? body)
-		(syntax-error "illegal use of `.'"))
-	    (or (<= 2 (length body) 3)
-		(syntax-error "wrong number of parts"))
-	    (or (identifier? (car body))
-		(and (stx-pair? (car body))
-		     (identifier? (stx-car (car body)))
-		     (stx-pair? (stx-cdr (car body)))
-		     (identifier? (stx-car (stx-cdr (car body))))
-		     (stx-null? (stx-cdr (stx-cdr (car body)))))
-		(syntax-error "first part must be an identifier or pair of identifiers"))
-	    (or (stx-list? (cadr body))
-		(if (stx-pair? (cadr body))
-		    (syntax-error "illegal use of `.' in field name sequence")
-		    (syntax-error "field names must be a sequence")))
-	    (for-each (lambda (x) 
-			(or (identifier? x)
-			    (syntax-error "field name not a identifier" x)))
-		      (stx->list (cadr body)))
-	    (if (memq (syntax-local-context) '(expression))
-		(syntax-error "allowed only in definition contexts")
-                (void))
-	    (let ([name (if (identifier? (car body))
-			    (car body)
-			    (stx-car (car body)))]
-		  [field-names (stx->list (cadr body))]
-		  [inspector (if (null? (cddr body))
-				 (quote-syntax (current-inspector))
-				 (caddr body))]
-		  [super-id (if (identifier? (car body))
-				#f
-				(stx-car (stx-cdr (car body))))])
-	      (let ([defined-names (map 
-				    (lambda (n) (datum->syntax name n name)) 
-				    (build-struct-names name field-names))])
-		(let-values ([(super-id/struct: stx-info) (values #f #f)])
-		  (let ([result
-			 (datum->syntax
-			  (quote-syntax here)
-			  `(begin
-			     (define-values
-			       ,defined-names
-                               ,(make-core name inspector super-id/struct: field-names))
-			     (define-syntaxes (,name) ,stx-info))
-			  stx)])
-		    (if super-id
-			(syntax-property result 
-					 'disappeared-use 
-					 (syntax-local-introduce super-id))
-			result))))))))))
-
-  (#%provide -define -define-syntax when unless call/ec let/ec -define-struct))
+  ;
+  ; --------------------------------------------------
+  )

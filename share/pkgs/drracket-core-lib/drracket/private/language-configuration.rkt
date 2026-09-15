@@ -5,6 +5,7 @@
          racket/contract
          racket/string
          racket/list
+         racket/match
          racket/gui/base
          drracket/private/drsig
          "tooltip.rkt"
@@ -27,39 +28,7 @@
 
   (define original-output (current-output-port))
   (define (oprintf . args) (apply fprintf original-output args))
-  
-  (define-values (sc-use-language-in-source 
-                  sc-use-teaching-language
-                  sc-choose-a-language
-                  mouse-event-uses-shortcut-prefix?)
-    (let* ([shortcut-prefix (get-default-shortcut-prefix)]
-           [menukey-string 
-            (apply string-append
-                   (map (λ (x)
-                          (case x
-                            [(cmd) "⌘"]
-                            [else (format "~a-" x)]))
-                        shortcut-prefix))])
-      (define (mouse-event-uses-shortcut-prefix? evt)
-        (andmap (λ (prefix)
-                  (case prefix
-                    [(alt) (case (system-type)
-                             [(windows) (send evt get-meta-down)]
-                             [else (send evt get-alt-down)])]
-                    [(cmd) (send evt get-meta-down)]
-                    [(meta) (send evt get-meta-down)]
-                    [(ctl) (send evt get-control-down)]
-                    [(shift) (send evt get-shiftdown)]
-                    [(option) (send evt get-alt-down)]))
-                shortcut-prefix))
-      (values (string-append (string-constant the-racket-language)
-                             (format " (~aR)" menukey-string))
-              (string-append (string-constant teaching-languages)
-                             (format " (~aT)" menukey-string))
-              (string-append (string-constant other-languages)
-                             (format " (~aO)" menukey-string))
-              mouse-event-uses-shortcut-prefix?)))
-  
+
   (provide language-configuration@)
   
   (define-unit language-configuration@
@@ -80,6 +49,16 @@
     (define language-settings-settings drracket:language-configuration:language-settings-settings)
     (define make-language-settings drracket:language-configuration:language-settings)
     (define language-settings make-language-settings)
+
+    (define sc-use-language-in-source
+      (drracket:language:add-menu-shortcut (string-constant the-racket-language) #\r))
+    (define sc-use-teaching-language
+      (drracket:language:add-menu-shortcut (string-constant teaching-languages) #\t))
+    (define sc-choose-a-language
+      (drracket:language:add-menu-shortcut (string-constant other-languages) #\o))
+
+    (struct config-panel-with-keystrokes (proc keystrokes)
+      #:property prop:procedure (struct-field-index proc))
     
     ;; settings-preferences-symbol : symbol
     ;; this pref used to depend on `version', but no longer does.
@@ -726,6 +705,9 @@
         (define selected-language #f)
         ;; get/set-selected-language-settings (union #f (-> settings))
         (define get/set-selected-language-settings #f)
+
+        ;; selected-get-keystrokes : -> (listof (list char (-> any)))
+        (define selected-get-keystrokes (λ () '()))
         
         (define details-computed? #f)
         
@@ -735,7 +717,7 @@
         ;;                  ->
         ;;                  ((implements hierlist<%>) -> (implements hierlist<%>))
         ;; a mixin that responds to language selections and updates the details-panel
-        (define (language-mixin language get-language-details-panel get/set-settings)
+        (define (language-mixin language get-language-details-panel get/set-settings get-keystrokes)
           (λ (%)
             (class* % (hieritem-language<%>)
               (init-rest args)
@@ -743,18 +725,21 @@
               (define/public (selected)
                 (update-gui-based-on-selected-language language
                                                        get-language-details-panel
-                                                       get/set-settings))
+                                                       get/set-settings
+                                                       get-keystrokes))
               (apply super-make-object args))))
         
         (define (update-gui-based-on-selected-language language
                                                        get-language-details-panel
-                                                       get/set-settings)
+                                                       get/set-settings
+                                                       get-keystrokes)
           (let ([ldp (get-language-details-panel)])
             (when ldp
               (send details-panel active-child ldp)))
           (send revert-to-defaults-button enable #t)
           (set! get/set-selected-language-settings get/set-settings)
-          (set! selected-language language))
+          (set! selected-language language)
+          (set! selected-get-keystrokes get-keystrokes))
         
         (define (module-language-selected)
           ;; need to deselect things in the languages-hier-list at this point.
@@ -767,7 +752,8 @@
           (send details-button enable #t)
           (update-gui-based-on-selected-language module-language*language
                                                  module-language*get-language-details-panel
-                                                 module-language*get/set-settings))
+                                                 module-language*get/set-settings
+                                                 module-language*get-keystrokes))
         
         ;; no-language-selected : -> void
         ;; updates the GUI for the situation where no language at all selected, and
@@ -783,6 +769,7 @@
         (define module-language*language 'module-language*-not-yet-set)
         (define module-language*get-language-details-panel 'module-language*-not-yet-set)
         (define module-language*get/set-settings 'module-language*-not-yet-set)
+        (define module-language*get-keystrokes 'module-language*-not-yet-set)
         
         ;; non-language-selected : -> void
         ;; updates the GUI and selected-language and get/set-selected-language-settings
@@ -792,6 +779,7 @@
           (send details-panel active-child no-details-panel)
           (set! get/set-selected-language-settings #f)
           (set! selected-language #f)
+          (set! selected-get-keystrokes (λ () '()))
           (ok-handler 'disable)
           (send details-button enable #f))
         
@@ -898,14 +886,17 @@
                         [get-language-details-panel (lambda () language-details-panel)]
                         [get/set-settings (lambda x (apply real-get/set-settings x))]
                         [position (car positions)]
-                        [number (car numbers)])
+                        [number (car numbers)]
+                        [keystrokes '()]
+                        [get-keystrokes (λ () keystrokes)])
                    
                    (set! construct-details
                          (let ([old construct-details])
                            (lambda ()
                              (old)
-                             (let-values ([(language-details-panel-real get/set-settings)
+                             (let-values ([(language-details-panel-real get/set-settings -keystrokes)
                                            (make-details-panel language)])
+                               (set! keystrokes -keystrokes)
                                (set! language-details-panel language-details-panel-real)
                                (set! real-get/set-settings get/set-settings))
                              
@@ -933,13 +924,15 @@
                      [(equal? positions (list (string-constant module-language-name)))
                       (set! module-language*language language)
                       (set! module-language*get-language-details-panel get-language-details-panel)
-                      (set! module-language*get/set-settings get/set-settings)]
+                      (set! module-language*get/set-settings get/set-settings)
+                      (set! module-language*get-keystrokes get-keystrokes)]
                      [else
                       (let* ([mixin (compose
                                      number-mixin
                                      (language-mixin language 
                                                      get-language-details-panel
-                                                     get/set-settings))]
+                                                     get/set-settings
+                                                     get-keystrokes))]
                              [item
                               (send hier-list new-item
                                     (if second-number
@@ -1066,13 +1059,16 @@
         ;; the language's default settings, unless this is
         ;; the to-show language.
         (define (make-details-panel language)
-          (let ([panel (instantiate vertical-panel% ()
-                         (parent details-panel)
-                         (stretchable-width #f)
-                         (stretchable-height #f))])
-            (values
-             panel
-             (send language config-panel panel))))
+          (define panel (new vertical-panel%
+                             [parent details-panel]
+                             [stretchable-width #f]
+                             [stretchable-height #f]))
+          (define cp (send language config-panel panel))
+          (cond
+            [(config-panel-with-keystrokes? cp)
+             (values panel cp (config-panel-with-keystrokes-keystrokes cp))]
+            [else
+             (values panel cp '())]))
         
         ;; close-all-languages : -> void
         ;; closes all of the tabs in the language hier-list.
@@ -1226,8 +1222,11 @@
             (get/set-selected-language-settings 
              (send selected-language default-settings))))
         
-        (define show-details-label (string-constant show-details-button-label))
-        (define hide-details-label (string-constant hide-details-button-label))
+        (define details-shortcut #\d)
+        (define show-details-label
+          (drracket:language:add-menu-shortcut (string-constant show-details-button-label) details-shortcut))
+        (define hide-details-label
+          (drracket:language:add-menu-shortcut (string-constant hide-details-button-label) details-shortcut))
         (define details-button (make-object button% 
                                  (if (show-details-label . system-font-space->= . hide-details-label)
                                      show-details-label
@@ -1333,28 +1332,28 @@
            (and get/set-selected-language-settings
                 (get/set-selected-language-settings)))
          (λ (receiver evt)
-           (case (send evt get-key-code)
-             [(#\r) 
-              (if (mouse-event-uses-shortcut-prefix? evt)
-                  (begin (send use-language-in-source-rb set-selection 0)
-                         (use-language-in-source-rb-callback)
-                         #t)
-                  #f)]
-             [(#\t)
-              (if (mouse-event-uses-shortcut-prefix? evt)
-                  (begin 
-                    (send use-teaching-language-rb set-selection 0)
-                    (use-teaching-language-rb-callback)
-                    #t)
-                  #f)]
-             [(#\o)
-              (if (mouse-event-uses-shortcut-prefix? evt)
-                  (begin 
-                    (send use-chosen-language-rb set-selection 0)
-                    (use-chosen-language-rb-callback)
-                    #t)
-                  #f)]
-             [else #f])))))
+           (cond
+             [(drracket:language:mouse-event-uses-shortcut-prefix? evt #\r)
+              (send use-language-in-source-rb set-selection 0)
+              (use-language-in-source-rb-callback)
+              #t]
+             [(drracket:language:mouse-event-uses-shortcut-prefix? evt #\t)
+              (send use-teaching-language-rb set-selection 0)
+              (use-teaching-language-rb-callback)
+              #t]
+             [(drracket:language:mouse-event-uses-shortcut-prefix? evt #\o)
+              (send use-chosen-language-rb set-selection 0)
+              (use-chosen-language-rb-callback)
+              #t]
+             [(drracket:language:mouse-event-uses-shortcut-prefix? evt #\d)
+              (details-callback)
+              #t]
+             [else
+              (for/or ([keystroke (in-list (selected-get-keystrokes))])
+                (and (drracket:language:mouse-event-uses-shortcut-prefix? evt (car keystroke))
+                     (begin
+                       ((list-ref keystroke 1))
+                       #t)))])))))
     
     (define (add-discussion p definitions-text use-language-in-source-rb-callback)
       (define t (new (text:hide-caret/selection-mixin text:standard-style-list%)))

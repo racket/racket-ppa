@@ -4,7 +4,6 @@
 
 (module more-scheme '#%kernel
   (#%require "define-et-al.rkt" "qq-and-or.rkt" "cond.rkt" "define.rkt" '#%paramz "case.rkt" "logger.rkt"
-             "member.rkt"
              (for-syntax '#%kernel "stx.rkt" "define-et-al.rkt" "qq-and-or.rkt" "cond.rkt" "stxcase-scheme.rkt" "qqstx.rkt"))
 
   ;; For `old-case`:
@@ -139,8 +138,6 @@
   
   (define-values (struct:break-paramz make-break-paramz break-paramz? break-paramz-ref break-paramz-set!)
     (make-struct-type 'break-parameterization #f 1 0 #f))
-
-  (-define-struct break-parameterization (cell))
   
   (define (current-break-parameterization)
     (make-break-paramz (continuation-mark-set-first #f break-enabled-key)))

@@ -3189,6 +3189,21 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
       pp->print_hash_table = qpht;
       pp->print_box = qpb;
     }
+  else if (compact && SAME_TYPE(SCHEME_TYPE(obj), scheme_inline_variant_type))
+    {
+      print_compact(pp, CPT_OTHER_FORM);
+      print_compact_number(pp, scheme_inline_variant_type);
+
+      print(SCHEME_VEC_ELS(obj)[0], notdisplay, 1, NULL, mt, pp);
+      closed = print(SCHEME_VEC_ELS(obj)[1], notdisplay, 1, NULL, mt, pp);
+    }
+  else if (compact && SAME_TYPE(SCHEME_TYPE(obj), scheme_cache_wrap_type))
+    {
+      print_compact(pp, CPT_OTHER_FORM);
+      print_compact_number(pp, scheme_cache_wrap_type);
+
+      closed = print(SCHEME_PTR1_VAL(obj), notdisplay, 1, NULL, mt, pp);
+    }
   else if (compact && SAME_TYPE(SCHEME_TYPE(obj), scheme_svector_type))
     {
       mzshort l, *v;
@@ -3712,7 +3727,7 @@ print_pair(Scheme_Object *pair, int notdisplay, int compact,
 
   cdr = SCHEME_CDR(pair);
   while (SAME_TYPE(SCHEME_TYPE(cdr), pair_type)
-         && !is_special_reader_form(pp, notdisplay, pair)) {
+         && (compact || !is_special_reader_form(pp, notdisplay, pair))) {
     if (ht && !super_compact) {
       if (is_graph_point(ht, cdr)) {
 	/* This needs a tag */

@@ -100,7 +100,9 @@
            (if (read-comments)
                (values (cons x lst) next)
                (values lst next)))]
-        [(and (pcdata? x) (andmap char-whitespace? (string->list (pcdata-string x))))
+        [(and (pcdata? x)
+              (for/and ([c (in-string (pcdata-string x))])
+                (char-whitespace? c)))
          (read-more)]
         [else (values null x)]))))
 
@@ -334,6 +336,7 @@
 ;; lex-pcdata : Input-port (-> Location) -> Pcdata
 ;; deviation - disallow ]]> "for compatibility" with SGML, sec 2.4 XML spec
 (define (lex-pcdata in pos)
+  (define collapse? (collapse-whitespace))
   (define start (pos))
   (define data
     (let loop ([chars null])
@@ -344,7 +347,7 @@
                (eq? next #\&)
                (eq? next #\<))
            (apply string (reverse chars))]
-          [(and (char-whitespace? next) (collapse-whitespace))
+          [(and collapse? (char-whitespace? next))
            (skip-space in)
            (loop (cons #\space chars))]
           [else

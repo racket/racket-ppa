@@ -7,6 +7,7 @@
          images/compile-time
          string-constants
          pict
+         simple-tree-text-markup/data
          (for-syntax images/icons/control images/icons/style))
 
 (provide
@@ -82,7 +83,7 @@
         (send s set-style (get-style))
         s))
     
-    (define (get-extent dc x y w-box h-box descent-box space-box lspace-box rspace-box)
+    (define (get-extent dc x y [w-box #f] [h-box #f] [descent-box #f] [space-box #f] [lspace-box #f] [rspace-box #f])
       (for-each (lambda (box) (unless (not box) (set-box! box 0)))
                 (list descent-box space-box lspace-box rspace-box))
       (unless (not w-box)
@@ -137,7 +138,10 @@
 (define stepper-sub-text%
   (class f:text:standard-style-list%
     
-    (init-field exps highlight-color show-inexactness? print-boolean-long-form?)
+    (init-field exps highlight-color
+                language-pretty-print-size-hook
+                language-pretty-print-print-hook
+                show-inexactness? print-boolean-long-form?)
     
     (inherit insert get-style-list set-style-list change-style highlight-range last-position lock erase
              begin-edit-sequence end-edit-sequence get-start-position select-all clear)
@@ -178,8 +182,17 @@
     (inherit get-dc)
     
     (define/private (format-sexp sexp)
-      (define text-port (open-output-text-editor this))
-      
+      (define text-port
+        (open-output-text-editor this 'end
+                                 ; need to handle number-markup
+                                 (lambda (x)
+                                   (if (number-markup? x)
+                                       (f:number-snip:number->string/snip (number-markup-number x)
+                                                                          #:exact-prefix (number-markup-exact-prefix x)
+                                                                          #:inexact-prefix (number-markup-inexact-prefix x)
+                                                                          #:fraction-view (number-markup-fraction-view x))
+                                       x))))
+
       (parameterize 
           ([pretty-print-show-inexactness show-inexactness?]
            [pretty-print-columns pretty-printed-width]
@@ -202,23 +215,32 @@
                      (let-values ([(xw dc dc2 dc3) (send dc get-text-extent "x")])
                        (max 1 (inexact->exact (ceiling (/ (unbox wbox) xw))))))]
                   [(and looked-up (not (eq? looked-up 'non-confusable)))
-                   (string-length (format "~s" (car looked-up)))]
-                  [else #f])))]
+                   (or
+                    ; note that this may return #f, but we still want the print-hook to handle it
+                    (language-pretty-print-size-hook (car looked-up) display? port)
+                    (string-length (format "~s" (car looked-up))))]
+                  [else
+                   (language-pretty-print-size-hook value display? port)])))]
            
            [pretty-print-print-hook
             ; this print-hook is called for confusable highlights and for images.
             (lambda (value display? port)
-              (let ([to-display (cond 
-                                  [(hash-ref highlight-table value (lambda () #f)) => car]
-                                  [else value])])
+              (let* ([looked-up (hash-ref highlight-table value (lambda () #f))]
+                     [maybe-snip (if looked-up (car looked-up) value)])
                 (cond 
-                  [(is-a? to-display snip%) 
-                   (write-special (send to-display copy) port) (set-last-style)]
+                  [(is-a? maybe-snip snip%)
+                   (write-special (send maybe-snip copy) port) (set-last-style)]
+                  [(and looked-up (not (eq? looked-up 'non-confusable)))
+                   ; we have to call the size hook *again* to find
+                   ; out if the underlying pretty-print-print-hook
+                   ; can handle this
+                   (define to-display (car looked-up))
+                   (if (language-pretty-print-size-hook to-display display? port)
+                       (language-pretty-print-print-hook to-display display? port)
+                       (write-string (format "~s" to-display) port))]
                   [else
-                   ;; there's already code somewhere else to handle this; this seems like a bit of a hack.
-                   (when (and (number? to-display) (inexact? to-display) (pretty-print-show-inexactness))
-                     (write-string "#i" port))
-                   (write-string (format "~s" to-display) port)])))]
+                   (language-pretty-print-print-hook value display? port)])))]
+
            [pretty-print-print-line
             (lambda (number port old-length dest-columns)
               (when (and number (not (eq? number 0)))
@@ -254,10 +276,14 @@
       (select-all)
       (clear)
       (reset-style)
+      (define start (get-start-position))
       (for ([exp stripped-exps] [i (in-naturals)])
         (unless (= i 0)
           (insert #\newline))
         (format-sexp exp))
+      (define end (get-start-position))
+      (change-style (send (get-style-list) find-named-style "Standard")
+                    start end)
       (end-edit-sequence)
       (lock #t))
     
@@ -348,7 +374,8 @@
 (define stepper-text%
   (class f:text:standard-style-list%
     
-    (init-field left-side right-side show-inexactness? print-boolean-long-form?)
+    (init-field left-side right-side show-inexactness? print-boolean-long-form?
+                language-pretty-print-size-hook language-pretty-print-print-hook)
     
     (inherit find-snip insert change-style highlight-range last-position lock erase auto-wrap
              begin-edit-sequence end-edit-sequence get-start-position get-style-list set-style-list
@@ -415,8 +442,11 @@
                    (make-object stepper-sub-error-text% error-or-exps)]
                   [else 
                    (make-object stepper-sub-text%
-                     error-or-exps highlight-color show-inexactness?
-                     print-boolean-long-form?)])))
+                                error-or-exps highlight-color
+                                language-pretty-print-size-hook 
+                                language-pretty-print-print-hook
+                                show-inexactness?
+                                print-boolean-long-form?)])))
     
     (setup-editor-snip before-snip left-side 'stepper:redex-highlight-color)
     (setup-editor-snip after-snip right-side 'stepper:reduct-highlight-color)
