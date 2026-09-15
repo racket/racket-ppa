@@ -1,3 +1,9 @@
+racket (9.2+ppa1-1~noble1) noble; urgency=medium
+
+  * New upstream release (Racket 9.2)
+
+ -- Sam Tobin-Hochstadt <sam@samth.net>  Tue, 15 Sep 2026 17:18:03 -0400
+
 racket (9.1+ppa1-1~noble1) noble; urgency=medium
 
   * New upstream release (Racket 9.1)
