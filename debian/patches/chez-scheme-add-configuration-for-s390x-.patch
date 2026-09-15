@@ -1,0 +1,25 @@
+From: Matthew Flatt <mflatt@racket-lang.org>
+Date: Sun, 10 Mar 2024 08:01:33 -0600
+X-Dgit-Generated: 8.12+dfsg1-3 36c36bcb2624c9536368c5e5512eec8c1d7870bc
+Subject: Chez Scheme: add configuration for s390x (and related) to `c/version.h`
+
+This configuration enables pb mode to run on s390x.
+
+---
+
+diff --git a/src/ChezScheme/c/version.h b/src/ChezScheme/c/version.h
+index e62922065e..d7e9ced750 100644
+--- a/src/ChezScheme/c/version.h
++++ b/src/ChezScheme/c/version.h
+@@ -48,6 +48,11 @@
+ # define FLUSHCACHE
+ #endif
+ 
++#if defined(__s390__) || defined(__s390x__) || defined(__zarch__)
++# define PORTABLE_BYTECODE_BIGENDIAN
++# define BIG_ENDIAN_IEEE_DOUBLE
++#endif
++
+ #ifdef PORTABLE_BYTECODE
+ # undef FLUSHCACHE
+ # ifdef PORTABLE_BYTECODE_BIGENDIAN
