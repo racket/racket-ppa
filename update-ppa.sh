@@ -706,17 +706,28 @@ if $NO_PUSH; then
     log "To push manually:"
     echo "  cd $REPO_DIR"
     echo "  git push origin main upstream"
-    echo "  git push origin $TAG_NAME"
+    echo "  git push origin \$(git tag -l 'upstream/*')"
 else
     echo ""
     if confirm "Push main, upstream, and tags to origin?"; then
         git push origin main upstream
-        git push origin "$TAG_NAME"
+
+        # Push every upstream tag origin is missing, not just this run's:
+        # an earlier version may have been packaged but not uploaded.
+        MISSING_TAGS=$(comm -23 \
+            <(git tag -l 'upstream/*' | sort) \
+            <(git ls-remote --tags origin 'refs/tags/upstream/*' \
+                | sed 's|.*refs/tags/||; s|\^{}||' | sort -u))
+        if [[ -n "$MISSING_TAGS" ]]; then
+            log "Pushing tags: $(echo "$MISSING_TAGS" | tr '\n' ' ')"
+            # shellcheck disable=SC2086
+            git push origin $MISSING_TAGS
+        fi
         log "Pushed to origin"
     else
         log "Skipped push. To push manually:"
         echo "  git push origin main upstream"
-        echo "  git push origin $TAG_NAME"
+        echo "  git push origin \$(git tag -l 'upstream/*')"
     fi
 fi
 
