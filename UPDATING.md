@@ -66,7 +66,7 @@ When a new LTS or non-LTS release comes out, add it.
 <racket-version>+ppa<iteration>-<debian-revision>~<release><revision>
 ```
 
-For example: `9.1+ppa1-1~noble1`
+For example: `9.3+ppa1-1~noble1`
 
 - `+ppa1`: PPA-specific upstream version suffix (increment if
   repackaging the same Racket version)
@@ -82,7 +82,7 @@ version number is on the front page) or at
 https://download.racket-lang.org/ (lists all available versions).
 
 ```
-VERSION=9.1  # set to target Racket version
+VERSION=9.3  # set to target Racket version
 wget https://download.racket-lang.org/installers/${VERSION}/racket-${VERSION}-src.tgz
 ```
 
@@ -194,12 +194,44 @@ git commit -C <sha>
 Then set `DEBIAN_SYNC_COMMIT` in `update-ppa.sh` to the last commit
 picked, and commit that.
 
-A conflict means Debian changed something this repository adapts — the
-`Maintainer`, `Vcs-*`, a package name that differs on Ubuntu, or the
-`drracket.1` path.  Keep the local adaptation and take Debian's change
-around it.  The local differences are deliberately few, and listed in
-the "Adapt Debian packaging for the PPA" commit; keeping them small is
-what keeps this step cheap.
+A conflict means Debian changed something this repository adapts.  Keep
+the local adaptation and take Debian's change around it.  Keeping the
+list short is what keeps this step cheap; it is currently six things,
+and `git diff debian/master main -- debian/ ':(exclude)debian/changelog'`
+prints all of them:
+
+In `debian/control`:
+
+1. `Maintainer` and `Vcs-*` point at the PPA rather than at Debian.
+2. `libfreetype-dev` and `libgl-dev | libgl1-mesa-dev`, rather than
+   Debian's transitional `libfreetype6-dev` and `libgl1-mesa-dev`
+   first.  Debian's names still resolve on every target release today,
+   but lintian flags them and Ubuntu retires transitional packages
+   sooner than Debian does.
+3. `libjpeg-turbo8 | libjpeg62-turbo` in `Recommends`, because
+   `libjpeg62-turbo` does not exist on Ubuntu 26.04.
+4. `Breaks`/`Replaces: racket-common (<< <version>~)` names the version
+   packaged here, which `update-ppa.sh` bumps each release.  This one
+   diverges from Debian permanently by design.
+
+Elsewhere:
+
+5. `debian/racket-common.manpages` points at
+   `share/pkgs/drracket-core-lib/drracket/drracket.1`, where drracket.1
+   lives in Racket 9.x.  Debian packages 8.18, where it is under
+   `share/pkgs/drracket`.  Expect this to stop being a difference when
+   Debian moves to 9.x — at which point take theirs.
+6. No `debian/patches`.  Debian's two patches are an upstream
+   cherry-pick and its own revert, so the series is a no-op, and neither
+   applies to 9.x source.
+
+`debian/source/local-options` is ours alone rather than a divergence:
+it tells dpkg-source to ignore NOTES, UPDATING.md and update-ppa.sh,
+which this repository owns and the upstream tarball does not contain.
+Debian has no equivalent because their repository does not carry them.
+
+Item 4 is the only one guaranteed to keep diverging, so a conflicting
+pick will almost certainly land in `debian/control`.
 
 ## Step 4: Update debian packaging
 
@@ -216,9 +248,9 @@ dch -v "${VERSION}+ppa1-1~noble1" -D noble "New upstream release (Racket ${VERSI
 Or edit manually. The format must be:
 
 ```
-racket (9.1+ppa1-1~noble1) noble; urgency=medium
+racket (9.3+ppa1-1~noble1) noble; urgency=medium
 
-  * New upstream release (Racket 9.1)
+  * New upstream release (Racket 9.3)
 
  -- Your Name <your@email>  Tue, 03 Mar 2026 12:00:00 -0500
 ```
@@ -242,7 +274,7 @@ Check for obsolete package names in `Build-Depends` and
 | libssl1.1 | libssl3 |
 
 Update `Breaks`/`Replaces` version numbers to match the new Racket
-version (e.g. `<<9.1~`).
+version (e.g. `<< 9.3~`).
 
 **Cross-release compatibility:** The same `debian/control` is used for
 all target releases. When updating package names, verify that the new
@@ -347,50 +379,55 @@ before continuing.
 
 ## Step 7: Build signed source packages for each release
 
-For each target release, modify the first line of `debian/changelog`
-to set the release-specific version suffix and distribution, then
-build a signed source package.
-
-The changelog first line has the form:
+One source package per target release, each with the release-specific
+version suffix and distribution in the first changelog line:
 
 ```
-racket (9.1+ppa1-1~noble1) noble; urgency=medium
+racket (9.3+ppa1-1~noble1) noble; urgency=medium
 ```
 
-Both the `~<release>1` version suffix and the distribution field
-must match the target release.
-
-Build for all releases using a loop:
+Rewrite that line for each release rather than substituting the previous
+release name into it.  Substituting silently does nothing when the line
+names a release you did not expect, which produces the same source
+package under one release name and leaves the other uploads with no
+`.changes` file to send:
 
 ```
-PRIMARY=noble
-RELEASES="noble jammy questing"
+VERSION=9.3
+RELEASES="jammy noble resolute"
 KEY=8D08AAF942E1F5C64AAE012A1ED00412299B67EB
 
 for RELEASE in $RELEASES; do
-    sed -i "1s/~${PRIMARY}1/~${RELEASE}1/" debian/changelog
-    sed -i "1s/) ${PRIMARY};/) ${RELEASE};/" debian/changelog
-    debuild -S -k${KEY}
-    # restore to primary for next iteration
-    sed -i "1s/~${RELEASE}1/~${PRIMARY}1/" debian/changelog
-    sed -i "1s/) ${RELEASE};/) ${PRIMARY};/" debian/changelog
+    sed -i "1s|^racket (.*) [^;]*;|racket (${VERSION}+ppa1-1~${RELEASE}1) ${RELEASE};|" \
+        debian/changelog
+    debuild -S -d -k${KEY}
 done
+
+git checkout -- debian/changelog     # back to the committed entry
 ```
 
-Set `PRIMARY` to whichever release the changelog currently targets.
-Set `RELEASES` to the full list of target releases (including the
-primary). The loop modifies the changelog, builds, then restores it,
-so the working tree is clean at the end.
+`-d` skips the build-dependency check: a source-only build compiles
+nothing, and the dependencies that matter are the ones on Launchpad's
+builders, which Step 4 already checked against each target release.
+
+Restoring the changelog from git rather than rewriting it once more
+leaves the working tree clean whichever release was built last.
 
 Each `debuild -S` produces a `.changes` file in the parent directory.
 
 ## Step 8: Upload to PPA
 
+One per target release:
+
 ```
-dput ppa:plt/racket ../racket_${VERSION}+ppa1-1~noble1_source.changes
 dput ppa:plt/racket ../racket_${VERSION}+ppa1-1~jammy1_source.changes
-dput ppa:plt/racket ../racket_${VERSION}+ppa1-1~questing1_source.changes
+dput ppa:plt/racket ../racket_${VERSION}+ppa1-1~noble1_source.changes
+dput ppa:plt/racket ../racket_${VERSION}+ppa1-1~resolute1_source.changes
 ```
+
+This is the irreversible step.  Launchpad will not accept a version
+string twice, so any fix after this needs a new one — `+ppa2`, or `-2`
+for a packaging-only change.
 
 After each upload, Launchpad sends email to the uploader's address:
 
@@ -414,33 +451,61 @@ Or via the API:
 curl -s "https://api.launchpad.net/1.0/~plt/+archive/ubuntu/racket?ws.op=getPublishedSources&source_name=racket&status=Published" | python3 -m json.tool
 ```
 
-Builds typically take ~40 minutes per release on Launchpad builders.
-After the build succeeds, it takes additional time for the Launchpad
-publisher to make binaries available via apt (usually within an hour).
+Each series is built for amd64 and arm64, so there are six builds.
+Watch the binaries rather than the source publications: the sources go
+`Published` as soon as they are accepted, while the binaries stay
+`Pending` until the publisher runs, and only then does apt see them.
+
+```
+curl -s "https://api.launchpad.net/1.0/~plt/+archive/ubuntu/racket?ws.op=getBuildRecords&source_name=racket" \
+  | jq -r '.entries[] | "\(.source_package_version)\t\(.arch_tag)\t\(.buildstate)"'
+
+curl -s "https://api.launchpad.net/1.0/~plt/+archive/ubuntu/racket?ws.op=getPublishedBinaries&binary_name=racket" \
+  | jq -r '.entries[] | "\(.binary_package_version)\t\(.distro_arch_series_link|split("/")|.[-2:]|join("/"))\t\(.status)"'
+```
+
+For 9.3 the whole thing took about two hours: uploaded 23:25, all six
+builds finished by 00:31, binaries published 01:36.
 
 ## Step 9: Verify installation
 
-Test in a clean Docker container for each release:
+Install from the PPA in a clean container for each release.  Note the
+`|| true`: on jammy, `add-apt-repository` fails while importing the
+signing key — its software-properties-common predates the current
+keyserver output — but it still adds the repository, and apt resolves
+the PPA fine afterwards.  Without it the check reports a failure that
+is not there.
 
 ```
-docker run --rm -it ubuntu:noble bash -c '
-  apt-get update &&
-  apt-get install -y software-properties-common gpg &&
-  add-apt-repository -y ppa:plt/racket &&
-  apt-get update &&
-  apt-get install -y racket &&
-  racket --version
-'
+for REL in jammy noble resolute; do
+  docker run --rm ubuntu:$REL bash -c '
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y --no-install-recommends software-properties-common gpg ca-certificates
+    add-apt-repository -y ppa:plt/racket || true
+    apt-get update -qq
+    apt-get install -y racket
+    racket --version
+    apt-cache policy racket | grep -A1 "\*\*\*" | tail -1
+  '
+done
 ```
 
-Expected output: `Welcome to Racket v9.1 [cs].`
+Expected output: `Welcome to Racket v${VERSION} [cs].`, and an origin
+line pointing at `ppa.launchpadcontent.net`.  Check that origin line:
+Ubuntu ships its own racket package, so an install can succeed while
+silently coming from the distribution rather than from the PPA.
 
 ## Step 10: Push git changes
 
 ```
 git push origin main upstream
-git push origin upstream/${VERSION}+ppa1
+git push origin $(git tag -l 'upstream/*')
 ```
+
+Push every upstream tag origin is missing, not just this release's: a
+version may have been packaged here without being uploaded, and its tag
+still belongs on origin.
 
 ## Troubleshooting
 

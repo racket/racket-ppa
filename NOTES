@@ -270,24 +270,73 @@ What came across from Debian:
   `debian/racket-common.maintscript` handling the upgrade
 - per-architecture configure flags for the pb Chez backend
 
-Kept local, and deliberately kept small so that future picks stay cheap
-(see "Adapt Debian packaging for the PPA"):
-- `Maintainer`/`Vcs-*` pointing at the PPA
-- Ubuntu package names where Debian's differ: `libjpeg-turbo8` rather
-  than `libjpeg62-turbo` (which does not exist on 26.04), and
-  `libfreetype-dev`/`libgl-dev` rather than the transitional names
-- `drracket.1` under `share/pkgs/drracket-core-lib`, its 9.x location
-- no `debian/patches`: Debian's two patches are an upstream cherry-pick
-  and its revert, so the series is a no-op and neither applies to 9.x
+Kept local, and deliberately kept small so that future picks stay cheap.
+The whole divergence is six things — `git diff debian/master main --
+debian/ ':(exclude)debian/changelog'` prints all of it:
+
+In `debian/control`:
+1. `Maintainer` and `Vcs-*` point at the PPA rather than at Debian.
+2. `libfreetype-dev` and `libgl-dev | libgl1-mesa-dev` rather than
+   Debian's transitional `libfreetype6-dev` and `libgl1-mesa-dev`
+   first.  Debian's still resolve on all three releases today, but
+   lintian flags them and Ubuntu retires such packages sooner.
+3. `libjpeg-turbo8 | libjpeg62-turbo` in Recommends.  Not a preference:
+   `libjpeg62-turbo` does not exist on 26.04 at all.
+4. `Breaks`/`Replaces: racket-common (<< <version>~)` tracks the version
+   packaged here.  update-ppa.sh bumps it every release, so this one
+   diverges from Debian permanently by design.
+
+Elsewhere:
+5. `drracket.1` under `share/pkgs/drracket-core-lib`, its 9.x location;
+   Debian still packages 8.18, where it is under `share/pkgs/drracket`.
+   This resolves itself when Debian moves to 9.x.
+6. No `debian/patches`: Debian's two patches are an upstream cherry-pick
+   and its revert, so the series is a no-op and neither applies to 9.x.
+
+Item 4 is the only one guaranteed to keep diverging.  A conflicting
+cherry-pick will almost certainly be in `debian/control`; the rule is to
+keep our value and take Debian's change around it.
 
 ## Bugs found in update-ppa.sh
-- Its stale-file check deleted every tracked file that was absent from
-  the upstream tarball, which meant NOTES, UPDATING.md and the script
-  itself. It now compares the previous upstream import against the new
-  one. The 9.1 run predated those files, which is why it went unnoticed.
+Most of these only surfaced by running the script rather than reading
+it, which is worth remembering next time it is changed.
+
+Would have broken any run:
+- The Build-Depends check aborted the whole script on the *success*
+  path: the shell loop ends non-zero when the last package is found, and
+  `set -e` took that as failure.
+- Its stale-file check deleted every tracked file absent from the
+  upstream tarball — which is every file this repo owns, so NOTES,
+  UPDATING.md and the script itself. The 9.1 run predated those files,
+  which is why it went unnoticed. It now compares the previous upstream
+  import against the new one.
+
+Would have broken a second run, or a run with different options:
+- `dch` refuses an entry that is not newer than the current one, so
+  re-running after a failure died at the packaging step — the very thing
+  the Debian-sync step tells you to do after resolving a conflict.
+- The per-release build rewrote the changelog with
+  `s/~$PRIMARY1/~$release1/`, which silently did nothing when the
+  changelog named a different release than `--primary`. That built one
+  release's source package three times and then failed the other two
+  uploads with "Changes file not found". It happened whenever
+  `--primary` was left to default, since that picks the newest LTS.
+- The push step pushed only the tag for the version being packaged, so
+  a version packaged but not uploaded — 9.2 here — never reached origin.
+
+Quieter problems:
 - `debuild -- clean` passes `clean` to lintian, not to `debian/rules`,
   so the test build's artifacts survived into the source package build.
-- The Build-Depends check skipped the first line of `Build-Depends:`.
+- The Build-Depends check skipped the first line of `Build-Depends:`
+  (debhelper), and split `a | b` alternatives, reporting a package
+  missing when the alternative satisfies it. It also started a container
+  per package per release — 66 of them, each running `apt-get update`,
+  about twenty minutes per run.
+- The source-package builds checked build dependencies, which a
+  source-only build does not need and which fail on a machine set up
+  only to upload.
+- `dpkg-genchanges` leaves a `debian/files` behind, so the working tree
+  came out dirty and the next run started unclean.
 - The tarball-exists preflight accepted the 302 that
   download.racket-lang.org returns for versions that do not exist.
 
@@ -305,12 +354,29 @@ questing (25.10) went end of life in July 2026 and was dropped. There is
 no current non-LTS release: stonking (26.10) is still in development.
 
 ## Verification
-Racket 9.3 was built from the source package in clean Ubuntu 26.04 and
-22.04 containers — 26.04 being the build the cdbs packaging could not do
-— and the resulting packages install and run:
+Before uploading, 9.3 was built from the source package in clean Ubuntu
+26.04 and 22.04 containers — 26.04 being the build the cdbs packaging
+could not do — and the resulting packages installed and ran. The package
+split from Debian works as intended: 6135 `.zo` files land in the
+architecture-dependent `racket` package and none in `racket-common`,
+which keeps the 5290 `.rkt` sources.
 
-    Welcome to Racket v9.3 [cs].
+On Launchpad all six builds succeeded, amd64 and arm64 for each of the
+three series, and all three published. arm64 had not been built locally
+— the per-architecture Chez configuration came in with the Debian
+cherry-picks — so that was the one real unknown at upload time.
 
-The package split from Debian works as intended: 6135 `.zo` files land
-in the architecture-dependent `racket` package and none in
-`racket-common`, which keeps the 5290 `.rkt` sources.
+Installing from the PPA in clean containers afterwards gives
+`Welcome to Racket v9.3 [cs].` on jammy, noble and resolute, each
+resolving to `ppa.launchpadcontent.net/plt/racket/ubuntu <release>/main`
+rather than to a distribution package. That last check matters most on
+26.04, where Ubuntu ships its own racket 8.18.
+
+Timings, for planning the next update: uploaded 23:25, all builds
+finished 00:31, binaries published 01:36, verified 01:40.
+
+One false alarm worth not repeating: the first verification reported a
+jammy failure. `add-apt-repository` on jammy throws while importing the
+signing key — old software-properties-common against modern keyserver
+output — but it still adds the repository and apt resolves the PPA
+fine. The test harness had `set -e` and bailed on the exit code.
