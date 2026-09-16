@@ -101,6 +101,15 @@ log()   { echo "==> $*"; }
 warn()  { echo "WARNING: $*" >&2; }
 die()   { echo "ERROR: $*" >&2; exit 1; }
 
+# Point the top changelog entry at one target release.  This rewrites the
+# line rather than substituting the previous release name into it, so it
+# does not matter which release the entry currently names.
+set_changelog_release() {
+    local rel="$1"
+    sed -i "1s|^racket (.*) [^;]*;|racket (${VERSION}+ppa${PPA_ITERATION}-1~${rel}1) ${rel};|" \
+        debian/changelog
+}
+
 confirm() {
     if $YES; then return 0; fi
     local prompt="$1"
@@ -494,10 +503,13 @@ log "Updating debian packaging"
 # 4a: debian/changelog
 FULL_VERSION="${VERSION}+ppa${PPA_ITERATION}-1~${PRIMARY}1"
 CURRENT_VERSION=$(dpkg-parsechangelog -S Version)
-if [[ "$CURRENT_VERSION" == "$FULL_VERSION" ]]; then
+# Compare without the ~release suffix: the same upload is built once per
+# target release, each with a different suffix, so the suffix currently
+# in the changelog says nothing about whether the entry is up to date.
+if [[ "${CURRENT_VERSION%%\~*}" == "${FULL_VERSION%%\~*}" ]]; then
     # Re-run after an earlier failure: dch refuses to add an entry that
     # is not newer than the current one.
-    log "Changelog already at $FULL_VERSION"
+    log "Changelog already at $CURRENT_VERSION"
 else
     dch -v "$FULL_VERSION" -D "$PRIMARY" "New upstream release (Racket ${VERSION})"
 fi
@@ -650,14 +662,13 @@ log "Building signed source packages"
 
 for release in $RELEASES; do
     log "  Building for $release"
-    sed -i "1s/~${PRIMARY}1/~${release}1/" debian/changelog
-    sed -i "1s/) ${PRIMARY};/) ${release};/" debian/changelog
-
+    set_changelog_release "$release"
     debuild -S -d -k"$GPG_KEY"
-
-    sed -i "1s/~${release}1/~${PRIMARY}1/" debian/changelog
-    sed -i "1s/) ${release};/) ${PRIMARY};/" debian/changelog
 done
+
+# Restore the committed changelog, so the working tree is clean whichever
+# release happened to be built last.
+git checkout -- debian/changelog
 
 # dpkg-genchanges leaves this behind after a source-only build, which
 # makes the working tree look dirty on the next run.
